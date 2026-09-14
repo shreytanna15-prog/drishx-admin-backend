@@ -1,0 +1,1733 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+  CUSTOMER
+}
+
+enum AccountApprovalStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum CustomerTaxType {
+  REGISTERED
+  UNREGISTERED
+  COMPOSITION
+  OTHER
+}
+
+model User {
+  id                     String                @id @default(cuid())
+  email                  String                @unique
+  password               String
+  name                   String?
+  role                   UserRole              @default(CUSTOMER)
+  isActive               Boolean               @default(true)
+  isApproved             Boolean               @default(true)
+  approvalStatus         AccountApprovalStatus @default(APPROVED)
+  gstNumber              String?               @unique
+  businessName           String?
+  businessAddress        String?
+  state                  String?
+  pincode                String?
+  mobileNumber           String?
+  alternateMobileNumber  String?
+  whatsappNumber         String?
+  shopName               String?
+  businessType           String?
+  addressLine1           String?
+  addressLine2           String?
+  city                   String?
+  businessEmail          String?
+  shopPhoneNumber        String?
+  legalBusinessName      String?
+  tradeName              String?
+  gstRegistrationState   String?
+  panNumber              String?
+  billingLegalName       String?
+  billingAddress         String?
+  billingCity            String?
+  billingState           String?
+  billingPincode         String?
+  billingGstState        String?
+  shippingLegalName      String?
+  shippingAddress        String?
+  shippingCity           String?
+  shippingState          String?
+  shippingPincode        String?
+  /// GST customer classification for invoicing.
+  customerType           CustomerTaxType       @default(UNREGISTERED)
+  /// Max receivable balance before admin warning (warn-only, not hard block).
+  creditLimit            Decimal?
+  approvedAt             DateTime?
+  approvedById           String?
+  rejectionReason        String?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  staffRoleId            String?
+  staffRole              StaffRole?            @relation(fields: [staffRoleId], references: [id])
+  transactions           Transaction[]
+  orders                 Order[]               @relation("CustomerOrders")
+  assignedOrders         Order[]               @relation("AssignedOrdersToEmployee")
+  notifications          Notification[]
+  invoices               Invoice[]
+  assignedTasks          Task[]                @relation("AssignedTasksToEmployee")
+  createdTasks           Task[]                @relation("AssignedTasksByAdmin")
+  cartReservations       CartReservation[]
+  returnRequests         ReturnRequest[]       @relation("CustomerReturnRequests")
+  assignedReturnRequests ReturnRequest[]       @relation("AssignedReturnRequestsToEmployee")
+  reviewedReturnRequests ReturnRequest[]       @relation("ReviewedReturnRequestsByAdmin")
+  returnImages           ReturnRequestImage[]
+  returnTimelineEvents   ReturnTimelineEvent[]
+  creditNotes            CreditNote[]
+  orderActivityLogs      OrderActivityLog[]  @relation("OrderActivityActors")
+  createdPowerVersions   OrderPowerVersion[] @relation("PowerVersionCreatedBy")
+  acceptedPowerVersions  OrderPowerVersion[] @relation("PowerVersionAcceptedBy")
+  refreshTokens          RefreshToken[]
+  payments               Payment[]             @relation("CustomerPayments")
+  paymentClaims          PaymentClaim[]        @relation("CustomerPaymentClaims")
+  reviewedPaymentClaims  PaymentClaim[]        @relation("PaymentClaimReviewer")
+  customerLedgerEntries  CustomerLedgerEntry[]
+  cashAccounts           CashAccount[]         @relation("EmployeeCashAccounts")
+  expenseRequests        ExpenseRequest[]      @relation("ExpenseRequestEmployee")
+  reviewedExpenseRequests ExpenseRequest[]     @relation("ExpenseRequestReviewer")
+  supplierPayments       SupplierPayment[]     @relation("SupplierPaymentRecorder")
+  loyaltyWallet          LoyaltyWallet?
+  loyaltyTransactions    LoyaltyTransaction[]
+  loyaltyCreatedTransactions LoyaltyTransaction[] @relation("LoyaltyCreatedBy")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  familyId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model StaffRole {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  isSystem    Boolean  @default(false)
+  permissions Json
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isSystem])
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  VOIDED
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+}
+
+enum ExpenseCategory {
+  PROCUREMENT
+  MANUAL
+}
+
+model Transaction {
+  id            String            @id @default(cuid())
+  reference     String            @unique
+  amount        Decimal
+  currency      String            @default("INR")
+  type          TransactionType
+  status        TransactionStatus @default(PENDING)
+  description   String?
+  category      ExpenseCategory?
+  voidedAt      DateTime?
+  voidReason    String?
+  user          User              @relation(fields: [userId], references: [id])
+  userId        String
+  ledgerEntries LedgerEntry[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+model LedgerEntry {
+  id            String          @id @default(cuid())
+  transaction   Transaction     @relation(fields: [transactionId], references: [id])
+  transactionId String
+  entryType     LedgerEntryType
+  amount        Decimal
+  description   String?
+  createdAt     DateTime        @default(now())
+}
+
+enum Eye {
+  LEFT
+  RIGHT
+}
+
+model SingleVisionLens {
+  id String @id @default(cuid())
+
+  // Product line / series — used to group lens families
+  // e.g., "WHITE BLUE CUT", "WHITE SV BLUE CUT SPECIAL COLORS", "WHITE NO BLUE CUT", "WHITE REGULAR",
+  //        "THIN PLUS LENTICULAR", "WHITE 55MM", "PHOTOGREY WITHOUT BLUE", "PHOTOGREY BLUE CUT SV",
+  //        "BLUE CUT SV", "PHOTO BLUE CUT", "PG SV", "SUPER POLY BLUE CUT", "SUPER PG POLY BLUE CUT", "HC SV"
+  category String?
+
+  // Brand / product name within the category
+  // WHITE SV BLUE CUT SPECIAL COLORS → "EYECONIC - BLUE CUT"
+  // PHOTOGREY WITHOUT BLUE           → "SUN-SYNC", "DIAMOND", "RAPID"
+  // PHOTOGREY BLUE CUT SV            → "SOLAR-X"
+  // WHITE BLUE CUT                   → "ASH", "DR-BLU", "OCEAN"
+  // WHITE NO BLUE CUT                → "DIAMOND BLUE/MAJENTA", "DIAMOND CRY.GREEN/CRY.BLUE", "POLY-SV BULLET"
+  // WHITE REGULAR                    → "DIAMOND/RUBY", "BROTECTOR"
+  // THIN PLUS                        → "LENTICULAR", "TRUTUFF HC", "55MM"
+  // Other series                     → "ENZO 1.60 Green", "DREAMZ 1.60 Green", "I-TRON 1.56 Invisible Blue",
+  //                                    "SOFY 1.60 Blue", "SIGNUS 1.60 Dual Blue+Green", "SOHO 1.60 Magenta",
+  //                                    "SUPER 1.61 Green", "B-TRON 1.67 Green", "T-TRON Tintable 1.56",
+  //                                    "KRASOL PG HC", "STARK PG HC", "OISHI Blue", "STARK Green",
+  //                                    "DKL BLUE", "DKL GREEN", "PG-TRON CLIK Invisible Blue",
+  //                                    "STARK Green Photo Brown", "MARI BLU", "BLU-GUARD", "DUAL TWIN", "MARI-STEEL"
+  brand String
+
+  // Item / sub-type (optional)
+  // e.g., "POLY SV - STEEL", "BLUE CUT", "Tintable", "SPECIAL COATING - DIAMOND"
+  item String?
+
+  index Decimal // e.g., 1.56, 1.59, 1.599, 1.60, 1.61, 1.67, 1.74
+
+  // Coating type (surface treatment / colour)
+  // e.g., "HC", "HMC", "GREEN", "BLUE", "BR HC", "Invisible Blue", "Magenta",
+  //        "VIOLET", "DUAL", "CRY.GREEN/CRY.BLUE", "Dual Blue+Green", "Photo Brown",
+  //        "INVISIBLE BLUE EXTRA WHITE", "MAGENTA NIGHT DRIVE", "BLU/GREEN"
+  coating String
+
+  sph           Decimal?
+  sphStartRange Decimal?
+  cyl           Decimal?
+  cylStartRange Decimal?
+  /// Cross-cylinder catalog power (e.g. -2 for "cross -2"). Mutually exclusive with sph/cyl.
+  crossPower    Decimal?
+  costPrice     Decimal?
+  price         Decimal
+  quantity      Int      @default(0)
+  isDisabled    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  orders        Order[]
+}
+
+model KryptokLens {
+  id String @id @default(cuid())
+
+  // Kryptok lens series / product line (price-sheet ITEM column)
+  // e.g., "WHITE KT", "BLUE CUT KT HMC", "PG KT", "PG BLUE CUT KT", "POLY KT"
+  category String?
+
+  // Brand within the category
+  // WHITE KT / BLUE CUT KT HMC → "PROTECTOR"
+  // BLUE CUT KT                → "VENUS", "INTENSITY", "INVISIO"
+  // PG BLUE CUT KT             → "HI-MAX/RAPID"
+  // POLY KT                    → (HC / HMC GREEN variants)
+  brand String?
+
+  // Coating / colour variant
+  // e.g., "HC", "HMC", "HMC GREEN", "GREEN", "VIOLET", "LIGHT BLU", "BLUE"
+  coating String?
+
+  /// Wholesale / shop item label — e.g. "CROSS" for cross compound lines.
+  item String?
+
+  sph           Decimal
+  sphStartRange Decimal?
+  cyl           Decimal?
+  cylStartRange Decimal?
+
+  /// Cross-cylinder catalog power (CYL value, e.g. -2.00 for cross -2).
+  crossPower Decimal?
+
+  // Axis of cylinder:
+  //   90  = ST.AXIS (Straight Axis)
+  //  180  = REV AXIS (Reverse Axis)
+  //  45/135 = SPL AXIS (Special / Oblique Axis)
+  axis Int?
+
+  // Bifocal addition power — typically PLANO or +4.00
+  add Decimal
+
+  costPrice Decimal?
+  price     Decimal
+  quantity  Int      @default(0)
+  isDisabled Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+}
+
+model ProgressiveLens {
+  id            String   @id @default(cuid())
+  category      String? // e.g., "WITHOUT BLUE CUT", "BLUE CUT"
+  item          String // e.g., "WHITE PROGRESSIVE", "PG BR HMC PROG", "PHOTO BROWN BR PROG", "POLY PG BR PROGRESSIVE"
+  brand         String // e.g., "PROX", "SPRO", "STARK", "SUPER Green", "Pro-Tron 9+4 Design"
+  index         Decimal // e.g., 1.56, 1.59, 1.61
+  type          String // e.g., "HC", "HMC", "SHMC"
+  coating       String // e.g., "Green", "Blue DL", "Clik (Inv Blue)", "LR Green"
+  sph           Decimal
+  sphStartRange Decimal?
+  cyl           Decimal?
+  cylStartRange Decimal?
+  axis          Int?
+  add           Decimal
+  eye           Eye
+  costPrice     Decimal?
+  price         Decimal
+  quantity      Int      @default(0)
+  isDisabled    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  orders        Order[]
+}
+
+model OriVisionLens {
+  id            String   @id @default(cuid())
+  category      String? // e.g., "SUPER-HYDROPHOPIC"
+  item          String? // e.g., "OPTIMAX SV PG BLUE CUT", "CHROMA", "WIZARD"
+  brand         String // e.g., "MARI-BLU", "GREEN", "1.56 SUPER OPTIMAX"
+  index         Decimal // e.g., 1.56, 1.61, 1.67, 1.59
+  coating       String // e.g., "INVISIBLE BLUE", "GREEN", "MAGENTA NIGHT DRIVE", "INVISIBLE MARI-BLU"
+  sph           Decimal
+  sphStartRange Decimal?
+  cyl           Decimal?
+  cylStartRange Decimal?
+  price         Decimal
+  quantity      Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  orders        Order[]
+}
+
+model MagnusLens {
+  id       String   @id @default(cuid())
+  category String? // e.g., "BLUE CUT SV 1.56 Premium Range", "SV Hi-Index", "DIGITAL PROGRESSIVE LENSES"
+  item     String? // e.g., "EVO 1.56 Green", "MAGNUS 1.67 AIR", "NUPRO HC"
+  index    Decimal? // e.g., 1.56, 1.67, 1.74
+  coating  String? // e.g., "Blue Cut Green", "UC", "Green"
+
+  sph           Decimal
+  sphStartRange Decimal?
+  cyl           Decimal?
+  cylStartRange Decimal?
+  axis          Int? // Optional: For astigmatism or progressive lenses
+  add           Decimal? // Optional: For progressive lenses
+
+  price     Decimal
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+}
+
+model BifocalLens {
+  id      String  @id @default(cuid())
+  brand   String // e.g., "KORAL HC", "TESLA GREEN", "STARK", "Poly"
+  item    String // e.g., "HC KT", "BR HMC KT", "BRC KT", "PG HC KT", "PG BR HMC KT", "Poly BR KT BLUE"
+  coating String? // e.g., "KT", "HMC KT", "BR HMC KT"
+
+  // Prescription fields
+  sph           Decimal
+  sphStartRange Decimal?
+  cyl           Decimal? // Cylinder value (e.g., Cyl 2, Cyl 3)
+  cylStartRange Decimal?
+  axis          Int? // Axis value (e.g., 90, 180, 45, 135)
+  add           Decimal? // Addition power for bifocal segment
+
+  price     Decimal
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+}
+
+// ─── Customer & Order ─────────────────────────────────────────
+
+enum LensType {
+  SINGLE_VISION
+  KRYPTOK
+  PROGRESSIVE
+  ORI_VISION
+  MAGNUS
+  BIFOCAL
+}
+
+enum OrderStatus {
+  PENDING
+  PICKING
+  PACKED
+  DISPATCHED
+  PARTIALLY_FULFILLED
+  AWAITING_PROCUREMENT
+  COMPLETED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+  VOID
+}
+
+enum NotificationType {
+  ORDER_STATUS_UPDATED
+  ORDER_PLACED
+  TASK_ASSIGNED
+  RETURN_REQUEST_SUBMITTED
+  RETURN_REQUEST_UPDATED
+  RETURN_REQUEST_DECIDED
+  ALTERNATE_POWER_SUGGESTED
+  ALTERNATE_POWER_ACCEPTED
+  ALTERNATE_POWER_REJECTED
+}
+
+enum PowerVersionSource {
+  ORIGINAL
+  ALTERNATE
+}
+
+enum PowerVersionStatus {
+  ACTIVE
+  SUPERSEDED
+  POWER_NOT_AVAILABLE
+  FINAL_FULFILLED
+}
+
+enum AlternateAvailability {
+  WAREHOUSE
+  SUPPLIER
+  OUT_OF_STOCK
+}
+
+enum AlternateSuggestionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum ReturnRequestType {
+  RETURN
+  REPLACEMENT
+}
+
+enum ReturnRequestStatus {
+  SUBMITTED
+  MORE_INFO_REQUIRED
+  ESCALATED_TO_ADMIN
+  AWAITING_MATERIAL
+  APPROVED_CREDIT
+  APPROVED_REPLACEMENT
+  REJECTED
+  CLOSED
+}
+
+enum ReturnReason {
+  WRONG_POWER
+  MANUFACTURING_DEFECT
+  COATING_ISSUE
+  BROKEN_IN_TRANSPORT
+  WRONG_PRODUCT
+  EXCESS_STOCK_RETURN
+  OTHER
+}
+
+enum StockDisposition {
+  RETURN_TO_SALEABLE
+  DAMAGED_STOCK
+  SEND_TO_IMPORTER
+  SCRAP
+}
+
+enum ReturnDecisionType {
+  CREDIT
+  REPLACEMENT
+  REJECT
+}
+
+enum ReturnTimelineEventType {
+  SUBMITTED
+  PHOTO_ADDED
+  MORE_INFO_REQUIRED
+  ESCALATED
+  APPROVED_CREDIT
+  APPROVED_REPLACEMENT
+  REJECTED
+  CLOSED
+}
+
+enum TaskStatus {
+  PENDING
+  COMPLETED
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  user      User             @relation(fields: [userId], references: [id])
+  userId    String
+  order     Order?           @relation(fields: [orderId], references: [id])
+  orderId   String?
+  task      Task?            @relation(fields: [taskId], references: [id])
+  taskId    String?
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+enum CartLineType {
+  RETAIL
+  WHOLESALE
+}
+
+/// Customer cart lines — no stock hold; inventory is reserved on order placement.
+model CartReservation {
+  id               String       @id @default(cuid())
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String
+  lensType         LensType
+  lensId           String
+  cartLineKey      String
+  lineType         CartLineType @default(RETAIL)
+  wholesaleSpec    Json?
+  quantity         Float
+  reservedQuantity Float        @default(0)
+  unitPrice        Decimal
+  sph              Decimal?
+  cyl              Decimal?
+  add              Decimal?
+  axis             Int?
+  eye              String?
+  brand            String?
+  coating          String?
+  item             String?
+  lensTypeLabel    String?
+  expiresAt        DateTime
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([userId, cartLineKey])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Order {
+  id                 String                   @id @default(cuid())
+  orderNumber        Int?                     @unique
+  checkoutBatchId    String?
+  user               User                     @relation("CustomerOrders", fields: [userId], references: [id])
+  userId             String
+  /// Staff employee responsible for fulfilling / procuring this order (or batch).
+  assignedTo         User?                    @relation("AssignedOrdersToEmployee", fields: [assignedToId], references: [id])
+  assignedToId       String?
+  assignedAt         DateTime?
+  lineType           CartLineType             @default(RETAIL)
+  wholesaleSpec      Json?
+  lensType           LensType
+  // Exactly one of these will be set based on lensType
+  singleVisionLens   SingleVisionLens?        @relation(fields: [singleVisionLensId], references: [id])
+  singleVisionLensId String?
+  kryptokLens        KryptokLens?             @relation(fields: [kryptokLensId], references: [id])
+  kryptokLensId      String?
+  progressiveLens    ProgressiveLens?         @relation(fields: [progressiveLensId], references: [id])
+  progressiveLensId  String?
+  oriVisionLens      OriVisionLens?           @relation(fields: [oriVisionLensId], references: [id])
+  oriVisionLensId    String?
+  magnusLens         MagnusLens?              @relation(fields: [magnusLensId], references: [id])
+  magnusLensId       String?
+  bifocalLens        BifocalLens?             @relation(fields: [bifocalLensId], references: [id])
+  bifocalLensId      String?
+  quantity           Float
+  /// Stock allocated at order time (logical hold; physical qty reduced on pick/pack).
+  reservedQuantity   Float                    @default(0)
+  /// Units picked from inventory by staff (decrements lens stock when increased).
+  pickedQuantity     Float                    @default(0)
+  unitPrice          Decimal
+  totalAmount        Decimal
+  /// Customer-selected prescription at checkout (cart), not catalog lens defaults.
+  sph                Decimal?
+  cyl                Decimal?
+  axis               Int?
+  add                Decimal?
+  eye                String?
+  status             OrderStatus              @default(PENDING)
+  notes              String? // Customer special instructions for this order
+  /// Staff-only ops notes — never exposed to CUSTOMER API responses.
+  internalNotes      String?
+  cancelReason       String?
+  courierName        String?
+  trackingNumber     String?
+  /// Delivery service chosen at order time (charge calculated after packing).
+  deliveryService    DeliveryService? @relation(fields: [deliveryServiceId], references: [id])
+  deliveryServiceId  String?
+  delivery           OrderDelivery?
+  orderImageUrl      String? // Supabase URL when customer submits a prescription photo
+  transactionId      String? // ID of the CREDIT Transaction auto-created on sale
+  archivedAt         DateTime?
+  archiveReason      String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  notifications      Notification[]
+  invoice            Invoice?
+  wholesaleLineItems WholesaleOrderLineItem[]
+  returnRequests     ReturnRequest[]          @relation("OrderReturnRequests")
+  returnItems        ReturnRequestItem[]      @relation("OrderReturnItems")
+  inventoryMovements InventoryMovement[]
+  activityLogs       OrderActivityLog[]
+  powerVersions      OrderPowerVersion[]
+  alternateSuggestions AlternatePowerSuggestion[]
+
+  @@index([checkoutBatchId])
+  @@index([assignedToId])
+  @@index([assignedToId, status])
+  @@index([status])
+}
+
+/// Immutable power history for retail orders. Version 1 is always the original ordered power.
+model OrderPowerVersion {
+  id               String              @id @default(cuid())
+  order            Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId          String
+  versionNumber    Int
+  sph              Decimal?
+  cyl              Decimal?
+  axis             Int?
+  add              Decimal?
+  eye              String?
+  lensType         LensType
+  lensId           String?
+  source           PowerVersionSource  @default(ORIGINAL)
+  status           PowerVersionStatus  @default(ACTIVE)
+  reservedQuantity Float               @default(0)
+  pickedQuantity   Float               @default(0)
+  isFinalFulfilled Boolean             @default(false)
+  createdBy        User?               @relation("PowerVersionCreatedBy", fields: [createdById], references: [id])
+  createdById      String?
+  acceptedBy       User?               @relation("PowerVersionAcceptedBy", fields: [acceptedById], references: [id])
+  acceptedById     String?
+  acceptedAt       DateTime?
+  supersededAt     DateTime?
+  notes            String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  suggestionsFor   AlternatePowerSuggestion[]
+
+  @@unique([orderId, versionNumber])
+  @@index([orderId, status])
+  @@index([orderId, isFinalFulfilled])
+}
+
+model AlternatePowerSuggestion {
+  id               String                    @id @default(cuid())
+  order            Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId          String
+  forVersion       OrderPowerVersion         @relation(fields: [forVersionId], references: [id], onDelete: Cascade)
+  forVersionId     String
+  sph              Decimal
+  cyl              Decimal?
+  axis             Int?
+  add              Decimal?
+  eye              String?
+  lensType         LensType
+  lensId           String
+  availability     AlternateAvailability
+  etaDays          Int?
+  distanceScore    Float
+  status           AlternateSuggestionStatus @default(PENDING)
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([orderId, status])
+  @@index([forVersionId])
+}
+
+/// Key/value app configuration (e.g. alternate-power nearest rules).
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model OrderActivityLog {
+  id        String   @id @default(cuid())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   String
+  actor     User?    @relation("OrderActivityActors", fields: [actorUserId], references: [id])
+  actorUserId String?
+  action    String
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+model WholesaleOrderLineItem {
+  id               String   @id @default(cuid())
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId          String
+  powerKey         String
+  quantity         Float
+  reservedQuantity Float    @default(0)
+  unitPrice        Decimal
+  totalAmount      Decimal
+  sph              Decimal
+  cyl              Decimal?
+  axis             Int?
+  add              Decimal?
+  needsProcurement Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([orderId, powerKey])
+  @@index([orderId])
+}
+
+model Invoice {
+  id                   String        @id @default(cuid())
+  invoiceNumber        String        @unique
+  user                 User          @relation(fields: [userId], references: [id])
+  userId               String
+  order                Order         @relation(fields: [orderId], references: [id])
+  orderId              String        @unique
+  /// Grand total (taxable + GST + rounding). Kept for backward-compatible clients.
+  amount               Decimal
+  status               InvoiceStatus @default(ISSUED)
+  issuedAt             DateTime?
+  dueDate              DateTime?
+  paymentTerms         String?
+  financialYear        String?
+  placeOfSupplyState   String?
+  placeOfSupplyCode    String?
+  isInterState         Boolean       @default(false)
+  /// True when HSN/GST fell back to company defaults or tax master incomplete.
+  taxIncomplete        Boolean       @default(false)
+  grossAmount          Decimal       @default(0)
+  discountAmount       Decimal       @default(0)
+  taxableAmount        Decimal       @default(0)
+  cgstAmount           Decimal       @default(0)
+  sgstAmount           Decimal       @default(0)
+  igstAmount           Decimal       @default(0)
+  roundingAdjustment   Decimal       @default(0)
+  amountPaid           Decimal       @default(0)
+  amountOutstanding    Decimal       @default(0)
+  /// Snapshots at issue time
+  companyGstin         String?
+  companyLegalName     String?
+  companyState         String?
+  companyStateCode     String?
+  customerGstin        String?
+  customerLegalName    String?
+  customerBillingState String?
+  customerTypeSnapshot CustomerTaxType?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  lines                InvoiceLine[]
+  returnRequests       ReturnRequest[]
+  creditNotes          CreditNote[]
+  paymentAllocations   PaymentAllocation[]
+  paymentClaimItems    PaymentClaimItem[]
+  customerLedgerEntries CustomerLedgerEntry[]
+
+  @@index([userId, status])
+  @@index([status, issuedAt])
+  @@index([financialYear])
+}
+
+model InvoiceLine {
+  id            String   @id @default(cuid())
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId     String
+  lineNumber    Int
+  description   String
+  sku           String?
+  lensType      String?
+  lensId        String?
+  powerLabel    String?
+  hsnCode       String?
+  quantity      Decimal
+  unitPrice     Decimal
+  discountAmount Decimal  @default(0)
+  taxableAmount Decimal
+  gstRatePercent Decimal
+  cgstAmount    Decimal   @default(0)
+  sgstAmount    Decimal   @default(0)
+  igstAmount    Decimal   @default(0)
+  lineTotal     Decimal
+  createdAt     DateTime  @default(now())
+
+  @@index([invoiceId])
+  @@index([hsnCode])
+}
+
+/// Delivery service master: one courier can have many services (Land / Air).
+/// Customer rate is shown to shops; internal cost stays hidden (delivery margin).
+model DeliveryService {
+  id               String   @id @default(cuid())
+  courierCompany   String
+  serviceName      String   // e.g. "Sri Raj Courier — Land"
+  serviceType      String   @default("LAND") // LAND / AIR / SURFACE / PICKUP
+  isActive         Boolean  @default(true)
+  customerRate     Decimal  @default(0) // per kg (0 = free pickup)
+  billingMethod    String   @default("PER_KG") // PER_KG / FLAT
+  flatCharge       Decimal  @default(0) // used when billingMethod = FLAT
+  minCharge        Decimal  @default(0)
+  minWeight        Decimal  @default(1) // minimum chargeable kg
+  weightRounding   String   @default("NEXT_1KG") // ACTUAL / NEXT_1KG / NEXT_0_5KG
+  internalCostRate Decimal  @default(0) // per kg cost paid to courier
+  internalMinCost  Decimal  @default(0)
+  etaText          String? // "1–2 days"
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  orders           Order[]
+  deliveries       OrderDelivery[]
+
+  @@index([isActive])
+}
+
+/// Per-order delivery audit record. Written at PACKED time, never silently edited.
+model OrderDelivery {
+  id                String          @id @default(cuid())
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId           String          @unique
+  deliveryService   DeliveryService @relation(fields: [deliveryServiceId], references: [id])
+  deliveryServiceId String
+  actualWeight      Decimal
+  chargeableWeight  Decimal
+  customerCharge    Decimal
+  internalCost      Decimal
+  margin            Decimal
+  packages          Json? // [{ no: 1, weight: 1.8 }]
+  weightEnteredBy   String?
+  weightEnteredAt   DateTime?
+  weightHistory     Json? // [{ from, to, by, at, reason }]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([deliveryServiceId])
+}
+
+model Task {
+  id            String         @id @default(cuid())
+  title         String
+  details       String?
+  dueDate       DateTime
+  status        TaskStatus     @default(PENDING)
+  completedAt   DateTime?
+  assignedTo    User           @relation("AssignedTasksToEmployee", fields: [assignedToId], references: [id])
+  assignedToId  String
+  assignedBy    User           @relation("AssignedTasksByAdmin", fields: [assignedById], references: [id])
+  assignedById  String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  notifications Notification[]
+}
+
+model ReturnRequest {
+  id                 String                @id @default(cuid())
+  requestNumber      String                @unique
+  customer           User                  @relation("CustomerReturnRequests", fields: [customerId], references: [id])
+  customerId         String
+  primaryOrder       Order?                @relation("OrderReturnRequests", fields: [primaryOrderId], references: [id])
+  primaryOrderId     String?
+  primaryInvoice     Invoice?              @relation(fields: [primaryInvoiceId], references: [id])
+  primaryInvoiceId   String?
+  assignedEmployee   User?                 @relation("AssignedReturnRequestsToEmployee", fields: [assignedEmployeeId], references: [id])
+  assignedEmployeeId String?
+  reviewedByAdmin    User?                 @relation("ReviewedReturnRequestsByAdmin", fields: [reviewedByAdminId], references: [id])
+  reviewedByAdminId  String?
+  requestType        ReturnRequestType
+  status             ReturnRequestStatus   @default(SUBMITTED)
+  customerRemarks    String?
+  employeeRemarks    String?
+  adminRemarks       String?
+  rejectionReason    String?
+  decisionType       ReturnDecisionType?
+  stockDisposition   StockDisposition?
+  approvedAmount     Decimal?
+  replacementBatchId String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  items              ReturnRequestItem[]
+  images             ReturnRequestImage[]
+  timelineEvents     ReturnTimelineEvent[]
+  creditNote         CreditNote?
+  inventoryMovements InventoryMovement[]
+
+  @@index([customerId, createdAt])
+  @@index([assignedEmployeeId, status])
+  @@index([status, createdAt])
+}
+
+model ReturnRequestItem {
+  id              String        @id @default(cuid())
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  returnRequestId String
+  originalOrder   Order         @relation("OrderReturnItems", fields: [originalOrderId], references: [id])
+  originalOrderId String
+  lensType        LensType
+  lensId          String?
+  lensLabel       String
+  quantity        Float
+  eye             String?
+  reason          ReturnReason
+  itemRemarks     String?
+  /// Snapshot of ordered power at request time.
+  originalSph     Decimal?
+  originalCyl     Decimal?
+  originalAxis    Int?
+  originalAdd     Decimal?
+  /// Customer-requested replacement power (catalog range validated on submit).
+  requestedSph    Decimal?
+  requestedCyl    Decimal?
+  requestedAxis   Int?
+  requestedAdd    Decimal?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([returnRequestId])
+  @@index([originalOrderId])
+}
+
+model ReturnRequestImage {
+  id               String        @id @default(cuid())
+  returnRequest    ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  returnRequestId  String
+  uploadedBy       User?         @relation(fields: [uploadedByUserId], references: [id])
+  uploadedByUserId String?
+  imageUrl         String
+  createdAt        DateTime      @default(now())
+
+  @@index([returnRequestId])
+}
+
+model ReturnTimelineEvent {
+  id              String                  @id @default(cuid())
+  returnRequest   ReturnRequest           @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  returnRequestId String
+  actorUser       User?                   @relation(fields: [actorUserId], references: [id])
+  actorUserId     String?
+  eventType       ReturnTimelineEventType
+  message         String
+  createdAt       DateTime                @default(now())
+
+  @@index([returnRequestId, createdAt])
+}
+
+model CreditNote {
+  id               String        @id @default(cuid())
+  creditNoteNumber String        @unique
+  returnRequest    ReturnRequest @relation(fields: [returnRequestId], references: [id])
+  returnRequestId  String        @unique
+  user             User          @relation(fields: [userId], references: [id])
+  userId           String
+  invoice          Invoice?      @relation(fields: [invoiceId], references: [id])
+  invoiceId        String?
+  amount           Decimal
+  taxableAmount    Decimal       @default(0)
+  cgstAmount       Decimal       @default(0)
+  sgstAmount       Decimal       @default(0)
+  igstAmount       Decimal       @default(0)
+  reason           String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  customerLedgerEntries CustomerLedgerEntry[]
+}
+
+model InventoryMovement {
+  id              String           @id @default(cuid())
+  returnRequest   ReturnRequest    @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  returnRequestId String
+  order           Order?           @relation(fields: [orderId], references: [id])
+  orderId         String?
+  lensType        LensType
+  lensId          String?
+  quantity        Float
+  disposition     StockDisposition
+  notes           String?
+  createdAt       DateTime         @default(now())
+
+  @@index([returnRequestId, createdAt])
+}
+
+/// Admin-managed shop/stock product lines under a lens type (e.g. BRC, HC KT).
+/// System rows are seeded from wholesale catalog constants; custom rows are admin-created.
+model CatalogProductLine {
+  id             String   @id @default(cuid())
+  /// single-vision | kryptok | progressive
+  lensType       String
+  /// Display / filter name, e.g. "BRC"
+  name           String
+  description    String?
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  /// Seeded system lines cannot be hard-deleted or renamed
+  isSystem       Boolean  @default(false)
+  /// Product-driven GST (overrides company default when set).
+  hsnCode        String?
+  gstRatePercent Decimal?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([lensType, name])
+  @@index([lensType, isActive, sortOrder])
+}
+
+/// Admin-managed coating filter chips for shop/wholesale (e.g. GREEN, Blue Coat).
+/// Canonical `name` matches the free-text `coating` field on lens SKU rows.
+model CoatingFilterLabel {
+  id          String   @id @default(cuid())
+  /// single-vision | kryptok | progressive
+  lensType    String
+  /// Canonical coating value stored on SKUs and shown on chips
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  /// Seeded from existing distinct coatings; custom ones are admin-created
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([lensType, name])
+  @@index([lensType, isActive, sortOrder])
+}
+
+// --- Audit & Logs (immutable; no FK cascade from business entities) ---
+
+enum AuditActorType {
+  HUMAN
+  SYSTEM
+  AUTOMATION
+  INTEGRATION
+}
+
+enum AuditSource {
+  WEB
+  MOBILE
+  ADMIN
+  SYSTEM
+  API
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+}
+
+enum AuditSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+/// Sequential public IDs for audit detail view (AU-000001).
+model AuditSequence {
+  id    String @id @default("default")
+  value Int    @default(0)
+}
+
+/// Immutable business audit trail — insert-only via application.
+model AuditEvent {
+  id              String         @id @default(cuid())
+  publicId        String         @unique
+  occurredAt      DateTime       @default(now())
+  actorType       AuditActorType @default(HUMAN)
+  actorUserId     String?
+  actorName       String?
+  action          String
+  module          String
+  entityType      String
+  entityId        String
+  severity        AuditSeverity  @default(INFO)
+  isHighRisk      Boolean        @default(false)
+  source          AuditSource    @default(API)
+  ipAddress       String?
+  userAgent       String?
+  sessionId       String?
+  correlationId   String?
+  clientRequestId String?
+  reasonCode      String?
+  reasonText      String?
+  result          AuditResult    @default(SUCCESS)
+  changes         Json?
+  context         Json?
+  relatedRefs     Json?
+  message         String?
+
+  @@index([occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@index([module, action])
+  @@index([entityType, entityId, occurredAt])
+  @@index([correlationId])
+  @@index([isHighRisk, occurredAt])
+}
+
+/// Auth and access-control events.
+model SecurityEvent {
+  id            String      @id @default(cuid())
+  occurredAt    DateTime    @default(now())
+  action        String
+  actorUserId   String?
+  actorEmail    String?
+  result        AuditResult @default(SUCCESS)
+  source        AuditSource @default(API)
+  ipAddress     String?
+  userAgent     String?
+  correlationId String?
+  context       Json?
+  message       String?
+
+  @@index([occurredAt])
+  @@index([action, occurredAt])
+  @@index([actorEmail, occurredAt])
+}
+
+/// Technical failures — shorter retention than audit events.
+model SystemErrorLog {
+  id            String   @id @default(cuid())
+  occurredAt    DateTime @default(now())
+  level         String   @default("error")
+  code          String?
+  message       String
+  route         String?
+  correlationId String?
+  context       Json?
+
+  @@index([occurredAt])
+  @@index([route, occurredAt])
+}
+
+/// Human-readable operational timeline.
+model ActivityEvent {
+  id           String   @id @default(cuid())
+  occurredAt   DateTime @default(now())
+  actorUserId  String?
+  actorName    String?
+  module       String
+  entityType   String?
+  entityId     String?
+  message      String
+  auditEventId String?
+
+  @@index([occurredAt])
+  @@index([entityType, entityId, occurredAt])
+  @@index([actorUserId, occurredAt])
+}
+
+/// Idempotency for offline mobile replay.
+model ProcessedClientRequest {
+  id              String   @id @default(cuid())
+  clientRequestId String   @unique
+  auditEventId    String?
+  createdAt       DateTime @default(now())
+}
+
+enum StockMovementType {
+  RECEIVED
+  SOLD
+  RESERVED
+  RELEASED
+  ADJUSTED
+  PICKED
+  RESTORED
+  RETURNED
+  DAMAGED
+  WRITTEN_OFF
+}
+
+/// General inventory movement ledger.
+model StockMovement {
+  id             String            @id @default(cuid())
+  lensType       LensType
+  lensId         String
+  movementType   StockMovementType
+  quantityDelta  Float
+  quantityBefore Float
+  quantityAfter  Float
+  sourceType     String?
+  referenceId    String?
+  orderId        String?
+  actorUserId    String?
+  reasonCode     String?
+  reasonText     String?
+  notes          String?
+  createdAt      DateTime          @default(now())
+
+  @@index([lensType, lensId, createdAt])
+  @@index([orderId])
+  @@index([referenceId])
+}
+
+// --- Finance & GST Billing ---
+
+model CompanyFinanceSettings {
+  id                   String   @id @default("default")
+  legalName            String   @default("DrishX")
+  tradeName            String?
+  addressLine1         String?
+  addressLine2         String?
+  city                 String?
+  state                String   @default("Gujarat")
+  stateCode            String   @default("24")
+  pincode              String?
+  gstin                String?
+  pan                  String?
+  phone                String?
+  email                String?
+  invoiceSeriesPrefix  String   @default("INV")
+  creditNotePrefix     String   @default("CN")
+  purchaseBillPrefix   String   @default("PB")
+  defaultHsnCode       String   @default("9001")
+  defaultGstRatePercent Decimal @default(5)
+  paymentTermsDays     Int      @default(30)
+  bankName             String?
+  bankAccountName      String?
+  bankAccountNumber    String?
+  bankIfsc             String?
+  invoiceFooterNotes   String?
+  updatedAt            DateTime @updatedAt
+  createdAt            DateTime @default(now())
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  BANK
+  CARD
+  CHEQUE
+  OTHER
+  CREDIT
+}
+
+enum PaymentClaimStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum PartyLedgerEntryType {
+  OPENING
+  INVOICE
+  PAYMENT
+  CREDIT_NOTE
+  DEBIT_NOTE
+  ADVANCE
+  ADJUSTMENT
+}
+
+model Payment {
+  id            String              @id @default(cuid())
+  paymentNumber String              @unique
+  customer      User                @relation("CustomerPayments", fields: [customerId], references: [id])
+  customerId    String
+  amount        Decimal
+  mode          PaymentMode
+  reference     String?
+  paidAt        DateTime            @default(now())
+  notes         String?
+  /// Unallocated remainder (customer advance).
+  unallocatedAmount Decimal         @default(0)
+  claim         PaymentClaim?       @relation(fields: [claimId], references: [id])
+  claimId       String?             @unique
+  recordedById  String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  allocations   PaymentAllocation[]
+  customerLedgerEntries CustomerLedgerEntry[]
+
+  @@index([customerId, paidAt])
+}
+
+model PaymentAllocation {
+  id        String   @id @default(cuid())
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  paymentId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
+  invoiceId String
+  amount    Decimal
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, invoiceId])
+  @@index([invoiceId])
+}
+
+model PaymentClaim {
+  id           String             @id @default(cuid())
+  customer     User               @relation("CustomerPaymentClaims", fields: [customerId], references: [id])
+  customerId   String
+  amount       Decimal
+  mode         PaymentMode
+  reference    String?
+  notes        String?
+  status       PaymentClaimStatus @default(PENDING)
+  reviewedBy   User?              @relation("PaymentClaimReviewer", fields: [reviewedById], references: [id])
+  reviewedById String?
+  reviewedAt   DateTime?
+  rejectReason String?
+  payment      Payment?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  items        PaymentClaimItem[]
+
+  @@index([customerId, status])
+  @@index([status, createdAt])
+}
+
+model PaymentClaimItem {
+  id      String       @id @default(cuid())
+  claim   PaymentClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claimId String
+  invoice Invoice      @relation(fields: [invoiceId], references: [id])
+  invoiceId String
+  amount  Decimal?
+
+  @@unique([claimId, invoiceId])
+}
+
+model CustomerLedgerEntry {
+  id            String               @id @default(cuid())
+  customer      User                 @relation(fields: [customerId], references: [id])
+  customerId    String
+  entryType     PartyLedgerEntryType
+  /// Positive = increases receivable (debit), negative = decreases (credit) when using signed amount.
+  /// Prefer debitAmount / creditAmount for clarity.
+  debitAmount   Decimal              @default(0)
+  creditAmount  Decimal              @default(0)
+  balanceAfter  Decimal?
+  description   String?
+  occurredAt    DateTime             @default(now())
+  invoice       Invoice?             @relation(fields: [invoiceId], references: [id])
+  invoiceId     String?
+  payment       Payment?             @relation(fields: [paymentId], references: [id])
+  paymentId     String?
+  creditNote    CreditNote?          @relation(fields: [creditNoteId], references: [id])
+  creditNoteId  String?
+  createdAt     DateTime             @default(now())
+
+  @@index([customerId, occurredAt])
+  @@index([invoiceId])
+}
+
+enum PurchaseBillStatus {
+  DRAFT
+  POSTED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+model Supplier {
+  id              String   @id @default(cuid())
+  name            String
+  tradeName       String?
+  gstin           String?
+  state           String?
+  stateCode       String?
+  address         String?
+  phone           String?
+  email           String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  purchaseBills   PurchaseBill[]
+  supplierPayments SupplierPayment[]
+  ledgerEntries   SupplierLedgerEntry[]
+
+  @@index([name])
+  @@index([gstin])
+}
+
+model PurchaseBill {
+  id                 String             @id @default(cuid())
+  billNumber         String             @unique
+  supplierBillNumber String?
+  supplier           Supplier           @relation(fields: [supplierId], references: [id])
+  supplierId         String
+  billDate           DateTime           @default(now())
+  status             PurchaseBillStatus @default(DRAFT)
+  financialYear      String?
+  placeOfSupplyState String?
+  isInterState       Boolean            @default(false)
+  poReference        String?
+  grnReference       String?
+  mismatchWarning    String?
+  grossAmount        Decimal            @default(0)
+  discountAmount     Decimal            @default(0)
+  taxableAmount      Decimal            @default(0)
+  cgstAmount         Decimal            @default(0)
+  sgstAmount         Decimal            @default(0)
+  igstAmount         Decimal            @default(0)
+  roundingAdjustment Decimal            @default(0)
+  totalAmount        Decimal            @default(0)
+  amountPaid         Decimal            @default(0)
+  amountOutstanding  Decimal            @default(0)
+  notes              String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  lines              PurchaseBillLine[]
+  paymentAllocations SupplierPaymentAllocation[]
+  ledgerEntries      SupplierLedgerEntry[]
+
+  @@index([supplierId, status])
+  @@index([status, billDate])
+}
+
+model PurchaseBillLine {
+  id             String       @id @default(cuid())
+  purchaseBill   PurchaseBill @relation(fields: [purchaseBillId], references: [id], onDelete: Cascade)
+  purchaseBillId String
+  lineNumber     Int
+  description    String
+  sku            String?
+  hsnCode        String?
+  quantity       Decimal
+  unitPrice      Decimal
+  discountAmount Decimal      @default(0)
+  taxableAmount  Decimal
+  gstRatePercent Decimal
+  cgstAmount     Decimal      @default(0)
+  sgstAmount     Decimal      @default(0)
+  igstAmount     Decimal      @default(0)
+  lineTotal      Decimal
+
+  @@index([purchaseBillId])
+}
+
+model SupplierPayment {
+  id                String   @id @default(cuid())
+  paymentNumber     String   @unique
+  supplier          Supplier @relation(fields: [supplierId], references: [id])
+  supplierId        String
+  amount            Decimal
+  mode              PaymentMode
+  reference         String?
+  paidAt            DateTime @default(now())
+  notes             String?
+  unallocatedAmount Decimal  @default(0)
+  recordedBy        User?    @relation("SupplierPaymentRecorder", fields: [recordedById], references: [id])
+  recordedById      String?
+  createdAt         DateTime @default(now())
+  allocations       SupplierPaymentAllocation[]
+  ledgerEntries     SupplierLedgerEntry[]
+
+  @@index([supplierId, paidAt])
+}
+
+model SupplierPaymentAllocation {
+  id                String          @id @default(cuid())
+  supplierPayment   SupplierPayment @relation(fields: [supplierPaymentId], references: [id], onDelete: Cascade)
+  supplierPaymentId String
+  purchaseBill      PurchaseBill    @relation(fields: [purchaseBillId], references: [id])
+  purchaseBillId    String
+  amount            Decimal
+  createdAt         DateTime        @default(now())
+
+  @@unique([supplierPaymentId, purchaseBillId])
+}
+
+model SupplierLedgerEntry {
+  id                String               @id @default(cuid())
+  supplier          Supplier             @relation(fields: [supplierId], references: [id])
+  supplierId        String
+  entryType         PartyLedgerEntryType
+  debitAmount       Decimal              @default(0)
+  creditAmount      Decimal              @default(0)
+  balanceAfter      Decimal?
+  description       String?
+  occurredAt        DateTime             @default(now())
+  purchaseBill      PurchaseBill?        @relation(fields: [purchaseBillId], references: [id])
+  purchaseBillId    String?
+  supplierPayment   SupplierPayment?     @relation(fields: [supplierPaymentId], references: [id])
+  supplierPaymentId String?
+  createdAt         DateTime             @default(now())
+
+  @@index([supplierId, occurredAt])
+}
+
+enum CashAccountType {
+  COMPANY
+  EMPLOYEE_FLOAT
+  BANK
+}
+
+model CashAccount {
+  id           String          @id @default(cuid())
+  name         String
+  accountType  CashAccountType
+  employee     User?           @relation("EmployeeCashAccounts", fields: [employeeId], references: [id])
+  employeeId   String?
+  balance      Decimal         @default(0)
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  ledgerEntries CashLedgerEntry[]
+  expenseRequests ExpenseRequest[]
+
+  @@index([accountType])
+  @@index([employeeId])
+}
+
+model CashLedgerEntry {
+  id            String      @id @default(cuid())
+  cashAccount   CashAccount @relation(fields: [cashAccountId], references: [id])
+  cashAccountId String
+  /// Positive = in, negative direction via outAmount
+  inAmount      Decimal     @default(0)
+  outAmount     Decimal     @default(0)
+  balanceAfter  Decimal
+  description   String?
+  referenceType String?
+  referenceId   String?
+  occurredAt    DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  @@index([cashAccountId, occurredAt])
+}
+
+enum ExpenseApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ExpenseDocType {
+  WITH_BILL
+  NO_BILL
+}
+
+model ExpenseRequest {
+  id              String                @id @default(cuid())
+  employee        User                  @relation("ExpenseRequestEmployee", fields: [employeeId], references: [id])
+  employeeId      String
+  category        String
+  amount          Decimal
+  expenseDate     DateTime              @default(now())
+  description     String?
+  merchant        String?
+  billAvailable   Boolean               @default(true)
+  docType         ExpenseDocType        @default(WITH_BILL)
+  noBillReason    String?
+  attachmentUrl   String?
+  status          ExpenseApprovalStatus @default(PENDING)
+  cashAccount     CashAccount?          @relation(fields: [cashAccountId], references: [id])
+  cashAccountId   String?
+  /// PROCUREMENT posts to inventory path; OPERATING is P&L expense.
+  postingClass    String                @default("OPERATING")
+  reviewedBy      User?                 @relation("ExpenseRequestReviewer", fields: [reviewedById], references: [id])
+  reviewedById    String?
+  reviewedAt      DateTime?
+  rejectReason    String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([employeeId, status])
+  @@index([status, expenseDate])
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  INCOME
+  EXPENSE
+  EQUITY
+}
+
+model ChartAccount {
+  id        String      @id @default(cuid())
+  code      String      @unique
+  name      String
+  accountType AccountType
+  isSystem  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  lines     JournalLine[]
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  entryNumber String   @unique
+  occurredAt  DateTime @default(now())
+  memo        String?
+  sourceType  String?
+  sourceId    String?
+  createdAt   DateTime @default(now())
+  lines       JournalLine[]
+
+  @@index([sourceType, sourceId])
+}
+
+model JournalLine {
+  id             String       @id @default(cuid())
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  journalEntryId String
+  account        ChartAccount @relation(fields: [accountId], references: [id])
+  accountId      String
+  debitAmount    Decimal      @default(0)
+  creditAmount   Decimal      @default(0)
+  description    String?
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+model InvoiceSequence {
+  id            String @id
+  /// e.g. "26-27"
+  financialYear String
+  prefix        String
+  nextValue     Int    @default(1)
+
+  @@unique([financialYear, prefix])
+}
+
+model CashReconcileLog {
+  id              String   @id @default(cuid())
+  cashAccountId   String
+  systemBalance   Decimal
+  countedBalance  Decimal
+  difference      Decimal
+  notes           String?
+  actorUserId     String?
+  createdAt       DateTime @default(now())
+
+  @@index([cashAccountId, createdAt])
+}
+
+// --- Loyalty (X Points) ---
+
+/// Company-wide loyalty program policy (singleton).
+model LoyaltySettings {
+  id                String   @id @default("default")
+  enabled           Boolean  @default(true)
+  /// Rule "1 X Point = ₹1". Always 1 in Phase 1.
+  pointValue        Int      @default(1)
+  /// Base earning % of net taxable value for full payment (on-time).
+  baseRatePct       Decimal  @default(0.5)
+  /// Extra % for full advance payment (base + advance = maximum).
+  advanceBonusPct   Decimal  @default(1.0)
+  /// Explicit full-payment rate (may equal base for non-advance). Kept for clarity.
+  fullPaymentRatePct Decimal @default(0.5)
+  /// Minimum protected gross margin %. Below this, no points awarded (zero-point option).
+  minMarginPct      Decimal  @default(5)
+  /// Max % of invoice taxable value that can be redeemed with points.
+  maxRedemptionPct  Decimal  @default(5)
+  /// Points expire this many days after activation.
+  expiryDays        Int      @default(365)
+  /// Minimum invoice taxable value required to earn points.
+  minInvoiceValue   Decimal  @default(0)
+  /// Max points per invoice (0 = unlimited).
+  maxPointsPerInvoice Decimal @default(0)
+  /// Award points on freight/shipping/handling charges.
+  freightEligible   Boolean  @default(false)
+  /// Fraud guard: duplicate invoice can never earn points twice.
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+}
+
+enum LoyaltyTransactionType {
+  POINTS_EARNED
+  ADVANCE_BONUS
+  POINTS_REDEEMED
+  POINTS_EXPIRED
+  POINTS_REVERSED
+  POINTS_ADJUSTED
+  POINTS_CANCELLED
+}
+
+enum LoyaltyTransactionStatus {
+  PENDING
+  AVAILABLE
+  REDEEMED
+  EXPIRED
+  REVERSED
+  CANCELLED
+}
+
+/// Per-customer running totals (1:1 with User).
+model LoyaltyWallet {
+  id             String  @id @default(cuid())
+  customer       User    @relation(fields: [customerId], references: [id])
+  customerId     String  @unique
+  availablePoints Decimal @default(0)
+  pendingPoints  Decimal @default(0)
+  totalEarned    Decimal @default(0)
+  totalRedeemed  Decimal @default(0)
+  totalExpired   Decimal @default(0)
+  totalReversed  Decimal @default(0)
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@index([customerId])
+}
+
+/// Point movement ledger. Every point has a source.
+model LoyaltyTransaction {
+  id            String                    @id @default(cuid())
+  customer      User                      @relation(fields: [customerId], references: [id])
+  customerId    String
+  type          LoyaltyTransactionType
+  /// Positive = earn, negative = redeem/expire/reverse.
+  points        Decimal
+  balanceAfter  Decimal
+  status        LoyaltyTransactionStatus  @default(PENDING)
+  reason        String?
+  invoiceId     String?
+  orderId       String?
+  paymentId     String?
+  creditNoteId  String?
+  returnRequestId String?
+  /// Who created this transaction (admin manual adjust, system, staff).
+  createdBy     User?                     @relation("LoyaltyCreatedBy", fields: [createdById], references: [id])
+  createdById   String?
+  expiresAt     DateTime?
+  activatedAt   DateTime?
+  createdAt     DateTime                  @default(now())
+
+  @@index([customerId, createdAt])
+  @@index([orderId])
+  @@index([invoiceId])
+  @@index([customerId, status])
+}

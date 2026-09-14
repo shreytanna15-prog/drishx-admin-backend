@@ -1,0 +1,894 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getSession } from "../../../lib/session-auth";
+import { prisma } from "../../../lib/prisma";
+import { InvoiceStatus, NotificationType, OrderStatus, Prisma } from "@prisma/client";
+import {
+  fulfillOrderPick,
+  restorePickedStock,
+  setOrderPickedQuantity,
+} from "../../../lib/order-inventory";
+import { markActiveVersionFinalFulfilled } from "../../../lib/alternate-power-workflow";
+import { activateOrderLoyalty } from "../../../lib/loyalty/activate";
+import { reverseRedemption } from "../../../lib/loyalty/redeem";
+import {
+  canTransitionStatus,
+  formatOrderStatusLabel,
+  isEditableOrderStatus,
+  isOrderTrackingStatus,
+  type OrderTrackingStatus,
+} from "../../../lib/order-status-transitions";
+import { logOrderActivity } from "../../../lib/order-activity";
+import {
+  AuditAction,
+  AuditModule,
+  ReasonCode,
+  actorFromSession,
+  buildAuditRequestContext,
+  recordAuditEvent,
+  singleChange,
+} from "../../../lib/audit";
+import { voidTransaction } from "../../../lib/audit-query";
+import { validateOrderNotes } from "../../../lib/order-notes";
+import { requireStaffPermission } from "../../../lib/staff-access";
+import {
+  parsePackages,
+  recordPackingDelivery,
+} from "../../../lib/delivery-pack";
+import {
+  validateCourierName,
+  validateTrackingNumber,
+} from "../../../lib/dispatch-validate";
+import {
+  orderDetailInclude,
+  serializeOrderDetail,
+} from "../../../lib/order-detail";
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/orders/:id
+// ─────────────────────────────────────────────────────────────
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const session = getSession(req);
+  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: orderDetailInclude,
+    });
+
+    if (!order) return NextResponse.json({ error: "Order not found." }, { status: 404 });
+
+    if (session.role === "CUSTOMER" && order.userId !== session.userId) {
+      return NextResponse.json({ error: "Forbidden. Not your order." }, { status: 403 });
+    }
+    if (
+      session.role === "EMPLOYEE" &&
+      order.assignedToId &&
+      order.assignedToId !== session.userId
+    ) {
+      return NextResponse.json({ error: "Forbidden. Not your assigned order." }, { status: 403 });
+    }
+
+    if (session.role === "EMPLOYEE") {
+      const gate = await requireStaffPermission(session, [
+        "orders.view",
+        "orders.fulfill",
+        "orders.rx",
+        "orders.dispatch",
+      ]);
+      if ("error" in gate) return gate.error;
+    }
+
+    return NextResponse.json(await serializeOrderDetail(order, session.role));
+  } catch (error) {
+    console.error("GET /api/orders/[id] error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+
+function parseTrackingStatus(value: unknown): OrderTrackingStatus | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  return isOrderTrackingStatus(normalized) ? normalized : null;
+}
+
+function parseOptionalString(value: unknown, maxLen = 2000): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLen);
+}
+
+// ─────────────────────────────────────────────────────────────
+// PUT /api/orders/:id
+// Status workflow, pick qty, reassignment, internal notes, shipping
+// ─────────────────────────────────────────────────────────────
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const session = getSession(req);
+  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+
+  try {
+    const body = await req.json();
+    const status = body?.status !== undefined ? parseTrackingStatus(body.status) : null;
+    if (body?.status !== undefined && !status) {
+      return NextResponse.json({ error: "Invalid order status." }, { status: 400 });
+    }
+
+    const hasPickedQuantity =
+      body?.pickedQuantity !== undefined && body?.pickedQuantity !== null;
+    const pickedQuantity =
+      hasPickedQuantity && Number.isFinite(Number(body.pickedQuantity))
+        ? Math.max(0, Math.floor(Number(body.pickedQuantity)))
+        : null;
+
+    const assignedToIdRaw = body?.assignedToId;
+    const hasAssignment = assignedToIdRaw !== undefined;
+    const assignedToId =
+      assignedToIdRaw === null || assignedToIdRaw === ""
+        ? null
+        : typeof assignedToIdRaw === "string"
+          ? assignedToIdRaw.trim()
+          : null;
+
+    const internalNotes = parseOptionalString(body?.internalNotes);
+    const cancelReason = parseOptionalString(body?.cancelReason, 500);
+    const courierName = parseOptionalString(body?.courierName, 200);
+    const trackingNumber = parseOptionalString(body?.trackingNumber, 200);
+    const force = body?.force === true && session.role === "ADMIN";
+    // Delivery module: service chosen at order time, weight entered at packing.
+    const deliveryServiceIdRaw = body?.deliveryServiceId;
+    const deliveryServiceId =
+      deliveryServiceIdRaw === null || deliveryServiceIdRaw === ""
+        ? null
+        : typeof deliveryServiceIdRaw === "string" && deliveryServiceIdRaw.trim()
+          ? deliveryServiceIdRaw.trim()
+          : undefined;
+    const actualWeightRaw = body?.actualWeight;
+    const hasActualWeight = actualWeightRaw !== undefined && actualWeightRaw !== null && actualWeightRaw !== "";
+    const actualWeight = hasActualWeight ? Number(actualWeightRaw) : null;
+    const packages = parsePackages(body?.packages);
+    const hasPackages = packages !== null;
+    const weightReason = parseOptionalString(body?.weightReason, 500);
+
+    const hasMutation =
+      status !== null ||
+      hasPickedQuantity ||
+      hasAssignment ||
+      internalNotes !== undefined ||
+      cancelReason !== undefined ||
+      courierName !== undefined ||
+      trackingNumber !== undefined ||
+      deliveryServiceId !== undefined ||
+      hasActualWeight ||
+      hasPackages;
+
+    if (!hasMutation) {
+      return NextResponse.json(
+        { error: "Provide status, pickedQuantity, assignedToId, notes, or shipping fields." },
+        { status: 400 }
+      );
+    }
+
+    const existingOrder = await prisma.order.findUnique({ where: { id } });
+    if (!existingOrder) return NextResponse.json({ error: "Order not found." }, { status: 404 });
+
+    const auditCtx = buildAuditRequestContext(req);
+    const stockAudit = {
+      actorUserId: session.userId,
+      orderId: id,
+      request: auditCtx,
+    };
+
+    const currentStatus = existingOrder.status as OrderTrackingStatus;
+    const nextStatus = (status ?? currentStatus) as OrderTrackingStatus;
+
+    if (session.role === "CUSTOMER") {
+      if (existingOrder.userId !== session.userId) {
+        return NextResponse.json({ error: "Forbidden. Not your order." }, { status: 403 });
+      }
+      if (nextStatus !== "CANCELLED" || status === null) {
+        return NextResponse.json({ error: "Customers can only cancel orders." }, { status: 403 });
+      }
+      if (
+        hasPickedQuantity ||
+        hasAssignment ||
+        internalNotes !== undefined ||
+        courierName !== undefined ||
+        trackingNumber !== undefined ||
+        deliveryServiceId !== undefined ||
+        hasActualWeight ||
+        hasPackages
+      ) {
+        return NextResponse.json({ error: "Customers cannot update those fields." }, { status: 403 });
+      }
+      if (
+        existingOrder.status !== "PENDING" &&
+        existingOrder.status !== "AWAITING_PROCUREMENT"
+      ) {
+        return NextResponse.json(
+          { error: "Only pending or procurement orders can be cancelled by the customer." },
+          { status: 400 }
+        );
+      }
+    } else if (session.role === "EMPLOYEE") {
+      if (existingOrder.assignedToId && existingOrder.assignedToId !== session.userId) {
+        return NextResponse.json(
+          { error: "Forbidden. Not your assigned order." },
+          { status: 403 }
+        );
+      }
+      const needsDispatch =
+        courierName !== undefined || trackingNumber !== undefined;
+      const needsFulfill =
+        status !== null ||
+        hasPickedQuantity ||
+        internalNotes !== undefined ||
+        cancelReason !== undefined ||
+        deliveryServiceId !== undefined ||
+        hasActualWeight ||
+        hasPackages;
+      if (needsDispatch) {
+        const gate = await requireStaffPermission(session, "orders.dispatch");
+        if ("error" in gate) return gate.error;
+      }
+      if (needsFulfill || hasAssignment) {
+        const gate = await requireStaffPermission(
+          session,
+          needsFulfill ? "orders.fulfill" : "orders.view"
+        );
+        if ("error" in gate) return gate.error;
+      }
+      if (hasAssignment) {
+        return NextResponse.json(
+          { error: "Employees cannot reassign orders." },
+          { status: 403 }
+        );
+      }
+    } else if (session.role !== "ADMIN") {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    }
+
+    if (existingOrder.status === "CANCELLED" && nextStatus !== "CANCELLED") {
+      return NextResponse.json(
+        { error: "Cannot un-cancel an order currently. Please create a new order." },
+        { status: 400 }
+      );
+    }
+
+    if (status && status !== currentStatus) {
+      const allowed = canTransitionStatus(currentStatus, status, {
+        allowAdminForce: force,
+      });
+      if (!allowed) {
+        return NextResponse.json(
+          {
+            error: `Invalid status transition from ${currentStatus} to ${status}.`,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // ── Courier dispatch ──────────────────────────────────────
+    // Dispatching (or fixing shipping on an already-dispatched order)
+    // requires valid courier + tracking details — no silent back door.
+    const dispatching = status === "DISPATCHED" && currentStatus !== "DISPATCHED";
+    const editingShippingOnDispatched =
+      existingOrder.status === "DISPATCHED" &&
+      (courierName !== undefined || trackingNumber !== undefined);
+    if (dispatching) {
+      const courierCheck = validateCourierName(body?.courierName);
+      if (!courierCheck.ok) {
+        return NextResponse.json({ error: courierCheck.error }, { status: 400 });
+      }
+      const trackingCheck = validateTrackingNumber(body?.trackingNumber);
+      if (!trackingCheck.ok) {
+        return NextResponse.json({ error: trackingCheck.error }, { status: 400 });
+      }
+    } else if (editingShippingOnDispatched) {
+      if (courierName !== undefined) {
+        const check = validateCourierName(body?.courierName);
+        if (!check.ok) {
+          return NextResponse.json({ error: check.error }, { status: 400 });
+        }
+      }
+      if (trackingNumber !== undefined) {
+        const check = validateTrackingNumber(body?.trackingNumber);
+        if (!check.ok) {
+          return NextResponse.json({ error: check.error }, { status: 400 });
+        }
+      }
+    }
+
+    if (hasAssignment && assignedToId) {
+      const employee = await prisma.user.findFirst({
+        where: { id: assignedToId, role: "EMPLOYEE" },
+        select: { id: true },
+      });
+      if (!employee) {
+        return NextResponse.json(
+          { error: "Assignee must be an existing employee." },
+          { status: 400 }
+        );
+      }
+    }
+
+    // ── Delivery module ──────────────────────────────────────────
+    // Service chosen at order time; weight + charge captured at PACKED.
+    const existingDelivery = await prisma.orderDelivery.findUnique({ where: { orderId: id } });
+    const currentServiceId = existingOrder.deliveryServiceId ?? existingDelivery?.deliveryServiceId ?? null;
+    const nextDeliveryServiceId: string | null | undefined = deliveryServiceId;
+    if (deliveryServiceId) {
+      const service = await prisma.deliveryService.findUnique({ where: { id: deliveryServiceId } });
+      if (!service || !service.isActive) {
+        return NextResponse.json({ error: "Selected delivery service is not available." }, { status: 400 });
+      }
+      // Only enforce change rules when the service actually changes — re-saving
+      // the same service (e.g. together with a weight correction) is always OK.
+      if (deliveryServiceId !== currentServiceId) {
+        const editableForServiceChange =
+          session.role === "ADMIN"
+            ? existingOrder.status !== "COMPLETED" && existingOrder.status !== "CANCELLED"
+            : ["PENDING", "PICKING", "AWAITING_PROCUREMENT"].includes(existingOrder.status);
+        if (!editableForServiceChange) {
+          return NextResponse.json(
+            { error: "Delivery service can no longer be changed for this order." },
+            { status: 400 }
+          );
+        }
+      }
+    }
+    const movingToPacked = status === "PACKED" && currentStatus !== "PACKED";
+    const effectiveServiceId =
+      nextDeliveryServiceId !== undefined ? nextDeliveryServiceId : currentServiceId;
+    if (movingToPacked) {
+      if (!effectiveServiceId) {
+        return NextResponse.json(
+          { error: "Choose a delivery service before marking the order as packed." },
+          { status: 400 }
+        );
+      }
+      if (!hasActualWeight && !hasPackages && !existingDelivery) {
+        return NextResponse.json(
+          { error: "Enter the packed weight (kg) to mark the order as packed." },
+          { status: 400 }
+        );
+      }
+      if (hasActualWeight && (!Number.isFinite(actualWeight!) || actualWeight! <= 0)) {
+        return NextResponse.json({ error: "Enter a valid packed weight greater than 0." }, { status: 400 });
+      }
+      if (body?.packages !== undefined && !hasPackages) {
+        return NextResponse.json({ error: "Invalid packages. Each package needs a weight > 0." }, { status: 400 });
+      }
+    }
+    const editingWeightAfterPack =
+      !movingToPacked && (hasActualWeight || hasPackages) && existingDelivery;
+    if (editingWeightAfterPack) {
+      if (!weightReason) {
+        return NextResponse.json(
+          { error: "A reason is required to change the packed weight." },
+          { status: 400 }
+        );
+      }
+      if (
+        session.role === "EMPLOYEE" &&
+        !["PACKED"].includes(existingOrder.status)
+      ) {
+        return NextResponse.json(
+          { error: "Packed weight can only be corrected while the order is Packed. Ask an admin." },
+          { status: 403 }
+        );
+      }
+      if (["COMPLETED", "CANCELLED"].includes(existingOrder.status) && session.role !== "ADMIN") {
+        return NextResponse.json({ error: "Weight can no longer be changed." }, { status: 403 });
+      }
+    }
+    if ((hasActualWeight || hasPackages) && session.role === "CUSTOMER") {
+      return NextResponse.json({ error: "Customers cannot update weight." }, { status: 403 });
+    }
+
+    if (nextStatus === "CANCELLED" && existingOrder.status !== "CANCELLED") {
+      await restorePickedStock(existingOrder, stockAudit);
+      if (existingOrder.transactionId) {
+        await voidTransaction(
+          existingOrder.transactionId,
+          ReasonCode.VOID.INCORRECT_ENTRY,
+          cancelReason ?? "Order cancelled",
+          session
+        );
+      }
+      await reverseRedemption({
+        customerId: existingOrder.userId,
+        orderId: existingOrder.id,
+      }).catch(() => undefined);
+    }
+
+    if (pickedQuantity !== null && session.role !== "CUSTOMER" && nextStatus !== "CANCELLED") {
+      await setOrderPickedQuantity(existingOrder, pickedQuantity, stockAudit);
+    }
+
+    const updateData: Prisma.OrderUpdateInput = {};
+
+    if (status && status !== currentStatus) {
+      updateData.status = status;
+    }
+    if (status === "CANCELLED" && currentStatus !== "CANCELLED") {
+      updateData.transactionId = null;
+      updateData.reservedQuantity = 0;
+      if (cancelReason !== undefined) {
+        updateData.cancelReason = cancelReason;
+      } else if (typeof body?.cancelReason === "string" && body.cancelReason.trim()) {
+        updateData.cancelReason = body.cancelReason.trim().slice(0, 500);
+      }
+    }
+    if (hasAssignment && session.role === "ADMIN") {
+      updateData.assignedTo =
+        assignedToId === null
+          ? { disconnect: true }
+          : { connect: { id: assignedToId } };
+      updateData.assignedAt = assignedToId ? new Date() : null;
+    }
+    if (internalNotes !== undefined && session.role !== "CUSTOMER") {
+      updateData.internalNotes = internalNotes;
+    }
+    if (courierName !== undefined && session.role !== "CUSTOMER") {
+      updateData.courierName = courierName;
+    }
+    if (trackingNumber !== undefined && session.role !== "CUSTOMER") {
+      updateData.trackingNumber = trackingNumber;
+    }
+    if (nextDeliveryServiceId !== undefined && session.role !== "CUSTOMER") {
+      updateData.deliveryService =
+        nextDeliveryServiceId === null ? { disconnect: true } : { connect: { id: nextDeliveryServiceId } };
+    }
+
+    let updatedOrder = await prisma.order.update({
+      where: { id },
+      data: updateData,
+    });
+
+    // Record packed weight + delivery charge (mandatory at PACKED).
+    let packedDelivery: Awaited<ReturnType<typeof recordPackingDelivery>> | null = null;
+    const needsDeliveryRecord =
+      (movingToPacked && (hasActualWeight || hasPackages || existingDelivery)) ||
+      Boolean(editingWeightAfterPack);
+    if (needsDeliveryRecord) {
+      const serviceId = effectiveServiceId!;
+      const weightInput = hasActualWeight || hasPackages
+        ? { actualWeight: hasActualWeight ? actualWeight : null, packages: hasPackages ? packages : null }
+        : {
+            actualWeight: existingDelivery ? Number(existingDelivery.actualWeight) : null,
+            packages: (existingDelivery?.packages as unknown as { no?: number; weight: number }[] | null) ?? null,
+          };
+      try {
+        packedDelivery = await recordPackingDelivery({
+          orderId: id,
+          deliveryServiceId: serviceId,
+          actualWeight: weightInput.actualWeight,
+          packages: weightInput.packages,
+          enteredBy: session.userId,
+          reason: weightReason ?? null,
+        });
+      } catch (e) {
+        return NextResponse.json(
+          { error: e instanceof Error ? e.message : "Could not calculate delivery charge." },
+          { status: 400 }
+        );
+      }
+      await logOrderActivity(prisma, {
+        orderId: id,
+        actorUserId: session.userId,
+        action: existingDelivery ? "WEIGHT_CHANGED" : "WEIGHT_ENTERED",
+        message: existingDelivery
+          ? `Packed weight corrected to ${packedDelivery.pricing.actualWeight} kg (chargeable ${packedDelivery.pricing.chargeableWeight} kg, delivery ₹${packedDelivery.pricing.customerCharge}).`
+          : `Packed weight ${packedDelivery.pricing.actualWeight} kg entered (chargeable ${packedDelivery.pricing.chargeableWeight} kg, delivery ₹${packedDelivery.pricing.customerCharge}).`,
+        metadata: {
+          actualWeight: packedDelivery.pricing.actualWeight,
+          chargeableWeight: packedDelivery.pricing.chargeableWeight,
+          customerCharge: packedDelivery.pricing.customerCharge,
+          internalCost: packedDelivery.pricing.internalCost,
+          margin: packedDelivery.pricing.margin,
+          reason: weightReason ?? null,
+        },
+      });
+    }
+
+    const shouldFulfillPick =
+      pickedQuantity === null &&
+      (nextStatus === "PACKED" || nextStatus === "COMPLETED") &&
+      existingOrder.reservedQuantity > existingOrder.pickedQuantity;
+
+    if (shouldFulfillPick) {
+      updatedOrder = await fulfillOrderPick(updatedOrder, stockAudit);
+    }
+
+    if (
+      status &&
+      status !== currentStatus &&
+      (status === "DISPATCHED" || status === "COMPLETED") &&
+      existingOrder.lineType === "RETAIL"
+    ) {
+      await markActiveVersionFinalFulfilled(id);
+    }
+
+    if (status && status !== currentStatus) {
+      await prisma.invoice.updateMany({
+        where: { orderId: existingOrder.id },
+        data: {
+          status: status === "COMPLETED" ? InvoiceStatus.PAID : InvoiceStatus.ISSUED,
+        },
+      });
+    }
+
+    // Loyalty: activate any pending points once the order is completed.
+    if (status === "COMPLETED" && status !== currentStatus) {
+      await activateOrderLoyalty(id).catch(() => undefined);
+    }
+
+    const activityMessages: string[] = [];
+    if (status && status !== currentStatus) {
+      activityMessages.push(
+        `Status changed from ${formatOrderStatusLabel(currentStatus)} to ${formatOrderStatusLabel(status)}.`
+      );
+      await logOrderActivity(prisma, {
+        orderId: id,
+        actorUserId: session.userId,
+        action: status === "CANCELLED" ? "CANCELLED" : "STATUS_CHANGED",
+        message: activityMessages[activityMessages.length - 1]!,
+        metadata: {
+          from: currentStatus,
+          to: status,
+          force,
+          cancelReason: updateData.cancelReason ?? null,
+        },
+      });
+      const auditCtx = buildAuditRequestContext(req);
+      await recordAuditEvent(prisma, {
+        action:
+          status === "CANCELLED"
+            ? AuditAction.ORDER_CANCELLED
+            : AuditAction.ORDER_STATUS_CHANGED,
+        module: AuditModule.ORDER,
+        entityType: "Order",
+        entityId: id,
+        actor: actorFromSession(session),
+        request: auditCtx,
+        reasonCode:
+          status === "CANCELLED" ? ReasonCode.ORDER_CANCEL.OTHER : undefined,
+        reasonText: status === "CANCELLED" ? (cancelReason ?? null) : null,
+        changes: singleChange("status", currentStatus, status),
+        context: { orderNumber: existingOrder.orderNumber },
+        activityMessage: activityMessages[activityMessages.length - 1]!,
+      });
+    }
+    if (hasAssignment && session.role === "ADMIN") {
+      const msg = assignedToId
+        ? `Order reassigned to employee ${assignedToId}.`
+        : "Order unassigned.";
+      await logOrderActivity(prisma, {
+        orderId: id,
+        actorUserId: session.userId,
+        action: "REASSIGNED",
+        message: msg,
+        metadata: {
+          from: existingOrder.assignedToId,
+          to: assignedToId,
+        },
+      });
+    }
+    if (pickedQuantity !== null && session.role !== "CUSTOMER") {
+      await logOrderActivity(prisma, {
+        orderId: id,
+        actorUserId: session.userId,
+        action: "PICKED_QUANTITY",
+        message: `Picked quantity set to ${pickedQuantity}.`,
+        metadata: { pickedQuantity },
+      });
+    }
+    if (internalNotes !== undefined && session.role !== "CUSTOMER") {
+      await logOrderActivity(prisma, {
+        orderId: id,
+        actorUserId: session.userId,
+        action: "INTERNAL_NOTES",
+        message: "Internal notes updated.",
+      });
+    }
+    if (
+      (courierName !== undefined || trackingNumber !== undefined) &&
+      session.role !== "CUSTOMER"
+    ) {
+      await logOrderActivity(prisma, {
+        orderId: id,
+        actorUserId: session.userId,
+        action: "SHIPPING_UPDATED",
+        message: "Shipping / tracking details updated.",
+        metadata: {
+          courierName: courierName ?? updatedOrder.courierName,
+          trackingNumber: trackingNumber ?? updatedOrder.trackingNumber,
+        },
+      });
+    }
+
+    const shouldCreateNotification =
+      Boolean(status) &&
+      existingOrder.status !== status &&
+      (session.role === "ADMIN" || session.role === "EMPLOYEE");
+
+    if (shouldCreateNotification && status) {
+      const packedNote =
+        packedDelivery && status === "PACKED"
+          ? ` Packed ${(packedDelivery.pricing.actualWeight)} kg, delivery ₹${packedDelivery.pricing.customerCharge}.`
+          : "";
+      await prisma.notification.create({
+        data: {
+          userId: existingOrder.userId,
+          orderId: existingOrder.id,
+          type: NotificationType.ORDER_STATUS_UPDATED,
+          title: "Order Update",
+          message: `Your order #${existingOrder.id.slice(-8).toUpperCase()} is now ${formatOrderStatusLabel(status)}.${packedNote}`,
+        },
+      });
+    }
+
+    const full = await prisma.order.findUnique({
+      where: { id },
+      include: orderDetailInclude,
+    });
+    if (!full) return NextResponse.json(updatedOrder);
+
+    return NextResponse.json(await serializeOrderDetail(full, session.role));
+  } catch (error) {
+    console.error("PUT /api/orders/[id] error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// PATCH /api/orders/:id
+// Safe edit while PENDING or AWAITING_PROCUREMENT (admin/employee)
+// ─────────────────────────────────────────────────────────────
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const session = getSession(req);
+  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
+
+  try {
+    const existingOrder = await prisma.order.findUnique({ where: { id } });
+    if (!existingOrder) return NextResponse.json({ error: "Order not found." }, { status: 404 });
+
+    if (session.role === "EMPLOYEE") {
+      if (existingOrder.assignedToId && existingOrder.assignedToId !== session.userId) {
+        return NextResponse.json(
+          { error: "Forbidden. Not your assigned order." },
+          { status: 403 }
+        );
+      }
+    }
+
+    if (!isEditableOrderStatus(existingOrder.status)) {
+      return NextResponse.json(
+        {
+          error:
+            "Orders can only be edited while Pending or Awaiting Procurement. Use a return after fulfillment.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const body = await req.json();
+    const data: Prisma.OrderUpdateInput = {};
+
+    if (body?.quantity !== undefined) {
+      const quantity = Number(body.quantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return NextResponse.json({ error: "Invalid quantity." }, { status: 400 });
+      }
+      data.quantity = quantity;
+      if (body?.unitPrice === undefined) {
+        data.totalAmount = Number(existingOrder.unitPrice) * quantity;
+      }
+    }
+
+    if (body?.unitPrice !== undefined) {
+      const unitPrice = Number(body.unitPrice);
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        return NextResponse.json({ error: "Invalid unit price." }, { status: 400 });
+      }
+      data.unitPrice = unitPrice;
+      const qty =
+        body?.quantity !== undefined
+          ? Number(body.quantity)
+          : Number(existingOrder.quantity);
+      data.totalAmount = unitPrice * qty;
+    }
+
+    if (body?.sph !== undefined || body?.cyl !== undefined || body?.axis !== undefined || body?.add !== undefined || body?.eye !== undefined) {
+      if (existingOrder.lineType === "RETAIL") {
+        return NextResponse.json(
+          {
+            error:
+              "Retail order power cannot be edited directly. Use Smart Alternate Power (mark not available → customer accepts an alternate).",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (body?.sph !== undefined) {
+      data.sph = body.sph === null || body.sph === "" ? null : Number(body.sph);
+    }
+    if (body?.cyl !== undefined) {
+      data.cyl = body.cyl === null || body.cyl === "" ? null : Number(body.cyl);
+    }
+    if (body?.axis !== undefined) {
+      data.axis =
+        body.axis === null || body.axis === ""
+          ? null
+          : Math.round(Number(body.axis));
+    }
+    if (body?.add !== undefined) {
+      data.add = body.add === null || body.add === "" ? null : Number(body.add);
+    }
+    if (body?.eye !== undefined) {
+      data.eye =
+        typeof body.eye === "string" && body.eye.trim()
+          ? body.eye.trim().toUpperCase()
+          : null;
+    }
+    if (body?.notes !== undefined) {
+      const notesResult = validateOrderNotes(body.notes);
+      if (!notesResult.ok) {
+        return NextResponse.json({ error: notesResult.error }, { status: 400 });
+      }
+      data.notes = notesResult.notes;
+    }
+    if (body?.deliveryServiceId !== undefined) {
+      const raw = body.deliveryServiceId;
+      if (raw === null || raw === "") {
+        data.deliveryService = { disconnect: true };
+      } else if (typeof raw === "string" && raw.trim()) {
+        const service = await prisma.deliveryService.findUnique({ where: { id: raw.trim() } });
+        if (!service || !service.isActive) {
+          return NextResponse.json({ error: "Selected delivery service is not available." }, { status: 400 });
+        }
+        data.deliveryService = { connect: { id: service.id } };
+      } else {
+        return NextResponse.json({ error: "Invalid delivery service." }, { status: 400 });
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ error: "No editable fields provided." }, { status: 400 });
+    }
+
+    await prisma.order.update({ where: { id }, data });
+
+    const auditCtx = buildAuditRequestContext(req);
+    await recordAuditEvent(prisma, {
+      action: AuditAction.ORDER_UPDATED,
+      module: AuditModule.ORDER,
+      entityType: "Order",
+      entityId: id,
+      actor: actorFromSession(session),
+      request: auditCtx,
+      context: { orderNumber: (await prisma.order.findUnique({ where: { id }, select: { orderNumber: true } }))?.orderNumber },
+      activityMessage: "Order details edited before fulfillment.",
+    });
+
+    await logOrderActivity(prisma, {
+      orderId: id,
+      actorUserId: session.userId,
+      action: "ORDER_EDITED",
+      message: "Order details edited before fulfillment.",
+      metadata: data as Prisma.InputJsonValue,
+    });
+
+    if (data.totalAmount !== undefined) {
+      await prisma.invoice.updateMany({
+        where: { orderId: id },
+        data: { amount: data.totalAmount as number },
+      });
+    }
+
+    const full = await prisma.order.findUnique({
+      where: { id },
+      include: orderDetailInclude,
+    });
+    if (!full) return NextResponse.json({ error: "Order not found." }, { status: 404 });
+    return NextResponse.json(await serializeOrderDetail(full, session.role));
+  } catch (error) {
+    console.error("PATCH /api/orders/[id] error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+
+// DELETE /api/orders/:id — ADMIN archive (no hard delete)
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const session = getSession(req);
+  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  if (session.role !== "ADMIN") {
+    return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
+  }
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const archiveReason = String(body.reason ?? body.archiveReason ?? "").trim() || "Archived by admin";
+
+    const existingOrder = await prisma.order.findUnique({ where: { id } });
+    if (!existingOrder) return NextResponse.json({ error: "Order not found." }, { status: 404 });
+    if (existingOrder.archivedAt) {
+      return NextResponse.json({ error: "Order is already archived." }, { status: 409 });
+    }
+
+    if (existingOrder.status !== OrderStatus.CANCELLED) {
+      await restorePickedStock(existingOrder, {
+        actorUserId: session.userId,
+        orderId: id,
+        request: buildAuditRequestContext(req),
+      });
+      if (existingOrder.transactionId) {
+        await voidTransaction(
+          existingOrder.transactionId,
+          ReasonCode.VOID.INCORRECT_ENTRY,
+          archiveReason,
+          session
+        );
+      }
+    }
+
+    await prisma.order.update({
+      where: { id },
+      data: {
+        archivedAt: new Date(),
+        archiveReason,
+        status: OrderStatus.CANCELLED,
+      },
+    });
+
+    await logOrderActivity(prisma, {
+      orderId: id,
+      actorUserId: session.userId,
+      action: "ARCHIVED",
+      message: "Order archived by admin (not hard-deleted).",
+    });
+
+    const auditCtx = buildAuditRequestContext(req);
+    await recordAuditEvent(prisma, {
+      action: AuditAction.ORDER_ARCHIVED,
+      module: AuditModule.ORDER,
+      entityType: "Order",
+      entityId: id,
+      actor: actorFromSession(session),
+      request: auditCtx,
+      reasonCode: ReasonCode.VOID.OTHER,
+      reasonText: archiveReason,
+      context: { orderNumber: existingOrder.orderNumber },
+      activityMessage: `Order archived — ${archiveReason}`,
+    });
+
+    return NextResponse.json({ message: "Order archived successfully." });
+  } catch (error) {
+    console.error("DELETE /api/orders/[id] error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}

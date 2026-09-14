@@ -1,0 +1,448 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getSession } from "../../lib/session-auth";
+import { orderTotalFromPairPrice } from "../../lib/lens-pricing";
+import { prisma } from "../../lib/prisma";
+import { requireStaffPermission } from "../../lib/staff-access";
+import { validateOrderNotes } from "../../lib/order-notes";
+import { consumeCartReservation, releaseExpiredReservations } from "../../lib/cart-reservations";
+import { computeOrderReservedQuantity } from "../../lib/order-inventory";
+import { resolveOrderPrescription } from "../../lib/order-prescription";
+import { resolveLensForOrder } from "../../lib/resolve-lens-stock";
+import { generateUniqueOrderNumber } from "../../lib/order-numbers";
+import { notifyStaffOfNewOrder } from "../../lib/staff-notifications";
+import {
+  assignmentCreateFields,
+  resolveOrderAssigneeId,
+} from "../../lib/assign-order-to-employee";
+import { getSignedOrderImageUrl } from "../../lib/supabase-storage";
+import { isCustomerApproved } from "../../lib/user-public";
+import {
+  serializeOrderPrescription,
+  serializeWholesaleLineItem,
+} from "../../lib/serialize-order";
+import { sanitizeOrderForRole } from "../../lib/order-activity";
+import { serializeDeliveryForRole } from "../../lib/delivery-pack";
+import { serializeDeliveryService } from "../../lib/delivery-service";
+import { createOriginalPowerVersion } from "../../lib/alternate-power-workflow";
+import { createInvoiceFromOrder } from "../../lib/finance/create-invoice-from-order";
+import {
+  applyOrderRedemption,
+  resolveCheckoutRedemption,
+} from "../../lib/loyalty/redeem";
+import {
+  CartLineType,
+  LensType,
+  TransactionType,
+  TransactionStatus,
+  LedgerEntryType,
+  OrderStatus,
+} from "@prisma/client";
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/orders
+// CUSTOMER: own orders
+// EMPLOYEE: only orders assigned to them
+// ADMIN: all orders (optional ?employeeId=)
+// ─────────────────────────────────────────────────────────────
+export async function GET(req: NextRequest) {
+  const session = getSession(req);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  if (session.role === "EMPLOYEE") {
+    const gate = await requireStaffPermission(session, [
+      "orders.view",
+      "orders.fulfill",
+      "orders.rx",
+      "orders.dispatch",
+      "orders.create_on_behalf",
+    ]);
+    if ("error" in gate) return gate.error;
+  }
+
+  try {
+    const { searchParams } = new URL(req.url);
+    const employeeId = searchParams.get("employeeId")?.trim() || null;
+    const batchId = searchParams.get("batchId")?.trim() || null;
+    const customerId = searchParams.get("userId")?.trim() || null;
+
+    const where =
+      session.role === "CUSTOMER"
+        ? { userId: session.userId }
+        : session.role === "EMPLOYEE"
+          ? { assignedToId: session.userId }
+          : {
+              ...(employeeId ? { assignedToId: employeeId } : {}),
+              ...(customerId ? { userId: customerId } : {}),
+              ...(batchId ? { checkoutBatchId: batchId } : {}),
+            };
+
+    const orders = await prisma.order.findMany({
+      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            businessName: true,
+          },
+        },
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+        singleVisionLens: true,
+        kryptokLens: true,
+        progressiveLens: true,
+        wholesaleLineItems: {
+          orderBy: { createdAt: "asc" },
+        },
+        deliveryService: true,
+        delivery: true,
+        alternateSuggestions: {
+          where: { status: "PENDING" },
+          select: {
+            id: true,
+            status: true,
+            availability: true,
+            sph: true,
+            cyl: true,
+          },
+        },
+        powerVersions: {
+          orderBy: { versionNumber: "asc" },
+          select: {
+            id: true,
+            versionNumber: true,
+            status: true,
+            source: true,
+            sph: true,
+            cyl: true,
+            isFinalFulfilled: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const serialized = [];
+    for (const order of orders) {
+      const o = order as unknown as Record<string, unknown> & {
+        deliveryService?: Parameters<typeof serializeDeliveryService>[0] | null;
+        delivery?: Record<string, unknown> | null;
+      };
+      serialized.push(
+        sanitizeOrderForRole(
+          {
+            ...order,
+            ...serializeOrderPrescription(order),
+            deliveryService: o.deliveryService
+              ? serializeDeliveryService(o.deliveryService)
+              : null,
+            delivery: serializeDeliveryForRole(o.delivery ?? null, session.role),
+            wholesaleLineItems: order.wholesaleLineItems.map(serializeWholesaleLineItem),
+            alternateSuggestions: (order.alternateSuggestions ?? []).map((s) => ({
+              ...s,
+              sph: Number(s.sph),
+              cyl: s.cyl !== null && s.cyl !== undefined ? Number(s.cyl) : null,
+            })),
+            powerVersions: (order.powerVersions ?? []).map((v) => ({
+              ...v,
+              sph: v.sph !== null && v.sph !== undefined ? Number(v.sph) : null,
+              cyl: v.cyl !== null && v.cyl !== undefined ? Number(v.cyl) : null,
+            })),
+            orderImageUrl: order.orderImageUrl
+              ? await getSignedOrderImageUrl(order.orderImageUrl)
+              : null,
+            createdAt: order.createdAt.toISOString(),
+            updatedAt: order.updatedAt.toISOString(),
+            assignedAt: order.assignedAt?.toISOString() ?? null,
+          },
+          session.role
+        )
+      );
+    }
+
+    return NextResponse.json(serialized);
+  } catch (error) {
+    console.error("GET /api/orders error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/orders
+// Access: ADMIN | EMPLOYEE
+// Create an order, decrement lens stock, add income transaction
+// Body: { userId?, user?: { name, email, password? }, lensType, quantity, lensId?, sph?, cyl?, axis?, add?, eye?, notes? }
+// ─────────────────────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  const session = getSession(req);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  if (session.role === "EMPLOYEE") {
+    const gate = await requireStaffPermission(session, "orders.create_on_behalf");
+    if ("error" in gate) return gate.error;
+  }
+
+  try {
+    if (session.role === "CUSTOMER") {
+      const customer = await prisma.user.findUnique({ where: { id: session.userId } });
+      if (!customer || !isCustomerApproved(customer)) {
+        return NextResponse.json(
+          { error: "Your account is pending admin approval. You cannot place orders yet." },
+          { status: 403 }
+        );
+      }
+    }
+
+    await releaseExpiredReservations();
+
+    const body = await req.json();
+    const { userId, user, lensType, quantity, lensId, cartLineKey, notes: rawNotes, checkoutBatchId, redeemPoints, deliveryServiceId: rawDeliveryServiceId } =
+      body;
+
+    const notesResult = validateOrderNotes(rawNotes);
+    if (!notesResult.ok) {
+      return NextResponse.json({ error: notesResult.error }, { status: 400 });
+    }
+    const orderNotes = notesResult.notes;
+
+    if (!lensType || !quantity || quantity <= 0) {
+      return NextResponse.json(
+        { error: "lensType and a valid quantity are required." },
+        { status: 400 }
+      );
+    }
+
+    if (session.role !== "CUSTOMER" && !userId && (!user || !user.name || !user.email)) {
+      return NextResponse.json(
+        { error: "Either userId or user details (name, email) are required when not acting as a customer." },
+        { status: 400 }
+      );
+    }
+
+    if (!Object.values(LensType).includes(lensType)) {
+      return NextResponse.json({ error: "Invalid lensType." }, { status: 400 });
+    }
+
+    if (!lensId) {
+      return NextResponse.json(
+        { error: "lensId is required. Please update the app and add the item to cart again." },
+        { status: 400 }
+      );
+    }
+
+    const orderUserId = session.role === "CUSTOMER" ? session.userId : userId;
+
+    const targetCustomerId =
+      session.role === "CUSTOMER"
+        ? session.userId
+        : typeof orderUserId === "string" && orderUserId.trim()
+          ? orderUserId.trim()
+          : null;
+
+    let reservation = null;
+    if (targetCustomerId && typeof cartLineKey === "string" && cartLineKey.trim()) {
+      reservation = await prisma.cartReservation.findUnique({
+        where: {
+          userId_cartLineKey: {
+            userId: targetCustomerId,
+            cartLineKey: cartLineKey.trim(),
+          },
+        },
+      });
+    }
+
+    const lens = await resolveLensForOrder(lensType as LensType, Number(quantity), lensId);
+
+    if (!lens) {
+      return NextResponse.json({ error: "Lens not found. Remove the item from cart and add it again from Shop." }, { status: 404 });
+    }
+
+    const resolvedLensId = reservation?.lensId ?? lens.id;
+    const orderQty = Number(quantity);
+    const followsCustomerProcurementFlow = session.role === "CUSTOMER" || Boolean(targetCustomerId);
+    const reservedQty = await computeOrderReservedQuantity(
+      lensType as LensType,
+      resolvedLensId,
+      lens.quantity,
+      orderQty
+    );
+    const needsProcurement = followsCustomerProcurementFlow && reservedQty < orderQty;
+
+    if (!needsProcurement && reservedQty < orderQty && !followsCustomerProcurementFlow) {
+      const productHint =
+        lensType === LensType.SINGLE_VISION && "brand" in lens
+          ? ` (${lens.brand} · ${lens.coating}, SPH ${lens.sph}, CYL ${lens.cyl ?? "—"})`
+          : "";
+      return NextResponse.json(
+        {
+          error: `Insufficient stock${productHint}. Available: ${reservedQty}. Check inventory for duplicate rows with the same prescription.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const unitPrice = lens.price;
+    const totalAmount = orderTotalFromPairPrice(Number(unitPrice), orderQty);
+    const prescription = resolveOrderPrescription(reservation, body, lens);
+    // Delivery service chosen at order time; charge calculated after packing.
+    let deliveryServiceId: string | null = null;
+    if (typeof rawDeliveryServiceId === "string" && rawDeliveryServiceId.trim()) {
+      const service = await prisma.deliveryService.findUnique({
+        where: { id: rawDeliveryServiceId.trim() },
+      });
+      if (!service || !service.isActive) {
+        return NextResponse.json({ error: "Selected delivery service is not available." }, { status: 400 });
+      }
+      deliveryServiceId = service.id;
+    }
+    const orderReference = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const orderNumber = await generateUniqueOrderNumber();
+    const normalizedBatchId =
+      typeof checkoutBatchId === "string" && checkoutBatchId.trim()
+        ? checkoutBatchId.trim().slice(0, 64)
+        : null;
+
+    // Resolve User (Customer)
+    let resolvedUserId = orderUserId;
+    
+    if (session.role === "CUSTOMER") {
+      resolvedUserId = session.userId;
+    } else if (!resolvedUserId) {
+      // Check if user already exists by email first
+      const existingUser = await prisma.user.findUnique({ where: { email: user.email } });
+      if (existingUser) {
+        resolvedUserId = existingUser.id;
+      } else {
+        const newUser = await prisma.user.create({
+          data: {
+            name: user.name,
+            email: user.email,
+            password: user.password || "defaultPassword123!", // Should be hashed in a real scenario
+            role: "CUSTOMER",
+          },
+        });
+        resolvedUserId = newUser.id;
+      }
+    }
+
+    // Perform sequential operations to avoid Supabase connection pooler limits (P2028)
+    
+    // 1. Create Income Transaction
+    const newTransaction = await prisma.transaction.create({
+      data: {
+        reference: orderReference,
+        amount: totalAmount,
+        currency: "INR",
+        type: TransactionType.CREDIT,
+        status: TransactionStatus.COMPLETED,
+        description: `Sale for order: ${orderReference}`,
+        userId: session.userId,
+      },
+    });
+
+    // 2. Create Ledger Entry for the Income
+    await prisma.ledgerEntry.create({
+      data: {
+        transactionId: newTransaction.id,
+        entryType: LedgerEntryType.CREDIT,
+        amount: totalAmount,
+        description: `Sale for order: ${orderReference}`,
+      },
+    });
+
+    // 3. Create Order
+    const assignedToId = await resolveOrderAssigneeId({
+      checkoutBatchId: normalizedBatchId,
+    });
+    const newOrder = await prisma.order.create({
+      data: {
+        orderNumber,
+        checkoutBatchId: normalizedBatchId,
+        userId: resolvedUserId,
+        ...assignmentCreateFields(assignedToId),
+        lineType: CartLineType.RETAIL,
+        lensType: lensType as LensType,
+        singleVisionLensId: lensType === LensType.SINGLE_VISION ? resolvedLensId : null,
+        kryptokLensId: lensType === LensType.KRYPTOK ? resolvedLensId : null,
+        progressiveLensId: lensType === LensType.PROGRESSIVE ? resolvedLensId : null,
+        quantity: orderQty,
+        reservedQuantity: reservedQty,
+        pickedQuantity: 0,
+        unitPrice: Number(unitPrice),
+        totalAmount: totalAmount,
+        sph: prescription.sph,
+        cyl: prescription.cyl,
+        axis: prescription.axis,
+        add: prescription.add,
+        eye: prescription.eye,
+        status: needsProcurement ? OrderStatus.AWAITING_PROCUREMENT : OrderStatus.PENDING,
+        notes: orderNotes,
+        transactionId: newTransaction.id,
+        deliveryServiceId,
+      },
+    });
+
+    await createOriginalPowerVersion(prisma, newOrder, session.userId);
+
+    const redemptionCustomerId =
+      session.role === "CUSTOMER" ? session.userId : resolvedUserId;
+    const redemption = await resolveCheckoutRedemption({
+      customerId: redemptionCustomerId,
+      redeemPoints: session.role === "CUSTOMER" ? redeemPoints : null,
+      orderGross: totalAmount,
+    });
+    if (redemption.error) {
+      return NextResponse.json({ error: redemption.error }, { status: 400 });
+    }
+
+    const { invoiceId } = await createInvoiceFromOrder({
+      orderId: newOrder.id,
+      markPaid: newOrder.status === OrderStatus.COMPLETED,
+      loyaltyDiscount: redemption.loyaltyDiscount,
+    });
+    const newInvoice = { id: invoiceId };
+
+    await applyOrderRedemption({
+      customerId: redemptionCustomerId,
+      orderId: newOrder.id,
+      invoiceId,
+      loyaltyDiscount: redemption.loyaltyDiscount,
+    });
+
+    // 5. Stock is reserved on the order (reservedQuantity) and reduced when staff marks packed.
+
+    if (targetCustomerId && typeof cartLineKey === "string" && cartLineKey.trim()) {
+      await consumeCartReservation(targetCustomerId, cartLineKey.trim());
+    }
+
+    if (targetCustomerId) {
+      const customer = await prisma.user.findUnique({
+        where: { id: resolvedUserId },
+        select: { name: true, email: true },
+      });
+      const customerLabel = customer?.name?.trim() || customer?.email || "A customer";
+      await notifyStaffOfNewOrder(newOrder.id, customerLabel, assignedToId);
+    }
+
+    return NextResponse.json({ order: newOrder, transaction: newTransaction, invoice: newInvoice }, { status: 201 });
+  } catch (error) {
+    console.error("POST /api/orders error:", error);
+    const message = error instanceof Error ? error.message : "Internal Server Error";
+    if (message.includes("loyalty") || message.includes("X Points") || message.includes("redeem")) {
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}

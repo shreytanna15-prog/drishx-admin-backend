@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "17309512-8144-494f-a5f0-3892234a9d92"
+      }
+    },
+    "android": {
+      "package": "com.shrey29.drishx_admin_and_backend"
+    }
+  }
+}

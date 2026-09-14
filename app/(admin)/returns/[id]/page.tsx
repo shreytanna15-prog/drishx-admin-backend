@@ -1,0 +1,440 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+
+import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
+import {
+  formatReturnDate,
+  formatReturnPowerLine,
+  formatReturnReason,
+  formatReturnStatus,
+  returnStatusBadgeClass,
+  type AdminReturnRequest,
+} from "@/app/lib/admin-returns";
+import { AdminPage } from "@/components/admin-shell";
+import { DetailSkeleton } from "@/components/admin-skeletons";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { EntityTimeline } from "@/components/audit/entity-timeline";
+
+const STOCK_OPTIONS = [
+  { value: "RETURN_TO_SALEABLE", label: "Return to saleable stock" },
+  { value: "DAMAGED_STOCK", label: "Damaged stock" },
+  { value: "SEND_TO_IMPORTER", label: "Send to importer" },
+  { value: "SCRAP", label: "Scrap" },
+] as const;
+
+/** Dark-theme friendly native select (options need solid bg + readable text). */
+const selectClass =
+  "h-10 w-full rounded-lg border border-(--brand-card-border) bg-(--brand-input-bg,#0b0f14) px-3 text-sm text-(--brand-text) [color-scheme:dark]";
+
+const optionStyle = {
+  backgroundColor: "#0f1620",
+  color: "#eaf0fa",
+} as const;
+
+const DECIDABLE_STATUSES = new Set([
+  "SUBMITTED",
+  "MORE_INFO_REQUIRED",
+  "ESCALATED_TO_ADMIN",
+]);
+
+type EmployeeOption = {
+  id: string;
+  name: string | null;
+  email: string;
+  isActive?: boolean;
+};
+
+export default function ReturnDetailPage() {
+  const params = useParams<{ id: string }>();
+  const [request, setRequest] = useState<AdminReturnRequest | null>(null);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [approvedAmount, setApprovedAmount] = useState("");
+  const [stockDisposition, setStockDisposition] = useState("RETURN_TO_SALEABLE");
+  const [assignedEmployeeId, setAssignedEmployeeId] = useState("");
+  const [reassignEmployeeId, setReassignEmployeeId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const canDecide = request ? DECIDABLE_STATUSES.has(request.status) : false;
+  const canReassign = request
+    ? (request.status === "APPROVED_CREDIT" ||
+        request.status === "AWAITING_MATERIAL" ||
+        request.status === "APPROVED_REPLACEMENT" ||
+        (request.status === "MORE_INFO_REQUIRED" && Boolean(request.assignedEmployee)))
+    : false;
+
+  const activeEmployees = useMemo(
+    () => employees.filter((e) => e.isActive !== false),
+    [employees]
+  );
+
+  useEffect(() => {
+    async function load() {
+      const id = params?.id;
+      if (!id) return;
+      setLoading(true);
+      setError("");
+      try {
+        const [data, employeesRes] = await Promise.all([
+          adminFetch<AdminReturnRequest>(`/api/returns/${id}`),
+          adminFetch<{ employees: EmployeeOption[] }>("/api/users/employees").catch(
+            () => ({ employees: [] as EmployeeOption[] })
+          ),
+        ]);
+        setRequest(data);
+        setEmployees(employeesRes.employees ?? []);
+        setApprovedAmount(data.approvedAmount ? String(data.approvedAmount) : "");
+        setAssignedEmployeeId(data.assignedEmployee?.id ?? "");
+        setReassignEmployeeId(data.assignedEmployee?.id ?? "");
+      } catch (err) {
+        setError(
+          err instanceof AdminApiError ? err.message : "Failed to load return request."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void load();
+  }, [params]);
+
+  async function submitDecision(decision: "CREDIT" | "REPLACEMENT" | "REJECT") {
+    if (!request) return;
+    if ((decision === "CREDIT" || decision === "REPLACEMENT") && !assignedEmployeeId) {
+      setError("Select an employee to assign before approving.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await adminFetch(`/api/returns/${request.id}/decision`, {
+        method: "POST",
+        body: JSON.stringify({
+          decision,
+          remarks,
+          approvedAmount: approvedAmount ? Number(approvedAmount) : undefined,
+          stockDisposition,
+          ...(decision !== "REJECT" ? { assignedEmployeeId } : {}),
+        }),
+      });
+      const refreshed = await adminFetch<AdminReturnRequest>(`/api/returns/${request.id}`);
+      setRequest(refreshed);
+      setReassignEmployeeId(refreshed.assignedEmployee?.id ?? "");
+      setRemarks("");
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError ? err.message : "Failed to submit decision."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function reassignEmployee() {
+    if (!request || !reassignEmployeeId) {
+      setError("Select an employee to assign.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await adminFetch(`/api/returns/${request.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: "assign",
+          assignedEmployeeId: reassignEmployeeId,
+          remarks: remarks || undefined,
+        }),
+      });
+      const refreshed = await adminFetch<AdminReturnRequest>(`/api/returns/${request.id}`);
+      setRequest(refreshed);
+      setReassignEmployeeId(refreshed.assignedEmployee?.id ?? "");
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError ? err.message : "Failed to reassign employee."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <AdminPage title="Return Request" subtitle={request?.requestNumber ?? "Details"}>
+      {error ? (
+        <div className="mb-4 rounded-2xl border border-rose-400/35 bg-rose-500/10 p-4 text-sm text-rose-100">
+          {error}
+        </div>
+      ) : null}
+
+      {loading || !request ? (
+        <DetailSkeleton cards={3} />
+      ) : (
+        <div className="space-y-5">
+          <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h1 className="text-2xl font-extrabold tracking-tight text-(--brand-text)">
+                  {request.requestNumber}
+                </h1>
+                <p className="mt-1 text-sm text-(--brand-text-muted)">
+                  {request.requestType} · created {formatReturnDate(request.createdAt)}
+                </p>
+              </div>
+              <Badge variant="outline" className={returnStatusBadgeClass(request.status)}>
+                {formatReturnStatus(request.status)}
+              </Badge>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted)">
+                  Customer
+                </p>
+                <p className="mt-2 font-semibold text-(--brand-text)">
+                  {request.customer.businessName || request.customer.name || request.customer.email}
+                </p>
+                <p className="text-sm text-(--brand-text-muted)">{request.customer.email}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted)">
+                  Assigned employee
+                </p>
+                <p className="mt-2 font-semibold text-(--brand-text)">
+                  {request.assignedEmployee?.name ||
+                    request.assignedEmployee?.email ||
+                    "Unassigned (admin review)"}
+                </p>
+              </div>
+            </div>
+            {request.customerRemarks ? (
+              <p className="mt-4 text-sm text-(--brand-text)">
+                <span className="font-semibold text-(--brand-text-muted)">Customer remarks: </span>
+                {request.customerRemarks}
+              </p>
+            ) : null}
+          </section>
+
+          <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+            <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+              Returned items
+            </h2>
+            <div className="mt-4 space-y-3">
+              {request.items.map((item) => (
+                <div key={item.id} className="rounded-xl border border-(--brand-card-border) p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-(--brand-text)">{item.lensLabel}</p>
+                    <p className="text-sm text-(--brand-text-muted)">Qty {item.quantity}</p>
+                  </div>
+                  <p className="mt-1 text-sm text-(--brand-text-muted)">
+                    {formatReturnReason(item.reason)}
+                    {item.eye ? ` · ${item.eye}` : ""}
+                  </p>
+                  <p className="mt-2 text-xs text-(--brand-text-muted)">
+                    Original:{" "}
+                    {formatReturnPowerLine({
+                      sph: item.originalSph,
+                      cyl: item.originalCyl,
+                      add: item.originalAdd,
+                      axis: item.originalAxis,
+                    })}
+                  </p>
+                  {item.requestedSph != null || item.requestedCyl != null ? (
+                    <p className="mt-1 text-xs font-semibold text-(--brand-text)">
+                      Requested:{" "}
+                      {formatReturnPowerLine({
+                        sph: item.requestedSph,
+                        cyl: item.requestedCyl,
+                        add: item.requestedAdd,
+                        axis: item.requestedAxis,
+                      })}
+                    </p>
+                  ) : null}
+                  {item.itemRemarks ? (
+                    <p className="mt-2 text-sm text-(--brand-text)">{item.itemRemarks}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {request.images.length > 0 ? (
+            <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+              <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+                Evidence photos
+              </h2>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {request.images.map((image) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={image.id}
+                    src={image.imageUrl}
+                    alt="Return evidence"
+                    className="aspect-square w-full rounded-xl border border-(--brand-card-border) object-contain p-2"
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {canDecide ? (
+            <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+              <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+                Admin decision
+              </h2>
+              <p className="mt-2 text-sm text-(--brand-text-muted)">
+                Review the request, then approve with an employee assignment, or reject.
+              </p>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-(--brand-text-muted)">
+                    Assign employee (required for approval)
+                  </span>
+                  <select
+                    value={assignedEmployeeId}
+                    onChange={(e) => setAssignedEmployeeId(e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="" style={optionStyle}>
+                      Select employee…
+                    </option>
+                    {activeEmployees.map((employee) => (
+                      <option key={employee.id} value={employee.id} style={optionStyle}>
+                        {employee.name || employee.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-(--brand-text-muted)">
+                    Stock disposition
+                  </span>
+                  <select
+                    value={stockDisposition}
+                    onChange={(e) => setStockDisposition(e.target.value)}
+                    className={selectClass}
+                  >
+                    {STOCK_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value} style={optionStyle}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-(--brand-text-muted)">
+                    Approved amount
+                  </span>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={approvedAmount}
+                    onChange={(e) => setApprovedAmount(e.target.value)}
+                    placeholder="Optional for auto-calc"
+                  />
+                </label>
+                <label className="block space-y-1 md:col-span-2">
+                  <span className="text-xs font-semibold text-(--brand-text-muted)">
+                    Remarks / rejection reason
+                  </span>
+                  <textarea
+                    rows={4}
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    className="w-full rounded-lg border border-(--brand-card-border) bg-transparent px-3 py-2 text-sm text-(--brand-text)"
+                  />
+                </label>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button disabled={submitting} onClick={() => void submitDecision("CREDIT")}>
+                  Approve Credit
+                </Button>
+                <Button
+                  disabled={submitting}
+                  variant="secondary"
+                  onClick={() => void submitDecision("REPLACEMENT")}
+                >
+                  Approve Replacement
+                </Button>
+                <Button
+                  disabled={submitting}
+                  variant="destructive"
+                  onClick={() => void submitDecision("REJECT")}
+                >
+                  Reject
+                </Button>
+              </div>
+            </section>
+          ) : null}
+
+          {canReassign ? (
+            <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+              <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+                {request.assignedEmployee ? "Reassign employee" : "Assign employee"}
+              </h2>
+              <div className="mt-4 flex flex-wrap items-end gap-3">
+                <label className="block min-w-55 flex-1 space-y-1">
+                  <span className="text-xs font-semibold text-(--brand-text-muted)">
+                    Employee
+                  </span>
+                  <select
+                    value={reassignEmployeeId}
+                    onChange={(e) => setReassignEmployeeId(e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="" style={optionStyle}>
+                      Select employee…
+                    </option>
+                    {activeEmployees.map((employee) => (
+                      <option key={employee.id} value={employee.id} style={optionStyle}>
+                        {employee.name || employee.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button disabled={submitting} onClick={() => void reassignEmployee()}>
+                  {request.assignedEmployee ? "Reassign" : "Assign"}
+                </Button>
+              </div>
+            </section>
+          ) : null}
+
+          <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+            <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+              Timeline
+            </h2>
+            <div className="mt-4 space-y-3">
+              {request.timelineEvents.map((event) => (
+                <div key={event.id} className="rounded-xl border border-(--brand-card-border) p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-(--brand-text)">{event.message}</p>
+                    <p className="text-xs text-(--brand-text-muted)">
+                      {formatReturnDate(event.createdAt)}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-(--brand-text-muted)">
+                    {event.actorUser?.name || event.actorUser?.email || "System"} ·{" "}
+                    {formatReturnStatus(event.eventType)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {params?.id ? (
+            <EntityTimeline
+              entityType="ReturnRequest"
+              entityId={params.id}
+              title="Audit timeline"
+            />
+          ) : null}
+        </div>
+      )}
+    </AdminPage>
+  );
+}

@@ -1,0 +1,7 @@
+# Production database dumps — never commit (contain real data).
+*.sql
+*.sql.gz
+*.dump
+*.custom
+!README.md
+!.gitignore
