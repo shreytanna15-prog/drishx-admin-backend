@@ -110,6 +110,9 @@ export async function serializeOrderDetail(
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
     assignedAt: order.assignedAt?.toISOString() ?? null,
+    dispatchDate: order.dispatchDate?.toISOString() ?? null,
+    cutoffDeferred: order.cutoffDeferred ?? false,
+    dispatchOverridden: Boolean(order.dispatchOverrideStamp),
     activityLogs: order.activityLogs.map((log) => ({
       ...log,
       createdAt: log.createdAt.toISOString(),

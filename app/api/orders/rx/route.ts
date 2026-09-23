@@ -19,6 +19,7 @@ import { getSignedOrderImageUrl } from "../../../lib/supabase-storage";
 import { isCustomerApproved } from "../../../lib/user-public";
 import { requireStaffPermission } from "../../../lib/staff-access";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
+import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
 
 function isStaffRole(role: string): boolean {
   return role === "ADMIN" || role === "EMPLOYEE";
@@ -119,6 +120,7 @@ export async function POST(req: NextRequest) {
     const prescriptionImage = body.prescriptionImageUrl?.trim() || null;
     const orderNumber = await generateUniqueOrderNumber();
     const assignedToId = await resolveOrderAssigneeId();
+    const cutoffSlot = await dispatchSlotForNow();
 
     const order = await prisma.order.create({
       data: {
@@ -135,6 +137,7 @@ export async function POST(req: NextRequest) {
         notes: orderNotes,
         deliveryServiceId,
         orderImageUrl: prescriptionImage,
+        ...cutoffSlot,
         sph: primaryEye.sph,
         cyl: primaryEye.cyl,
         axis: primaryEye.axis,

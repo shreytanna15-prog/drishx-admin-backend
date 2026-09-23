@@ -14,6 +14,7 @@ import { computeOrderReservedQuantity } from "./order-inventory";
 import { resolveOrderPrescription } from "./order-prescription";
 import { resolveLensForOrder } from "./resolve-lens-stock";
 import { generateUniqueOrderNumber } from "./order-numbers";
+import { dispatchSlotForNow } from "./dispatch-cutoff";
 import { notifyStaffOfNewOrder } from "./staff-notifications";
 import {
   assignmentCreateFields,
@@ -160,6 +161,8 @@ export async function placeOrderLine(
     },
   });
 
+  const cutoffSlot = await dispatchSlotForNow();
+
   const newOrder = await prisma.order.create({
     data: {
       orderNumber,
@@ -189,6 +192,7 @@ export async function placeOrderLine(
       notes: input.notes ?? null,
       transactionId: newTransaction.id,
       deliveryServiceId,
+      ...cutoffSlot,
     },
   });
 

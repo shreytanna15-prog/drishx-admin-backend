@@ -9,6 +9,7 @@ import { computeOrderReservedQuantity } from "../../lib/order-inventory";
 import { resolveOrderPrescription } from "../../lib/order-prescription";
 import { resolveLensForOrder } from "../../lib/resolve-lens-stock";
 import { generateUniqueOrderNumber } from "../../lib/order-numbers";
+import { dispatchSlotForNow } from "../../lib/dispatch-cutoff";
 import { notifyStaffOfNewOrder } from "../../lib/staff-notifications";
 import {
   assignmentCreateFields,
@@ -164,6 +165,9 @@ export async function GET(req: NextRequest) {
             createdAt: order.createdAt.toISOString(),
             updatedAt: order.updatedAt.toISOString(),
             assignedAt: order.assignedAt?.toISOString() ?? null,
+            dispatchDate: order.dispatchDate?.toISOString() ?? null,
+            cutoffDeferred: order.cutoffDeferred ?? false,
+            dispatchOverridden: Boolean(order.dispatchOverrideStamp),
           },
           session.role
         )
@@ -366,6 +370,7 @@ export async function POST(req: NextRequest) {
     const assignedToId = await resolveOrderAssigneeId({
       checkoutBatchId: normalizedBatchId,
     });
+    const cutoffSlot = await dispatchSlotForNow();
     const newOrder = await prisma.order.create({
       data: {
         orderNumber,
@@ -391,6 +396,7 @@ export async function POST(req: NextRequest) {
         notes: orderNotes,
         transactionId: newTransaction.id,
         deliveryServiceId,
+        ...cutoffSlot,
       },
     });
 

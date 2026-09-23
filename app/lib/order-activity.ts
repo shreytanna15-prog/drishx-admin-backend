@@ -34,11 +34,13 @@ export function sanitizeOrderForRole<T extends Record<string, unknown>>(
   const {
     internalNotes: _internalNotes,
     cancelReason: _cancelReason,
+    dispatchOverrideStamp: _dispatchOverrideStamp,
     activityLogs: _activityLogs,
     ...rest
   } = order as T & {
     internalNotes?: unknown;
     cancelReason?: unknown;
+    dispatchOverrideStamp?: unknown;
     activityLogs?: unknown;
   };
 

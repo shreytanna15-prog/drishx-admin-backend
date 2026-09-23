@@ -15,8 +15,16 @@ type AlternatePowerSettings = {
   hardMaxDistanceScore: number;
 };
 
+type DispatchCutoffSettings = {
+  enabled: boolean;
+  time: string;
+  timezone: string;
+  skipWeekends: boolean;
+};
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AlternatePowerSettings | null>(null);
+  const [dispatchCutoff, setDispatchCutoff] = useState<DispatchCutoffSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -55,6 +63,24 @@ export default function SettingsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCutoff() {
+      try {
+        const data = await adminFetch<{ settings: DispatchCutoffSettings }>(
+          "/api/settings/dispatch-cutoff"
+        );
+        if (!cancelled) setDispatchCutoff(data.settings);
+      } catch {
+        setDispatchCutoff(null);
+      }
+    }
+    void loadCutoff();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleSave() {
     if (!settings) return;
     setBusy(true);
@@ -79,6 +105,30 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleSaveDispatchCutoff() {
+    if (!dispatchCutoff) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const data = await adminFetch<{ settings: DispatchCutoffSettings }>(
+        "/api/settings/dispatch-cutoff",
+        {
+          method: "PUT",
+          body: JSON.stringify(dispatchCutoff),
+        }
+      );
+      setDispatchCutoff(data.settings);
+      setMessage("Dispatch cutoff settings saved.");
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError ? err.message : "Failed to save cutoff settings."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <AdminPage title="Settings" subtitle="Business rules and configuration">
       <div className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
@@ -87,7 +137,7 @@ export default function SettingsPage() {
             Settings
           </h1>
           <p className="mt-1 text-sm text-(--brand-muted)">
-            Configure Smart Alternate Power nearest-power rules for retail orders.
+            Business rules: alternative-power matching and the courier dispatch cutoff.
           </p>
         </div>
 
@@ -205,6 +255,100 @@ export default function SettingsPage() {
               <div className="sm:col-span-2">
                 <Button type="button" onClick={() => void handleSave()} disabled={busy}>
                   {busy ? "Saving…" : "Save settings"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5 shadow-(--brand-card-shadow)">
+          <h2 className="mb-4 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+            Dispatch cutoff
+          </h2>
+          {dispatchCutoff === null ? (
+            <DetailSkeleton cards={1} />
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex items-end pb-2">
+                <label className="flex items-center gap-2 text-sm text-(--brand-text)">
+                  <input
+                    type="checkbox"
+                    checked={dispatchCutoff.enabled}
+                    onChange={(e) =>
+                      setDispatchCutoff({
+                        ...dispatchCutoff,
+                        enabled: e.target.checked,
+                      })
+                    }
+                  />
+                  Enable daily dispatch cutoff
+                </label>
+              </div>
+              <div className="flex items-end pb-2">
+                <label className="flex items-center gap-2 text-sm text-(--brand-text)">
+                  <input
+                    type="checkbox"
+                    checked={dispatchCutoff.skipWeekends}
+                    onChange={(e) =>
+                      setDispatchCutoff({
+                        ...dispatchCutoff,
+                        skipWeekends: e.target.checked,
+                      })
+                    }
+                  />
+                  Skip Sat/Sun when deferring to the next day
+                </label>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-(--brand-label)">
+                  Cutoff time
+                </label>
+                <Input
+                  type="time"
+                  step="60"
+                  value={dispatchCutoff.time}
+                  onChange={(e) =>
+                    setDispatchCutoff({
+                      ...dispatchCutoff,
+                      time: e.target.value,
+                    })
+                  }
+                  className="h-10 border-(--brand-input-border) bg-(--brand-input-bg)"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-(--brand-label)">
+                  Timezone
+                </label>
+                <select
+                  value={dispatchCutoff.timezone}
+                  onChange={(e) =>
+                    setDispatchCutoff({
+                      ...dispatchCutoff,
+                      timezone: e.target.value,
+                    })
+                  }
+                  className="h-10 w-full rounded-lg border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
+                >
+                  <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                  <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+                  <option value="UTC">UTC</option>
+                  <option value="America/New_York">America/New_York (EST)</option>
+                  <option value="Europe/London">Europe/London (GMT/BST)</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="mb-3 text-[11px] text-(--brand-muted)">
+                  Orders placed before this time can be handed to the courier the
+                  same day. Orders placed after it are held until the next working
+                  day, unless an admin moves them forward on the Dispatch page.
+                </p>
+                <Button
+                  type="button"
+                  onClick={() => void handleSaveDispatchCutoff()}
+                  disabled={busy}
+                >
+                  {busy ? "Saving…" : "Save cutoff"}
                 </Button>
               </div>
             </div>

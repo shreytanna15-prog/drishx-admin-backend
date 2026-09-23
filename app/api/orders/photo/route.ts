@@ -12,6 +12,7 @@ import {
 import { isCustomerApproved } from "../../../lib/user-public";
 import { getSignedOrderImageUrl, uploadOrderImage } from "../../../lib/supabase-storage";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
+import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic"]);
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
         status: "PENDING",
         deliveryServiceId,
         orderImageUrl: storedImageUrl,
+        ...(await dispatchSlotForNow()),
       },
       include: {
         user: {

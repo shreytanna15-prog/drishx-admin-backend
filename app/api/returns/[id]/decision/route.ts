@@ -3,6 +3,7 @@ import { getSession } from "../../../../lib/session-auth";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "../../../../lib/prisma";
+import { dispatchSlotForNow } from "../../../../lib/dispatch-cutoff";
 import {
   appendReturnTimelineEvent,
   createCreditNoteForReturn,
@@ -99,6 +100,8 @@ export async function POST(
     assignedEmployeeId = employee.id;
     assignedEmployeeLabel = employee.name || employee.email;
   }
+
+  const cutoffSlot = await dispatchSlotForNow();
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -237,6 +240,7 @@ export async function POST(
             status: "PENDING",
             notes: `[Replacement Order] ${remarks || `Created from return request ${request.requestNumber}`}`,
             orderImageUrl: originalOrder.orderImageUrl,
+            ...cutoffSlot,
           },
         });
 

@@ -22,6 +22,7 @@ import {
   formatMoney,
   formatOrderDisplayId,
   formatStatus,
+  isDeferredOrder,
   isDispatchedOrder,
   statusBadgeClass,
 } from "@/app/lib/admin-orders";
@@ -63,6 +64,17 @@ function ageInPacked(updatedAt?: string): string {
   return `${days}d ${hours % 24}h`;
 }
 
+function formatDay(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-IN", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
 export default function DispatchPage() {
   const [pending, setPending] = useState<PendingOrder[]>([]);
   const [dispatched, setDispatched] = useState<AdminOrder[]>([]);
@@ -71,6 +83,7 @@ export default function DispatchPage() {
   const [dispatchedLoading, setDispatchedLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [overrideBusyId, setOverrideBusyId] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [drafts, setDrafts] = useState<Record<string, { courierName: string; trackingNumber: string }>>(
     {}
@@ -170,6 +183,32 @@ export default function DispatchPage() {
     }
   }
 
+  async function handleOverride(order: PendingOrder) {
+    const reason = window.prompt(
+      `Reason for moving order ${formatOrderDisplayId(order)} past the dispatch cutoff:`
+    );
+    if (!reason || !reason.trim()) {
+      if (reason !== null) setError("A reason is required to move the order forward.");
+      return;
+    }
+    setOverrideBusyId(order.id);
+    setError("");
+    try {
+      await adminFetch(`/api/orders/${order.id}/dispatch-override`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      await refreshAll();
+    } catch (err) {
+      setError(err instanceof AdminApiError ? err.message : "Could not move the order forward.");
+    } finally {
+      setOverrideBusyId("");
+    }
+  }
+
+  const dispatchablePending = pending.filter((o) => !isDeferredOrder(o));
+  const deferredPending = pending.filter(isDeferredOrder);
+
   return (
     <AdminPage
       title="Dispatch Management"
@@ -181,10 +220,12 @@ export default function DispatchPage() {
             Awaiting dispatch
           </div>
           <div className="mt-1 text-2xl font-extrabold text-(--brand-primary)">
-            {loading ? "…" : pending.length}
+            {loading ? "…" : dispatchablePending.length}
           </div>
           <div className="mt-1 text-xs text-(--brand-text-muted)">
-            Packed orders with no courier + tracking yet
+            {deferredPending.length > 0
+              ? `${dispatchablePending.length} now · ${deferredPending.length} held after cutoff`
+              : "Packed orders with no courier + tracking yet"}
           </div>
         </div>
         <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4">
@@ -267,7 +308,7 @@ export default function DispatchPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pending.length === 0 ? (
+                {dispatchablePending.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
@@ -277,7 +318,7 @@ export default function DispatchPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  pending.map((order) => {
+                  dispatchablePending.map((order) => {
                     const draft = drafts[order.id] ?? {
                       courierName: order.courierName ?? "",
                       trackingNumber: order.trackingNumber ?? "",
@@ -307,6 +348,79 @@ export default function DispatchPage() {
           </div>
         )}
       </div>
+
+      {deferredPending.length > 0 ? (
+        <div className="mb-8">
+          <h2 className="mb-3 text-lg font-extrabold text-(--brand-text)">
+            Held after dispatch cutoff
+          </h2>
+          <div className="mb-3 rounded-xl border border-[rgba(240,161,50,0.45)] bg-[rgba(240,161,50,0.08)] px-3 py-2 text-sm text-(--brand-text-muted)">
+            Orders placed after the daily dispatch cutoff. They become eligible to
+            dispatch on the date shown. Admins can move an order forward to dispatch
+            it today.
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-(--brand-card-border) hover:bg-transparent">
+                  <TableHead className="text-(--brand-label)">Order</TableHead>
+                  <TableHead className="text-(--brand-label)">Customer</TableHead>
+                  <TableHead className="text-(--brand-label)">Eligible from</TableHead>
+                  <TableHead className="text-(--brand-label)">Packed age</TableHead>
+                  <TableHead className="text-(--brand-label)">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {deferredPending.map((order) => (
+                  <TableRow key={order.id} className="border-(--brand-card-border)">
+                    <TableCell className="align-top">
+                      <Link
+                        href={`/orders/${order.id}`}
+                        className="font-semibold text-(--brand-link) hover:underline"
+                      >
+                        {formatOrderDisplayId(order)}
+                      </Link>
+                      <div className="mt-0.5 text-xs text-(--brand-text-muted)">
+                        {order.assignedTo?.name?.trim() ||
+                          order.assignedTo?.email ||
+                          "Unassigned"}
+                      </div>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <div className="font-semibold text-(--brand-text)">
+                        {order.user?.name?.trim() || "Unnamed customer"}
+                      </div>
+                      <div className="mt-0.5 text-xs text-(--brand-text-muted)">
+                        {order.user?.email}
+                      </div>
+                    </TableCell>
+                    <TableCell className="align-top whitespace-nowrap text-sm text-(--brand-text)">
+                      {order.dispatchDate ? formatDay(order.dispatchDate) : "—"}
+                    </TableCell>
+                    <TableCell className="align-top whitespace-nowrap text-sm text-(--brand-text-muted)">
+                      {ageInPacked(order.updatedAt)}
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleOverride(order)}
+                        disabled={overrideBusyId === order.id}
+                        className="rounded-lg border-[rgba(240,161,50,0.45)] text-(--brand-primary)"
+                      >
+                        {overrideBusyId === order.id
+                          ? "Moving…"
+                          : "Move forward today"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      ) : null}
 
       <div>
         <h2 className="mb-3 text-lg font-extrabold text-(--brand-text)">

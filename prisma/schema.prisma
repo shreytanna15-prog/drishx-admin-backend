@@ -598,6 +598,12 @@ model Order {
   cancelReason       String?
   courierName        String?
   trackingNumber     String?
+  /// Courier dispatch slot decided at placement: null when the dispatch cutoff was disabled at creation.
+  dispatchDate DateTime?
+  /// True when the placement time fell after the admin-configured dispatch cutoff.
+  cutoffDeferred Boolean                   @default(false)
+  /// Super-admin manual override permitting early dispatch of a deferred order.
+  dispatchOverrideStamp Json?
   /// Delivery service chosen at order time (charge calculated after packing).
   deliveryService    DeliveryService? @relation(fields: [deliveryServiceId], references: [id])
   deliveryServiceId  String?
@@ -622,6 +628,7 @@ model Order {
   @@index([assignedToId])
   @@index([assignedToId, status])
   @@index([status])
+  @@index([dispatchDate])
 }
 
 /// Immutable power history for retail orders. Version 1 is always the original ordered power.

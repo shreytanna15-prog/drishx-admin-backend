@@ -18,6 +18,7 @@ import {
 import { getSignedOrderImageUrl } from "../../../lib/supabase-storage";
 import { isCustomerApproved } from "../../../lib/user-public";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
+import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
 
 function isStaffRole(role: string): boolean {
   return role === "ADMIN" || role === "EMPLOYEE";
@@ -72,6 +73,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid lens type." }, { status: 400 });
     }
 
+    const cutoffSlot = await dispatchSlotForNow();
+
     const right = parseEyePower(body.prescription?.right);
     const left = parseEyePower(body.prescription?.left);
     if (!right || !left) {
@@ -111,6 +114,7 @@ export async function POST(req: NextRequest) {
         notes: orderNotes,
         deliveryServiceId,
         orderImageUrl: referenceImage,
+        ...cutoffSlot,
         sph: right.sph,
         cyl: right.cyl,
         axis: right.axis,

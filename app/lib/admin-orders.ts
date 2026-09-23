@@ -65,6 +65,9 @@ export type AdminOrder = {
   cancelReason?: string | null;
   courierName?: string | null;
   trackingNumber?: string | null;
+  dispatchDate?: string | null;
+  cutoffDeferred?: boolean;
+  dispatchOverridden?: boolean;
   deliveryServiceId?: string | null;
   deliveryService?: {
     id: string;
@@ -287,6 +290,19 @@ export function isColorLensOrder(order: Pick<AdminOrder, "notes">) {
 
 export function isDispatchedOrder(order: Pick<AdminOrder, "status">) {
   return order.status === "DISPATCHED";
+}
+
+/** Held behind the dispatch cutoff right now (not yet overridden by an admin). */
+export function isDeferredOrder(
+  order: Pick<AdminOrder, "status" | "dispatchDate" | "cutoffDeferred" | "dispatchOverridden">
+): boolean {
+  if (order.dispatchOverridden) return false;
+  if (!order.cutoffDeferred || !order.dispatchDate) return false;
+  const dispatchDate = new Date(order.dispatchDate);
+  if (Number.isNaN(dispatchDate.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return dispatchDate.getTime() > today.getTime();
 }
 
 export function formatMoney(value: number | string) {

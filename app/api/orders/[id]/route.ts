@@ -38,6 +38,7 @@ import {
   validateCourierName,
   validateTrackingNumber,
 } from "../../../lib/dispatch-validate";
+import { assertDispatchAllowed } from "../../../lib/dispatch-cutoff";
 import {
   orderDetailInclude,
   serializeOrderDetail,
@@ -307,6 +308,15 @@ export async function PUT(
         if (!check.ok) {
           return NextResponse.json({ error: check.error }, { status: 400 });
         }
+      }
+    }
+
+    // Dispatch cutoff: an order placed after the cutoff cannot be handed to
+    // the courier until its dispatch date — unless a super admin moved it forward.
+    if (dispatching && !force) {
+      const cutoff = await assertDispatchAllowed(existingOrder);
+      if (!cutoff.ok) {
+        return NextResponse.json({ error: cutoff.error }, { status: 400 });
       }
     }
 

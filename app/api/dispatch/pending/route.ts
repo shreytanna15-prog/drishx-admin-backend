@@ -105,6 +105,9 @@ export async function GET(req: NextRequest) {
             createdAt: order.createdAt.toISOString(),
             updatedAt: order.updatedAt.toISOString(),
             assignedAt: order.assignedAt?.toISOString() ?? null,
+            dispatchDate: order.dispatchDate?.toISOString() ?? null,
+            cutoffDeferred: order.cutoffDeferred ?? false,
+            dispatchOverridden: Boolean(order.dispatchOverrideStamp),
           },
           session.role
         )

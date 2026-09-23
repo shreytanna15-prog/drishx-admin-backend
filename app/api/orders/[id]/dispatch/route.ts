@@ -8,6 +8,7 @@ import {
   type OrderTrackingStatus,
 } from "../../../../lib/order-status-transitions";
 import { logOrderActivity } from "../../../../lib/order-activity";
+import { assertDispatchAllowed } from "../../../../lib/dispatch-cutoff";
 import {
   AuditAction,
   AuditModule,
@@ -106,6 +107,13 @@ export async function POST(
       order.trackingNumber === trackingNumber
         ? "This order was already dispatched with the same courier and tracking details."
         : null;
+
+    if (statusChanged) {
+      const cutoff = await assertDispatchAllowed(order);
+      if (!cutoff.ok) {
+        return NextResponse.json({ error: cutoff.error }, { status: 400 });
+      }
+    }
 
     const auditCtx = buildAuditRequestContext(req);
 

@@ -11,6 +11,7 @@ import { CartLineType } from "./cart-line-type";
 import { orderTotalFromPairPrice } from "./lens-pricing";
 import { getCommittedQuantity } from "./order-inventory";
 import { generateUniqueOrderNumbers } from "./order-numbers";
+import { dispatchSlotForNow } from "./dispatch-cutoff";
 import { prisma } from "./prisma";
 import { resolveLensForOrder } from "./resolve-lens-stock";
 import { notifyStaffOfNewOrder } from "./staff-notifications";
@@ -247,6 +248,7 @@ export async function placeWholesaleCheckoutBatches(
   const assignedToId = await resolveOrderAssigneeId({
     checkoutBatchId: context.checkoutBatchId,
   });
+  const cutoffSlot = await dispatchSlotForNow();
 
   await prisma.$transaction(
     async (tx) => {
@@ -306,6 +308,7 @@ export async function placeWholesaleCheckoutBatches(
           notes: context.orderNotes,
           transactionId: newTransaction.id,
           deliveryServiceId: context.deliveryServiceId ?? null,
+          ...cutoffSlot,
         };
 
         const newOrder = await tx.order.create({
