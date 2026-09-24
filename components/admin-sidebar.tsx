@@ -113,7 +113,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { title: "Employees", icon: Users, href: "/employees" },
       { title: "Roles & Permissions", icon: Shield, href: "/employees/roles" },
-      { title: "Attendance", icon: Clock },
+      { title: "Attendance", icon: Clock, href: "/employees/attendance" },
       { title: "Performance", icon: TrendingUp },
       { title: "Payroll & Incentives", icon: Banknote },
     ],

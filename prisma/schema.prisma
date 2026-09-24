@@ -107,6 +107,8 @@ model User {
   loyaltyWallet          LoyaltyWallet?
   loyaltyTransactions    LoyaltyTransaction[]
   loyaltyCreatedTransactions LoyaltyTransaction[] @relation("LoyaltyCreatedBy")
+  attendanceRecords      AttendanceRecord[]       @relation("AttendanceEmployee")
+  attendanceMarkedBy     AttendanceRecord[]       @relation("AttendanceMarkedBy")
 }
 
 model RefreshToken {
@@ -1737,4 +1739,41 @@ model LoyaltyTransaction {
   @@index([orderId])
   @@index([invoiceId])
   @@index([customerId, status])
+}
+
+enum AttendanceMethod {
+  QR_SCAN
+  BY_ADMIN
+}
+
+/// One office attendance day (Asia/Kolkata calendar date) with a rotating QR token.
+model AttendanceDay {
+  id             String             @id @default(cuid())
+  /// Calendar date stored as UTC midnight of the IST day key (YYYY-MM-DD).
+  date           DateTime           @db.Date
+  currentToken   String
+  tokenExpiresAt DateTime
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  records        AttendanceRecord[]
+
+  @@unique([date])
+}
+
+model AttendanceRecord {
+  id         String           @id @default(cuid())
+  dayId      String
+  day        AttendanceDay    @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   User             @relation("AttendanceEmployee", fields: [employeeId], references: [id])
+  /// Always PRESENT in v1.
+  status     String           @default("PRESENT")
+  method     AttendanceMethod
+  markedAt   DateTime         @default(now())
+  markedById String?
+  markedBy   User?            @relation("AttendanceMarkedBy", fields: [markedById], references: [id])
+
+  @@unique([employeeId, dayId])
+  @@index([dayId])
+  @@index([employeeId])
 }

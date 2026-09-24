@@ -9,6 +9,8 @@ export const STAFF_PERMISSIONS = [
   "returns.view",
   "inventory.view",
   "tasks.view",
+  "attendance.view",
+  "attendance.scan",
 ] as const;
 
 export type StaffPermission = (typeof STAFF_PERMISSIONS)[number];
@@ -100,6 +102,22 @@ export const STAFF_PERMISSION_GROUPS: StaffPermissionGroup[] = [
       },
     ],
   },
+  {
+    id: "attendance",
+    label: "Attendance",
+    items: [
+      {
+        key: "attendance.view",
+        label: "View attendance",
+        description: "See own attendance status and history",
+      },
+      {
+        key: "attendance.scan",
+        label: "Scan QR",
+        description: "Mark present by scanning the office QR",
+      },
+    ],
+  },
 ];
 
 export const ALL_STAFF_PERMISSIONS: StaffPermission[] = [...STAFF_PERMISSIONS];
@@ -135,13 +153,21 @@ export const SYSTEM_STAFF_ROLE_SEEDS: SystemStaffRoleSeed[] = [
       "orders.fulfill",
       "inventory.view",
       "tasks.view",
+      "attendance.view",
+      "attendance.scan",
     ],
   },
   {
     slug: STAFF_ROLE_SLUGS.dispatch,
     name: "Dispatch",
     description: "Ship assigned orders and add courier details.",
-    permissions: ["orders.view", "orders.dispatch", "tasks.view"],
+    permissions: [
+      "orders.view",
+      "orders.dispatch",
+      "tasks.view",
+      "attendance.view",
+      "attendance.scan",
+    ],
   },
   {
     slug: STAFF_ROLE_SLUGS.procurement,
@@ -153,13 +179,21 @@ export const SYSTEM_STAFF_ROLE_SEEDS: SystemStaffRoleSeed[] = [
       "procurement.intake",
       "inventory.view",
       "tasks.view",
+      "attendance.view",
+      "attendance.scan",
     ],
   },
   {
     slug: STAFF_ROLE_SLUGS.returns,
     name: "Returns",
     description: "Review assigned return and replacement requests.",
-    permissions: ["orders.view", "returns.view", "tasks.view"],
+    permissions: [
+      "orders.view",
+      "returns.view",
+      "tasks.view",
+      "attendance.view",
+      "attendance.scan",
+    ],
   },
 ];
 

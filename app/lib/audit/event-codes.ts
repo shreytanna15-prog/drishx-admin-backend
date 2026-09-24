@@ -72,6 +72,11 @@ export const AuditAction = {
   SYSTEM_ORDER_COVERAGE_RECALCULATED: "SYSTEM_ORDER_COVERAGE_RECALCULATED",
   SETTINGS_UPDATED: "SETTINGS_UPDATED",
   DISPATCH_CUTOFF_SETTINGS_UPDATED: "DISPATCH_CUTOFF_SETTINGS_UPDATED",
+
+  // Attendance
+  ATTENDANCE_QR_SCAN: "ATTENDANCE_QR_SCAN",
+  ATTENDANCE_MANUAL_MARK: "ATTENDANCE_MANUAL_MARK",
+  ATTENDANCE_TOKEN_REFRESHED: "ATTENDANCE_TOKEN_REFRESHED",
 } as const;
 
 export type AuditActionCode = (typeof AuditAction)[keyof typeof AuditAction];
@@ -88,6 +93,7 @@ export const AuditModule = {
   LENS: "LENS",
   CONFIG: "CONFIG",
   SYSTEM: "SYSTEM",
+  ATTENDANCE: "ATTENDANCE",
 } as const;
 
 export type AuditModuleCode = (typeof AuditModule)[keyof typeof AuditModule];
