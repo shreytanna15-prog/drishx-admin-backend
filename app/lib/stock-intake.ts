@@ -1,9 +1,6 @@
 import { prisma } from "./prisma";
-import {
-  AuditAction,
-  AuditModule,
-  recordAuditEvent,
-} from "./audit";
+import { getLensQuantity, logStockDelta } from "./audit";
+import { recordProcurementReceipt } from "./procurement-requests";
 import {
   ExpenseCategory,
   LedgerEntryType,
@@ -32,7 +29,66 @@ export type StockIntakeItemInput = {
   /** Customer selling price stored on the lens record. */
   sellingPrice: number;
   description?: string;
+  /** Customer order this receipt fulfils, when it is order-linked. */
+  orderId?: string | null;
 };
+
+/**
+ * Apply a receipt to one SKU inside a transaction:
+ *  1. increment stock,
+ *  2. write the StockMovement row (procurement PDF §36 — stock must never be
+ *     edited without a movement record; `StockMovementType.RECEIVED` was
+ *     previously never written),
+ *  3. advance any unresolved ProcurementRequest for this SKU.
+ */
+export async function receiveStockLine(input: {
+  lensType: LensType;
+  lensId: string;
+  quantityAdded: number;
+  costPrice: number;
+  sellingPrice: number;
+  orderId?: string | null;
+  actorUserId: string;
+  referenceId?: string | null;
+  client: DbClient;
+}) {
+  const quantityBefore =
+    (await getLensQuantity(input.client, input.lensType, input.lensId)) ?? 0;
+
+  const lens = await applyStockIntake(
+    input.lensType,
+    input.lensId,
+    input.quantityAdded,
+    input.costPrice,
+    input.sellingPrice,
+    input.client
+  );
+
+  await logStockDelta({
+    lensType: input.lensType,
+    lensId: input.lensId,
+    quantityDelta: input.quantityAdded,
+    quantityBefore,
+    quantityAfter: lens.quantity,
+    movementType: "STOCK_RECEIVED",
+    actorUserId: input.actorUserId,
+    orderId: input.orderId ?? null,
+    referenceId: input.referenceId ?? null,
+    sourceType: "PROCUREMENT",
+    client: input.client,
+  });
+
+  const settledRequests = await recordProcurementReceipt({
+    lensType: input.lensType,
+    lensId: input.lensId,
+    quantity: input.quantityAdded,
+    orderId: input.orderId ?? null,
+    actorUserId: input.actorUserId,
+    client: input.client,
+  });
+
+  return { lens, settledRequests };
+}
 
 export async function applyStockIntake(
   lensType: LensType,
@@ -135,7 +191,8 @@ export function validateStockIntakeItem(item: StockIntakeItemInput): string | nu
 export async function processStockIntakeBatch(
   items: StockIntakeItemInput[],
   userId: string,
-  batchNotes?: string
+  batchNotes?: string,
+  batchReference?: string
 ) {
   for (const item of items) {
     const error = validateStockIntakeItem(item);
@@ -144,7 +201,8 @@ export async function processStockIntakeBatch(
     }
   }
 
-  const batchRef = `PROC-BATCH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const batchRef =
+    batchReference ?? `PROC-BATCH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
   return prisma.$transaction(async (tx) => {
     const results: {
@@ -154,14 +212,20 @@ export async function processStockIntakeBatch(
 
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
-      const updatedLens = await applyStockIntake(
-        item.lensType,
-        item.lensId,
-        item.quantityAdded,
-        item.costPrice,
-        item.sellingPrice,
-        tx
-      );
+      const reference = items.length > 1 ? `${batchRef}-${index + 1}` : batchRef;
+
+      const { lens: updatedLens } = await receiveStockLine({
+        lensType: item.lensType,
+        lensId: item.lensId,
+        quantityAdded: item.quantityAdded,
+        costPrice: item.costPrice,
+        sellingPrice: item.sellingPrice,
+        orderId: item.orderId ?? null,
+        actorUserId: userId,
+        referenceId: reference,
+        client: tx,
+      });
+
       const lensLabel = formatLensStockLabel(item.lensType, updatedLens);
       const lineDescription =
         item.description?.trim() ||
@@ -169,8 +233,6 @@ export async function processStockIntakeBatch(
       const expenseDescription = batchNotes?.trim()
         ? `${lineDescription} | ${batchNotes.trim()}`
         : lineDescription;
-
-      const reference = items.length > 1 ? `${batchRef}-${index + 1}` : batchRef;
 
       const newTransaction = await tx.transaction.create({
         data: {
@@ -195,23 +257,6 @@ export async function processStockIntakeBatch(
       });
 
       results.push({ transaction: newTransaction, lens: updatedLens });
-    }
-
-    for (const item of items) {
-      await recordAuditEvent(tx, {
-        action: AuditAction.STOCK_RECEIVED,
-        module: AuditModule.INVENTORY,
-        entityType: "LensSku",
-        entityId: item.lensId,
-        actor: { actorType: "HUMAN", actorUserId: userId, actorName: null },
-        context: {
-          lensType: item.lensType,
-          quantityAdded: item.quantityAdded,
-          batchReference: batchRef,
-        },
-        relatedRefs: { batchReference: batchRef },
-        activityMessage: `Stock intake +${item.quantityAdded} (${batchRef})`,
-      });
     }
 
     return {

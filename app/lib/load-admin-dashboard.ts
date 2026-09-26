@@ -21,6 +21,9 @@ import {
   type DashboardRange,
 } from "./admin-dashboard";
 import { prisma, withDbRetry } from "./prisma";
+import { OPEN_REQUEST_STATUSES } from "./procurement-requests";
+
+const OPEN_PROCUREMENT_STATUSES = [...OPEN_REQUEST_STATUSES];
 
 const OPEN_RETURN_STATUSES: ReturnRequestStatus[] = [
   ReturnRequestStatus.SUBMITTED,
@@ -140,6 +143,8 @@ export async function loadAdminDashboard(
       pendingGst,
       pendingAlternatePower,
       dispatched,
+      openProcurementRequests,
+      criticalProcurementRequests,
       recentOrders,
       clients,
       employees,
@@ -181,6 +186,17 @@ export async function loadAdminDashboard(
       }),
       prisma.order.count({
         where: { status: OrderStatus.DISPATCHED },
+      }),
+      // Unresolved procurement requests — the real "what do we need to buy"
+      // signal, driven by the configured per-SKU thresholds.
+      prisma.procurementRequest.count({
+        where: { status: { in: OPEN_PROCUREMENT_STATUSES } },
+      }),
+      prisma.procurementRequest.count({
+        where: {
+          status: { in: OPEN_PROCUREMENT_STATUSES },
+          priority: "CRITICAL",
+        },
       }),
       prisma.order.findMany({
         take: 8,
@@ -270,6 +286,8 @@ export async function loadAdminDashboard(
         pendingAlternatePower,
         openReturns,
         awaitingProcurement,
+        openProcurementRequests,
+        criticalProcurementRequests,
         unpaidInvoices: unpaidCount,
         dispatched,
         outOfStock: inventory.outOfStock,

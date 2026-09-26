@@ -88,16 +88,20 @@ const NAV_SECTIONS: NavSection[] = [
         href: "/inventory/stock-overview",
       },
       {
-        title: "Power wise stock",
+        title: "Reorder Rules",
         icon: Gauge,
         href: "/inventory/power-wise-stock",
+      },
+      {
+        title: "Procurement Requests",
+        icon: ClipboardList,
+        href: "/procurement/requests",
       },
       {
         title: "Products & catalog",
         icon: Layers,
         href: "/inventory/products-catalog",
       },
-      { title: "Purchase Management", icon: ClipboardList },
       { title: "Smart Alerts", icon: Bell },
     ],
   },

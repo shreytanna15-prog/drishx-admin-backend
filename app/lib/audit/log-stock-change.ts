@@ -1,4 +1,4 @@
-import type { LensType } from "@prisma/client";
+import type { LensType, Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import {
   AuditAction,
@@ -10,6 +10,8 @@ import {
   systemActor,
   type AuditRequestContext,
 } from "./index";
+
+type DbClient = Prisma.TransactionClient | typeof prisma;
 
 export async function logStockDelta(input: {
   lensType: LensType;
@@ -26,10 +28,18 @@ export async function logStockDelta(input: {
   request?: AuditRequestContext | null;
   quantityBefore?: number;
   quantityAfter?: number;
+  /**
+   * Pass a `$transaction` client so the movement row and audit event commit
+   * atomically with the stock write they describe. Defaults to the global client
+   * to keep existing call sites working.
+   */
+  client?: DbClient;
 }) {
+  const db = input.client ?? prisma;
+
   const before =
     input.quantityBefore ??
-    (await getLensQuantity(prisma, input.lensType, input.lensId)) ??
+    (await getLensQuantity(db, input.lensType, input.lensId)) ??
     0;
   const after =
     input.quantityAfter ?? before + input.quantityDelta;
@@ -45,7 +55,7 @@ export async function logStockDelta(input: {
             ? "ADJUSTED"
             : "ADJUSTED";
 
-  await recordStockMovement(prisma, {
+  await recordStockMovement(db, {
     lensType: input.lensType,
     lensId: input.lensId,
     movementType: stockMovementType,
@@ -71,7 +81,7 @@ export async function logStockDelta(input: {
             ? AuditAction.STOCK_INCREMENTED
             : AuditAction.STOCK_DECREMENTED;
 
-  await recordAuditEvent(prisma, {
+  await recordAuditEvent(db, {
     action: auditAction,
     module: AuditModule.INVENTORY,
     entityType: "LensSku",

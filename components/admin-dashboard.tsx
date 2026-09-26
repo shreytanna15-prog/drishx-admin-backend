@@ -149,6 +149,20 @@ export function AdminDashboard() {
               count: data.attention.awaitingProcurement,
             }
           : null,
+        data.attention.openProcurementRequests > 0
+          ? {
+              href: "/procurement/requests",
+              label: "Buy requests",
+              count: data.attention.openProcurementRequests,
+            }
+          : null,
+        data.attention.criticalProcurementRequests > 0
+          ? {
+              href: "/procurement/requests?priority=CRITICAL",
+              label: "Critical shortages",
+              count: data.attention.criticalProcurementRequests,
+            }
+          : null,
         data.attention.dispatched > 0
           ? {
               href: "/orders/dispatch",

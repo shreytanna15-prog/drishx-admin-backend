@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { releaseExpiredReservations } from "../../../lib/cart-reservations";
+import { authorizeCronRequest } from "../../../lib/cron-auth";
 
-/** Call from Vercel Cron or manually with CRON_SECRET. */
+/**
+ * Call from Vercel Cron or manually with CRON_SECRET.
+ *
+ * GET /api/cron/release-cart-reservations?secret=<CRON_SECRET>
+ * GET /api/cron/release-cart-reservations  + `Authorization: Bearer <CRON_SECRET>`
+ *
+ * Fails closed with 503 when CRON_SECRET is unset — see app/lib/cron-auth.ts.
+ */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  const auth = req.headers.get("authorization") ?? "";
-  const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-  const querySecret = req.nextUrl.searchParams.get("secret");
-
-  if (secret && bearer !== secret && querySecret !== secret) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
+  const denied = authorizeCronRequest(req);
+  if (denied) return denied;
 
   try {
     const released = await releaseExpiredReservations();

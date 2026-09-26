@@ -62,6 +62,8 @@ export type DashboardAttention = {
   pendingAlternatePower: number;
   openReturns: number;
   awaitingProcurement: number;
+  openProcurementRequests: number;
+  criticalProcurementRequests: number;
   unpaidInvoices: number;
   dispatched: number;
   outOfStock: number;

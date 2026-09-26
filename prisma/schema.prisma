@@ -625,6 +625,7 @@ model Order {
   activityLogs       OrderActivityLog[]
   powerVersions      OrderPowerVersion[]
   alternateSuggestions AlternatePowerSuggestion[]
+  procurementRequests ProcurementRequest[]
 
   @@index([checkoutBatchId])
   @@index([assignedToId])
@@ -1385,6 +1386,7 @@ model Supplier {
   purchaseBills   PurchaseBill[]
   supplierPayments SupplierPayment[]
   ledgerEntries   SupplierLedgerEntry[]
+  reorderRules    ReorderRule[]
 
   @@index([name])
   @@index([gstin])
@@ -1776,4 +1778,112 @@ model AttendanceRecord {
   @@unique([employeeId, dayId])
   @@index([dayId])
   @@index([employeeId])
+}
+
+// --- Stock-wise Procurement (Reorder Rules + Procurement Requests) ---
+
+enum ProcurementRequestSource {
+  /// Created because a customer order could not be fully covered from stock (PDF §2.1).
+  ORDER_SHORTAGE
+  /// Created automatically because available stock fell to/below the minimum threshold (PDF §2.2).
+  MINIMUM_STOCK_THRESHOLD
+  /// Created by an admin/staff member by hand (PDF §2.3).
+  MANUAL
+}
+
+enum ProcurementRequestStatus {
+  OPEN
+  UNDER_REVIEW
+  APPROVED
+  CANCELLED
+  /// Stock fully received — the shortage is closed.
+  RESOLVED
+}
+
+enum ProcurementPriority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+/// Per SKU (= lensType + lensId) replenishment configuration.
+/// `lensId` is intentionally a plain string so one table serves all six lens
+/// families (SingleVision / Kryptok / Progressive / OriVision / Magnus / Bifocal).
+model ReorderRule {
+  id         String  @id @default(cuid())
+  lensType   LensType
+  lensId     String
+  /// Replenishment trigger line. Available stock at or below this raises a request.
+  minStock   Int     @default(0)
+  /// Desired level after replenishment. Required quantity = target - available - incoming.
+  targetStock Int
+  /// When false this rule is documentation only — nothing is triggered automatically.
+  autoProcure Boolean @default(false)
+  preferredSupplierId String?
+  preferredSupplier   Supplier? @relation(fields: [preferredSupplierId], references: [id], onDelete: SetNull)
+  /// Minimum order quantity. Recommended quantity is rounded up to a MOQ multiple.
+  moq      Int?
+  isActive Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+
+  requests ProcurementRequest[]
+
+  @@unique([lensType, lensId])
+  @@index([lensType])
+  @@index([autoProcure, isActive])
+}
+
+/// The central entity connecting inventory demand to an actual purchase.
+/// Doubles as the "reorder event" record (PDF §9) — trigger reason, stock at
+/// trigger, minimum, target and required quantity are all stored inline.
+model ProcurementRequest {
+  id        String  @id @default(cuid())
+  /// Human-facing reference, e.g. PR-000125.
+  publicId  String  @unique
+  lensType  LensType
+  lensId    String
+  source    ProcurementRequestSource
+  status    ProcurementRequestStatus @default(OPEN)
+  priority  ProcurementPriority     @default(NORMAL)
+
+  /// Shortage that triggered this request.
+  requiredQuantity  Int
+  /// Quantity actually asked for (may be raised to an MOQ multiple).
+  requestedQuantity Int
+  orderedQuantity   Int  @default(0)
+  receivedQuantity  Int  @default(0)
+
+  /// Originating customer order, when source = ORDER_SHORTAGE (PDF §32).
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  reorderRuleId String?
+  reorderRule   ReorderRule? @relation(fields: [reorderRuleId], references: [id], onDelete: SetNull)
+
+  // --- Reorder event snapshot (PDF §9) ---
+  stockAtTrigger       Int?
+  minStockAtTrigger    Int?
+  targetStockAtTrigger Int?
+  availableAtTrigger   Int?
+  incomingAtTrigger    Int?
+  triggerReason        String?
+
+  resolvedAt       DateTime?
+  resolutionReason String?
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  createdById  String?
+  /// Null when raised automatically by the reorder checker.
+  approvedAt   DateTime?
+  approvedById String?
+
+  @@index([lensType, lensId, status])
+  @@index([status, source])
+  @@index([orderId])
+  @@index([createdAt])
 }

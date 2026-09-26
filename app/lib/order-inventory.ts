@@ -256,6 +256,43 @@ export async function fulfillProcurementOrder(orderId: string): Promise<Order | 
       activityMessage: `Procurement coverage recalculated → ${nextStatus}`,
     });
 
+    // Once the order is fully covered from stock, any ORDER_SHORTAGE
+    // procurement request raised for it has served its purpose. Close it as
+    // satisfied rather than leaving a phantom "buy more" requirement open.
+    if (reservedQty >= order.quantity) {
+      await resolveOrderShortageRequests(orderId, order.quantity);
+    }
+
     return updated;
   });
+}
+
+/**
+ * Close every open ORDER_SHORTAGE request for an order that is now fully
+ * covered. History is preserved — only the status advances.
+ */
+async function resolveOrderShortageRequests(orderId: string, orderQuantity: number) {
+  const open = await prisma.procurementRequest.findMany({
+    where: {
+      orderId,
+      source: "ORDER_SHORTAGE",
+      status: { in: ["OPEN", "UNDER_REVIEW", "APPROVED"] },
+    },
+    select: { id: true, publicId: true, receivedQuantity: true, requestedQuantity: true },
+  });
+
+  for (const request of open) {
+    const stillNeeded = Math.max(0, request.requestedQuantity - request.receivedQuantity);
+    await prisma.procurementRequest.update({
+      where: { id: request.id },
+      data: {
+        status: stillNeeded > 0 ? "CANCELLED" : "RESOLVED",
+        resolvedAt: new Date(),
+        resolutionReason:
+          stillNeeded > 0
+            ? `Order fully covered from stock (${orderQuantity} units); remaining requirement withdrawn`
+            : "Order fully covered from stock",
+      },
+    });
+  }
 }

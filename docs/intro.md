@@ -21,9 +21,9 @@ There are **no** Agora, Stripe/Razorpay, posts, gifts, or live streaming feature
 ```mermaid
 flowchart TB
     subgraph clients ["Client Apps"]
-        Web["Drishx-web-app<br/>Next.js 16<br/>Customer + Employee portal"]
+        Web["drishx-website<br/>Next.js 16<br/>Customer + Employee portal"]
         Mobile["drishx-mobile-app<br/>Expo 54 / React Native<br/>Customer + Staff app"]
-        Admin["Drishx-admin-and-backend<br/>Next.js 16 Admin Panel"]
+        Admin["drishx-admin-and-backend<br/>Next.js 16 Admin Panel"]
     end
 
     subgraph backend ["Single Backend (same deployment)"]
@@ -41,8 +41,8 @@ flowchart TB
 
 | Repo | Role | Has database? |
 |------|------|---------------|
-| **Drishx-admin-and-backend** | Backend API + Admin panel | Yes (Prisma + PostgreSQL) |
-| **Drishx-web-app** | Customer web portal + Employee ops portal | No — proxy only |
+| **drishx-admin-and-backend** | Backend API + Admin panel | Yes (Prisma + PostgreSQL) |
+| **drishx-website** | Customer web portal + Employee ops portal | No — proxy only |
 | **drishx-mobile-app** | Customer + Staff mobile app | No — calls backend directly |
 
 **Production URLs (from config):**
@@ -54,8 +54,8 @@ flowchart TB
 
 | Repo | Path |
 |------|------|
-| Admin + Backend | `Drishx-admin-and-backend/` |
-| Web App | `Drishx-web-app/` |
+| Admin + Backend | `drishx-admin-and-backend/` |
+| Web App | `drishx-website/` |
 | Mobile App | `drishx-mobile-app/` |
 
 ---
@@ -92,7 +92,7 @@ enum UserRole {
 
 ---
 
-## Repo 1: `Drishx-admin-and-backend` (The Brain)
+## Repo 1: `drishx-admin-and-backend` (The Brain)
 
 **Stack:** Next.js 16.2, React 19, Prisma 7.8, PostgreSQL (Supabase), JWT auth, Supabase Storage, shadcn/ui, Tailwind v4
 
@@ -112,7 +112,7 @@ enum UserRole {
 
 ---
 
-## Repo 2: `Drishx-web-app` (Customer + Employee Web)
+## Repo 2: `drishx-website` (Customer + Employee Web)
 
 **Stack:** Next.js 16.2, React 19, shadcn/ui, Tailwind v4 — **no database, no Prisma**
 
@@ -181,11 +181,58 @@ Payment gateways, loyalty/wallet, attendance, payroll, AI center, discounts, cre
 Two config files contain **obfuscated malicious JavaScript** appended after legitimate config:
 
 1. **`drishx-mobile-app/babel.config.js`** — runs on every Metro/Babel build
-2. **`Drishx-web-app/postcss.config.mjs`** — runs on every Next.js dev/build
+2. **`drishx-website/postcss.config.mjs`** — runs on every Next.js dev/build
 
 The malware scans Ethereum blockchain transactions, downloads remote payloads, and `eval`s them. The legitimate config is only the first ~6–11 lines; everything after that should be removed.
 
 **Before running dev or build on either repo**, clean those files and audit git history for when they were introduced. The admin-and-backend repo does not appear to have this issue.
+
+---
+
+## Environment Setup
+
+Each repo has its own `.env.example` — the single authoritative list of what
+that repo needs. Copy it, fill in real values, and never commit the result.
+
+| Repo | Template | Real file | Notes |
+|---|---|---|---|
+| `drishx-admin-and-backend` | `.env.example` | `.env` | Only repo with secrets. The other two must never hold them. |
+| `drishx-website` | `.env.example` | `.env.local` | Exactly one var: `BACKEND_URL`. No database. |
+| `drishx-mobile-app` | `.env.example` | `.env` | Untracked by design. `EXPO_PUBLIC_*` is embedded in the JS bundle in plaintext. |
+
+`DEPLOY_*` variables are unrelated to runtime — they drive the one-shot git push
+that triggers a Vercel build. Those live in `.env.deploy.example` →
+`.env.deploy` in the two web repos.
+
+### Backend required variables
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres (Supabase). |
+| `JWT_SECRET` | Signs access tokens. |
+| `REFRESH_TOKEN_SECRET` | Signs refresh tokens. |
+| `ADMIN_CREATION_SECRET` | Bootstraps the first admin account. |
+| `SUPABASE_URL` | Storage REST endpoint. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Storage access. **Bypasses RLS — server only.** |
+| `CRON_SECRET` | Guards `/api/cron/*`. |
+
+Optional, with defaults: `DATABASE_POOL_MAX` (2), `SUPABASE_ORDER_IMAGES_BUCKET`
+(`order-images`), `AUDIT_RETENTION_DAYS` (90).
+
+### Two things that bite people
+
+**1. Use the `:5432` form in `DATABASE_URL`, on purpose.**
+`app/lib/prisma.ts` rewrites `:5432/` → `:6543/` for `pooler.supabase.com`, so
+the app runtime automatically uses the Supabase *transaction* pooler. Session
+mode dies with `EMAXCONNSESSION` at roughly 15 clients. Note the asymmetry:
+`prisma.config.ts` reads the value **raw**, so `npm run db:migrate` and
+`npm run db:studio` run in session mode — fine for a single connection.
+
+**2. `CRON_SECRET` is load-bearing, and the crons fail closed.**
+If it is unset, `/api/cron/*` returns `503` rather than running
+(`app/lib/cron-auth.ts`). Do not "fix" that by loosening the check — an
+unauthenticated `/api/cron/release-cart-reservations` can release live cart
+holds and cause overselling.
 
 ---
 
@@ -194,8 +241,8 @@ The malware scans Ethereum blockchain transactions, downloads remote payloads, a
 **Backend (required first):**
 
 ```bash
-cd Drishx-admin-and-backend
-# Set .env with DATABASE_URL, JWT_SECRET, SUPABASE_* etc.
+cd drishx-admin-and-backend
+cp .env.example .env    # then fill in DATABASE_URL, JWT_SECRET, SUPABASE_*, CRON_SECRET
 npm install
 npm run db:migrate
 npm run db:seed   # lens catalog
@@ -205,8 +252,8 @@ npm run dev       # port 3000
 **Web app:**
 
 ```bash
-cd Drishx-web-app
-# .env.local: BACKEND_URL=http://127.0.0.1:3000
+cd drishx-website
+# .env.local: BACKEND_URL=http://127.0.0.1:3000   (cp .env.example .env.local)
 npm install
 npm run dev -- -p 3001
 ```
