@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { TaskStatus } from "@prisma/client";
 
 import { prisma } from "../../lib/prisma";
-import { getSession } from "../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../lib/session-auth";
 import { notifyEmployeeOfTaskAssigned } from "../../lib/staff-notifications";
 import { requireStaffPermission } from "../../lib/staff-access";
 
@@ -26,10 +26,11 @@ function sanitizeDetails(value: unknown): string | null {
 // ADMIN: all tasks (optional ?employeeId=)
 // EMPLOYEE: only own tasks
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
@@ -68,10 +69,11 @@ export async function GET(req: NextRequest) {
 // ADMIN only: assign task to employee
 // Body: { assignedToId, title, details?, dueDate }
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
   }

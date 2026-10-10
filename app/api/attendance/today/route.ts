@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import {
   ensureAttendanceDay,
   listActiveEmployees,
@@ -8,10 +8,11 @@ import {
 
 /** GET /api/attendance/today — admin: office QR + roster for today */
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
   }

@@ -19,7 +19,15 @@ type RefreshResponse = {
   };
 };
 
-let refreshPromise: Promise<boolean> | null = null;
+/** Outcome of a refresh attempt — transient failures must not force logout. */
+export type RefreshOutcome =
+  | { status: "refreshed" }
+  | { status: "auth_failed" }
+  | { status: "transient" };
+
+const REFRESH_TIMEOUT_MS = 15_000;
+
+let refreshPromise: Promise<RefreshOutcome> | null = null;
 let onAuthFailure: (() => void) | null = null;
 
 export function registerAuthFailureHandler(handler: () => void) {
@@ -30,30 +38,43 @@ function resolveAccessToken(data: RefreshResponse) {
   return data.accessToken ?? data.token ?? null;
 }
 
-export async function refreshAccessToken(): Promise<boolean> {
+function isTransientRefreshStatus(status: number) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+export async function refreshAccessToken(): Promise<RefreshOutcome> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
     try {
       const res = await fetch("/api/auth/refresh", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
       });
-      if (!res.ok) return false;
+      if (!res.ok) {
+        if (isTransientRefreshStatus(res.status)) {
+          return { status: "transient" };
+        }
+        return { status: "auth_failed" };
+      }
 
       const data = (await res.json()) as RefreshResponse;
       const nextToken = resolveAccessToken(data);
-      if (!nextToken) return false;
+      if (!nextToken) return { status: "auth_failed" };
 
       setAccessToken(nextToken);
       if (data.user) {
         setSession(nextToken, data.user);
       }
-      return true;
+      return { status: "refreshed" };
     } catch {
-      return false;
+      return { status: "transient" };
     } finally {
+      clearTimeout(timer);
       refreshPromise = null;
     }
   })();
@@ -94,8 +115,11 @@ export async function adminAuthFetch(
     return res;
   }
 
-  const refreshed = await refreshAccessToken();
-  if (!refreshed) {
+  const outcome = await refreshAccessToken();
+  if (outcome.status === "transient") {
+    return res;
+  }
+  if (outcome.status !== "refreshed") {
     clearSession();
     onAuthFailure?.();
     return res;

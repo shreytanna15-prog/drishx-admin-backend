@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../../lib/session-auth";
 import { prisma } from "../../../../lib/prisma";
 import { buildDispatchOverrideStamp } from "../../../../lib/dispatch-cutoff";
 import { logOrderActivity } from "../../../../lib/order-activity";
@@ -38,8 +38,9 @@ export async function POST(
     return NextResponse.json({ error: "Invalid order id." }, { status: 400 });
   }
 
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
   if (session.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden. Admins only." }, { status: 403 });
   }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { requireStaffPermission } from "../../../lib/staff-access";
 import { markPresentQr } from "../../../lib/attendance";
 import {
@@ -13,10 +13,11 @@ import { prisma } from "../../../lib/prisma";
 
 /** POST /api/attendance/scan — employee: mark present via office QR token */
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "EMPLOYEE") {
     return NextResponse.json(
       { error: "Only employees can scan the office attendance QR." },

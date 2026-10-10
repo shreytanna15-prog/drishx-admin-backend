@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { serializeDeliveryService } from "../../../lib/delivery-service";
 
 // PUT /api/delivery-services/:id — ADMIN only
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
   if (session.role !== "ADMIN")
     return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
   try {
@@ -49,8 +50,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 // DELETE /api/delivery-services/:id — ADMIN only (soft: deactivate if used)
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
   if (session.role !== "ADMIN")
     return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
   try {

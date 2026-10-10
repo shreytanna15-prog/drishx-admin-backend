@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/app/lib/session-auth";
+import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import { prisma } from "@/app/lib/prisma";
 import { financialYearBounds, getFinancialYear } from "@/app/lib/finance/financial-year";
 
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session || (session.role !== "ADMIN" && session.role !== "EMPLOYEE")) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
+  }
+  const session = auth.session;
+  if ((session.role !== "ADMIN" && session.role !== "EMPLOYEE")) {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);

@@ -27,7 +27,11 @@ import {
   type AuthUser,
 } from "@/app/lib/client-auth";
 import { clearListCache } from "@/app/lib/admin-cache";
-import { logoutSession, registerAuthFailureHandler } from "@/app/lib/admin-auth-fetch";
+import {
+  logoutSession,
+  refreshAccessToken,
+  registerAuthFailureHandler,
+} from "@/app/lib/admin-auth-fetch";
 
 type AdminPageHeaderState = {
   title: string;
@@ -66,17 +70,42 @@ export function AdminChrome({ children }: { children: ReactNode }) {
   }, [router]);
 
   useEffect(() => {
-    const token = getToken();
-    const stored = getStoredUser();
+    let cancelled = false;
 
-    if (!token || !isAdminUser(stored)) {
-      clearSession();
-      router.replace("/login");
-      return;
+    async function bootstrap() {
+      let token = getToken();
+      let stored = getStoredUser();
+
+      // New tab may have empty sessionStorage while the refresh cookie is still
+      // valid — attempt one silent refresh before forcing login.
+      if (!token) {
+        const outcome = await refreshAccessToken();
+        if (cancelled) return;
+        if (outcome.status === "refreshed") {
+          token = getToken();
+          stored = getStoredUser();
+        } else if (outcome.status === "transient") {
+          // Keep the refresh cookie; send to login without wiping session storage
+          // so a retry can succeed when the network recovers.
+          router.replace("/login");
+          return;
+        }
+      }
+
+      if (!token || !isAdminUser(stored)) {
+        clearSession();
+        router.replace("/login");
+        return;
+      }
+
+      setUser(stored);
+      setReady(true);
     }
 
-    setUser(stored);
-    setReady(true);
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   async function handleLogout() {

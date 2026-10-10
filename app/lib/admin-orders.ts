@@ -401,3 +401,221 @@ export function matchesOrderSearch(order: AdminOrder, query: string) {
     order.id.toLowerCase().includes(q)
   );
 }
+
+/** Calendar day key from order timestamp (runtime clock; no forced timezone). */
+export function orderCreatedDayKey(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export function formatOrderDayLabel(dayKey: string): string {
+  if (dayKey === "unknown") return "Unknown date";
+  const date = new Date(`${dayKey}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return dayKey;
+  return new Intl.DateTimeFormat("en-IN", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+export function customerGroupLabel(order: AdminOrder): string {
+  const business = order.user?.businessName?.trim();
+  if (business) return business;
+  const name = order.user?.name?.trim();
+  if (name) return name;
+  return order.user?.email?.trim() || "Unknown customer";
+}
+
+export function orderAmountNumber(order: AdminOrder): number {
+  const n = Number(order.totalAmount);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export type OrderStatusBreakdown = { status: string; count: number };
+
+export type AdminOrderGroup = {
+  key: string;
+  label: string;
+  subtitle?: string;
+  orders: AdminOrder[];
+  count: number;
+  totalAmount: number;
+  statusBreakdown: OrderStatusBreakdown[];
+  latestCreatedAt: string;
+};
+
+function buildStatusBreakdown(orders: AdminOrder[]): OrderStatusBreakdown[] {
+  const counts = new Map<string, number>();
+  for (const order of orders) {
+    counts.set(order.status, (counts.get(order.status) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([status, count]) => ({ status, count }))
+    .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status));
+}
+
+function finalizeGroup(
+  key: string,
+  label: string,
+  orders: AdminOrder[],
+  subtitle?: string
+): AdminOrderGroup {
+  const sortedLines = [...orders].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  return {
+    key,
+    label,
+    subtitle,
+    orders: sortedLines,
+    count: sortedLines.length,
+    totalAmount: sortedLines.reduce((sum, o) => sum + orderAmountNumber(o), 0),
+    statusBreakdown: buildStatusBreakdown(sortedLines),
+    latestCreatedAt: sortedLines[0]?.createdAt ?? "",
+  };
+}
+
+export function groupOrdersByDate(orders: AdminOrder[]): AdminOrderGroup[] {
+  const map = new Map<string, AdminOrder[]>();
+  for (const order of orders) {
+    const key = orderCreatedDayKey(order.createdAt);
+    const list = map.get(key);
+    if (list) list.push(order);
+    else map.set(key, [order]);
+  }
+  return [...map.entries()]
+    .map(([key, list]) => finalizeGroup(key, formatOrderDayLabel(key), list))
+    .sort((a, b) => b.key.localeCompare(a.key));
+}
+
+export function groupOrdersByCustomer(orders: AdminOrder[]): AdminOrderGroup[] {
+  const map = new Map<string, AdminOrder[]>();
+  for (const order of orders) {
+    const key = order.user?.id || "unknown";
+    const list = map.get(key);
+    if (list) list.push(order);
+    else map.set(key, [order]);
+  }
+  return [...map.entries()].map(([key, list]) => {
+    const sample = list[0];
+    const label = sample ? customerGroupLabel(sample) : "Unknown customer";
+    const email = sample?.user?.email?.trim();
+    const name = sample?.user?.name?.trim();
+    const business = sample?.user?.businessName?.trim();
+    let subtitle: string | undefined;
+    if (business && label === business && email) subtitle = email;
+    else if (name && label === name && email && email !== name) subtitle = email;
+    else if (email && label !== email) subtitle = email;
+    return finalizeGroup(key, label, list, subtitle);
+  });
+}
+
+export type OrderGroupSort =
+  | "newest"
+  | "oldest"
+  | "amount_desc"
+  | "amount_asc"
+  | "count_desc"
+  | "count_asc"
+  | "label_asc"
+  | "label_desc";
+
+export const ORDER_GROUP_SORT_OPTIONS: {
+  id: OrderGroupSort;
+  label: string;
+}[] = [
+  { id: "newest", label: "Newest first" },
+  { id: "oldest", label: "Oldest first" },
+  { id: "amount_desc", label: "Amount: high → low" },
+  { id: "amount_asc", label: "Amount: low → high" },
+  { id: "count_desc", label: "Most orders" },
+  { id: "count_asc", label: "Fewest orders" },
+  { id: "label_asc", label: "Name A → Z" },
+  { id: "label_desc", label: "Name Z → A" },
+];
+
+export function sortOrderGroups(
+  groups: AdminOrderGroup[],
+  sort: OrderGroupSort
+): AdminOrderGroup[] {
+  const copy = [...groups];
+  const byLatest = (a: AdminOrderGroup, b: AdminOrderGroup) =>
+    new Date(b.latestCreatedAt).getTime() - new Date(a.latestCreatedAt).getTime();
+  const byOldest = (a: AdminOrderGroup, b: AdminOrderGroup) =>
+    new Date(a.latestCreatedAt).getTime() - new Date(b.latestCreatedAt).getTime();
+
+  switch (sort) {
+    case "oldest":
+      return copy.sort(byOldest);
+    case "amount_desc":
+      return copy.sort(
+        (a, b) => b.totalAmount - a.totalAmount || byLatest(a, b)
+      );
+    case "amount_asc":
+      return copy.sort(
+        (a, b) => a.totalAmount - b.totalAmount || byLatest(a, b)
+      );
+    case "count_desc":
+      return copy.sort((a, b) => b.count - a.count || byLatest(a, b));
+    case "count_asc":
+      return copy.sort((a, b) => a.count - b.count || byLatest(a, b));
+    case "label_asc":
+      return copy.sort(
+        (a, b) => a.label.localeCompare(b.label) || byLatest(a, b)
+      );
+    case "label_desc":
+      return copy.sort(
+        (a, b) => b.label.localeCompare(a.label) || byLatest(a, b)
+      );
+    case "newest":
+    default:
+      return copy.sort(byLatest);
+  }
+}
+
+export type OrderLineSort = "newest" | "oldest" | "amount_desc" | "amount_asc";
+
+export const ORDER_LINE_SORT_OPTIONS: { id: OrderLineSort; label: string }[] = [
+  { id: "newest", label: "Lines: newest first" },
+  { id: "oldest", label: "Lines: oldest first" },
+  { id: "amount_desc", label: "Lines: amount high → low" },
+  { id: "amount_asc", label: "Lines: amount low → high" },
+];
+
+export function sortOrdersInGroup(
+  orders: AdminOrder[],
+  sort: OrderLineSort
+): AdminOrder[] {
+  const copy = [...orders];
+  switch (sort) {
+    case "oldest":
+      return copy.sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+    case "amount_desc":
+      return copy.sort(
+        (a, b) =>
+          orderAmountNumber(b) - orderAmountNumber(a) ||
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    case "amount_asc":
+      return copy.sort(
+        (a, b) =>
+          orderAmountNumber(a) - orderAmountNumber(b) ||
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    case "newest":
+    default:
+      return copy.sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+  }
+}

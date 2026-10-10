@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/app/lib/session-auth";
+import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import { getLoyaltyLedger } from "@/app/lib/loyalty/dashboard";
 import { expirePoints } from "@/app/lib/loyalty/expire";
 
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
-
+  const session = auth.session;
   const { searchParams } = new URL(req.url);
   const customerId =
     session.role === "CUSTOMER"

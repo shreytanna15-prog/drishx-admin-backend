@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { requireStaffPermission } from "../../../lib/staff-access";
 import { getEmployeeMe } from "../../../lib/attendance";
 
 /** GET /api/attendance/me — employee: today status + recent history */
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "EMPLOYEE") {
     return NextResponse.json(
       { error: "This endpoint is for employees only." },

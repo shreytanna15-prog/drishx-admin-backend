@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { CartLineType } from "../../../lib/cart-line-type";
 import { validateOrderNotes } from "../../../lib/order-notes";
 import {
@@ -24,11 +24,11 @@ function parseWholesaleSpec(value: unknown): WholesaleSpec | null {
 // POST /api/orders/wholesale-checkout
 // Body: { cartLineKeys?: string[], notes?, checkoutBatchId? }
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
-
+  const session = auth.session;
   try {
     if (session.role === "CUSTOMER") {
       const customer = await prisma.user.findUnique({

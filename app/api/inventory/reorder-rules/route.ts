@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LensType } from "@prisma/client";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { requireStaffPermission } from "../../../lib/staff-access";
 import { prisma } from "../../../lib/prisma";
 import {
@@ -35,10 +35,11 @@ function parseLensType(raw: string | null): LensType | undefined {
 // Returns configured rules joined with live stock position.
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role === "EMPLOYEE") {
     const gate = await requireStaffPermission(session, "inventory.view");
     if ("error" in gate) return gate.error;
@@ -92,10 +93,11 @@ export async function GET(req: NextRequest) {
 // Access: ADMIN only — thresholds drive real purchasing decisions.
 // ─────────────────────────────────────────────────────────────
 export async function PUT(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (!isAdmin(session)) {
     return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
   }

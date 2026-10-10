@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../lib/session-auth";
 import { prisma, withDbRetry } from "../../lib/prisma";
 
 // GET /api/invoices
 // Access: ADMIN | EMPLOYEE => all invoices, CUSTOMER => own invoices
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
-
+  const session = auth.session;
   try {
     const invoices = await withDbRetry(() =>
       prisma.invoice.findMany({

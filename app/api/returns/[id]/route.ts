@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 
 import {
   appendReturnTimelineEvent,
@@ -56,8 +56,9 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
 
   const { id } = await params;
   const request = await getReturnRequestWithRelations(id);
@@ -77,8 +78,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
   if (session.role !== "EMPLOYEE" && session.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PaymentMode, PurchaseBillStatus } from "@prisma/client";
-import { getSession } from "@/app/lib/session-auth";
+import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import { prisma } from "@/app/lib/prisma";
 import { getCompanyFinanceSettings } from "@/app/lib/finance/company-settings";
 import { nextPurchaseBillNumber, nextSupplierPaymentNumber } from "@/app/lib/finance/invoice-number";
@@ -11,9 +11,13 @@ import { AuditAction, AuditModule, recordAuditEvent } from "@/app/lib/audit";
 import { PartyLedgerEntryType } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session || (session.role !== "ADMIN" && session.role !== "EMPLOYEE")) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
+  }
+  const session = auth.session;
+  if ((session.role !== "ADMIN" && session.role !== "EMPLOYEE")) {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
   const { searchParams } = new URL(req.url);
   const resource = searchParams.get("resource") || "bills";
@@ -48,9 +52,13 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session || session.role !== "ADMIN") {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
+  }
+  const session = auth.session;
+  if (session.role !== "ADMIN") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
   const body = await req.json();
   const action = body.action as string;

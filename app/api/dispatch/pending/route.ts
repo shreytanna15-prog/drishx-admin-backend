@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { prisma } from "../../../lib/prisma";
 import { requireStaffPermission } from "../../../lib/staff-access";
 import {
@@ -17,10 +17,11 @@ import { getSignedOrderImageUrl } from "../../../lib/supabase-storage";
 // + tracking recorded yet). EMPLOYEE sees assigned orders only.
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role === "CUSTOMER") {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }

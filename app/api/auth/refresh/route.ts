@@ -65,8 +65,12 @@ export async function POST(req: NextRequest) {
     response.headers.append("Set-Cookie", buildRefreshCookie(rotated.rawToken, rotated.expiresAt));
     return response;
   } catch {
+    // Infra / DB blip — keep the refresh cookie; clients treat 5xx as transient.
     return NextResponse.json(
-      { error: "Unable to refresh session. Please try again.", code: "TOKEN_INVALID" },
+      {
+        error: "Unable to refresh session. Please try again.",
+        code: "TOKEN_INVALID",
+      },
       { status: 503 }
     );
   }

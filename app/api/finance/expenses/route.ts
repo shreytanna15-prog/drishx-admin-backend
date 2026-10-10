@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ExpenseApprovalStatus, ExpenseDocType } from "@prisma/client";
-import { getSession } from "@/app/lib/session-auth";
+import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import { prisma } from "@/app/lib/prisma";
 import { roundMoney } from "@/app/lib/finance/tax-calc";
 import { AuditAction, AuditModule, recordAuditEvent } from "@/app/lib/audit";
 
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
-
+  const session = auth.session;
   const { searchParams } = new URL(req.url);
   const resource = searchParams.get("resource") || "expenses";
 
@@ -55,9 +55,13 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session || session.role === "CUSTOMER") {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
+  }
+  const session = auth.session;
+  if (session.role === "CUSTOMER") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
   const body = await req.json();
