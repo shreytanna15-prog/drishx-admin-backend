@@ -1,21 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { buildEmployeeAuditScope } from "../../../lib/audit";
 import { buildAuditListWhere } from "../../../lib/audit-query";
 
-function requireStaff(session: ReturnType<typeof getSession>) {
-  if (!session) return { error: NextResponse.json({ error: "Unauthorized." }, { status: 401 }) };
-  if (session.role === "CUSTOMER") {
-    return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) };
-  }
-  return { session };
-}
-
 export async function GET(req: NextRequest) {
-  const auth = requireStaff(getSession(req));
-  if (auth.error) return auth.error;
-  const { session } = auth;
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
+  if (session.role === "CUSTOMER") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
 
   try {
     const scope =

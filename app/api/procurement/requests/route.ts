@@ -6,7 +6,7 @@ import {
   ProcurementRequestStatus,
   type Prisma,
 } from "@prisma/client";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { requireStaffPermission } from "../../../lib/staff-access";
 import { prisma } from "../../../lib/prisma";
 import { buildAuditRequestContext } from "../../../lib/audit";
@@ -36,10 +36,11 @@ function oneOf<T extends string>(raw: string | null, allowed: readonly T[]): T |
 // Access: ADMIN | EMPLOYEE (procurement.view)
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
@@ -182,10 +183,11 @@ function parseDate(raw: string | null): Date | undefined {
 // Manual procurement requirement (procurement PDF §2.3).
 // ─────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }

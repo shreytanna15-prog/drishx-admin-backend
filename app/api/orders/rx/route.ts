@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 
 import { generateUniqueOrderNumber } from "../../../lib/order-numbers";
 import {
@@ -27,10 +27,11 @@ function isStaffRole(role: string): boolean {
 
 // POST /api/orders/rx — place a custom prescription (RX) order
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "CUSTOMER" && !isStaffRole(session.role)) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }

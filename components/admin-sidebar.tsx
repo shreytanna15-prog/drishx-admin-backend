@@ -14,6 +14,7 @@ import {
   FlaskConical,
   Gauge,
   Home,
+  LayoutGrid,
   Layers,
   List,
   Package,
@@ -65,6 +66,11 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Order Management",
     items: [
       { title: "Orders", icon: ShoppingCart, href: "/orders" },
+      {
+        title: "Orders overview",
+        icon: LayoutGrid,
+        href: "/orders/overview",
+      },
       { title: "Rx Orders", icon: FlaskConical, href: "/orders/rx-lab" },
       {
         title: "Dispatch Management",

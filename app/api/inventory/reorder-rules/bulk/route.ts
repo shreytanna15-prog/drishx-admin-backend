@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LensType } from "@prisma/client";
-import { getSession } from "../../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../../lib/session-auth";
 import { prisma } from "../../../../lib/prisma";
 import {
   actorFromSession,
@@ -38,10 +38,11 @@ type BulkItem = {
  * itself runs in one transaction.
  */
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
   }

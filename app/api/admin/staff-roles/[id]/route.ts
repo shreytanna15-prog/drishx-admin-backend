@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
-import { getSession } from "../../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../../lib/session-auth";
 import { serializeStaffRole } from "../../../../lib/staff-access";
 import { parsePermissionList } from "../../../../lib/staff-permissions";
 
 function requireAdmin(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return {
-      error: NextResponse.json({ error: "Unauthorized." }, { status: 401 }),
-    };
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return { error: auth.error };
   }
+  const session = auth.session;
   if (session.role !== "ADMIN") {
     return {
       error: NextResponse.json({ error: "Forbidden." }, { status: 403 }),

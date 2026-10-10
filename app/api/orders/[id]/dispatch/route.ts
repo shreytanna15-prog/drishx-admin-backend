@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { InvoiceStatus, NotificationType } from "@prisma/client";
-import { getSession } from "../../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../../lib/session-auth";
 import { prisma } from "../../../../lib/prisma";
 import {
   canTransitionStatus,
@@ -46,8 +46,9 @@ export async function POST(
     return NextResponse.json({ error: "Invalid order id." }, { status: 400 });
   }
 
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
 
   try {
     const body = await req.json().catch(() => null);

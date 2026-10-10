@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../../lib/session-auth";
 
 import {
   getSignedOrderImageUrl,
@@ -13,10 +13,11 @@ const ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/we
 
 // POST /api/orders/rx/prescription — upload prescription attachment for RX orders
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   const isStaff = session.role === "ADMIN" || session.role === "EMPLOYEE";
   if (session.role !== "CUSTOMER" && !isStaff) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });

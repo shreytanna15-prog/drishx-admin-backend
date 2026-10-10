@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { getTodayKey, markPresentAdmin } from "../../../lib/attendance";
 import {
   AuditAction,
@@ -12,10 +12,11 @@ import { prisma } from "../../../lib/prisma";
 
 /** POST /api/attendance/manual — admin: mark employee present without QR */
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
   }

@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/app/lib/session-auth";
+import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import { validateRedemption } from "@/app/lib/loyalty/redeem";
 import { getLoyaltySettings } from "@/app/lib/loyalty/settings";
 import { roundMoney } from "@/app/lib/finance/tax-calc";
 
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session || session.role !== "CUSTOMER") {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
+  }
+  const session = auth.session;
+  if (session.role !== "CUSTOMER") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);

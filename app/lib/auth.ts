@@ -159,30 +159,38 @@ export async function rotateRefreshToken(rawToken: string): Promise<RotateRefres
     return { ok: false, code: "TOKEN_INVALID" };
   }
 
-  // Atomic claim — only one concurrent rotator wins.
-  const claimed = await prisma.refreshToken.updateMany({
-    where: { id: existing.id, revokedAt: null },
-    data: { revokedAt: new Date() },
-  });
-
-  if (claimed.count === 0) {
-    // Lost the race; winner already issued a successor. Do not wipe family.
-    return { ok: false, code: "TOKEN_INVALID" };
-  }
-
+  // Claim + issue successor in one transaction so a failed create cannot
+  // leave the family with a revoked parent and no replacement token.
+  // DB / infra errors must propagate — callers map them to transient 503
+  // so clients do not treat outages as forced logout.
   const rawNewToken = generateRawRefreshToken();
   const newHash = hashRefreshToken(rawNewToken);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
 
-  await prisma.refreshToken.create({
-    data: {
-      userId: existing.userId,
-      tokenHash: newHash,
-      familyId: existing.familyId,
-      expiresAt,
-      userAgent: existing.userAgent,
-    },
+  const issued = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.refreshToken.updateMany({
+      where: { id: existing.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      return null;
+    }
+    await tx.refreshToken.create({
+      data: {
+        userId: existing.userId,
+        tokenHash: newHash,
+        familyId: existing.familyId,
+        expiresAt,
+        userAgent: existing.userAgent,
+      },
+    });
+    return true;
   });
+
+  if (!issued) {
+    // Lost the race; winner already issued a successor. Do not wipe family.
+    return { ok: false, code: "TOKEN_INVALID" };
+  }
 
   return {
     ok: true,

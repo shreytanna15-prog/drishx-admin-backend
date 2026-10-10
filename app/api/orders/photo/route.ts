@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { LensType } from "@prisma/client";
 
 import { prisma } from "../../../lib/prisma";
@@ -19,10 +19,11 @@ const ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/we
 
 // POST /api/orders/photo — upload prescription image to Supabase and create an Order row
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
   if (session.role !== "CUSTOMER") {
     return NextResponse.json({ error: "Only customers can submit photo orders." }, { status: 403 });
   }
