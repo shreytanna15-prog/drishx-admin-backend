@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { LensType } from "@prisma/client";
 import { CartLineType } from "../../../lib/cart-line-type";
 import {
@@ -185,9 +185,9 @@ async function getLensOnHandQuantity(lensType: LensType, lensId: string): Promis
 
 // POST /api/cart/wholesale — persist one wholesale batch cart line
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
+  const { session, error } = getSessionOrUnauthorized(req);
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    return error;
   }
 
   try {

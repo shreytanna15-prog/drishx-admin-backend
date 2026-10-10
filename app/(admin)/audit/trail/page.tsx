@@ -13,7 +13,7 @@ import {
 } from "@/app/lib/admin-audit";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { getAccessToken } from "@/app/lib/client-auth";
+import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
 
 export default function AuditTrailPage() {
   const [items, setItems] = useState<AuditEventRow[]>([]);
@@ -51,16 +51,12 @@ export default function AuditTrailPage() {
   }, [load]);
 
   function handleExport() {
-    const token = getAccessToken();
     const url = auditExportUrl({
       module: module || undefined,
       action: action || undefined,
       q: query || undefined,
     });
-    fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: "include",
-    })
+    void adminAuthFetch(url, { method: "GET" })
       .then(async (res) => {
         if (!res.ok) throw new Error("Export failed");
         const blob = await res.blob();

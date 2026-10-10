@@ -60,6 +60,7 @@ export function AdminChrome({ children }: { children: ReactNode }) {
   useEffect(() => {
     registerAuthFailureHandler(() => {
       clearListCache();
+      clearSession();
       router.replace("/login?session=expired");
     });
   }, [router]);

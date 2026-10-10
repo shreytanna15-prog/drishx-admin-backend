@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LensType } from "@prisma/client";
 import { CartLineType } from "../../lib/cart-line-type";
-import { getSession } from "../../lib/session-auth";
+import { getSession, getSessionOrUnauthorized } from "../../lib/session-auth";
 import {
   CART_LINE_TTL_MS,
   batchGetLensOnHand,
@@ -50,9 +50,9 @@ function resolveActingCustomerId(req: NextRequest, session: ReturnType<typeof ge
 
 // GET /api/cart — list active cart reservations for the signed-in customer
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
+  const { session, error } = getSessionOrUnauthorized(req);
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    return error;
   }
   const actingUserId = resolveActingCustomerId(req, session);
   if (!actingUserId) {
@@ -102,9 +102,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/cart — add or update a cart line (reserves stock up to available qty)
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
+  const { session, error } = getSessionOrUnauthorized(req);
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    return error;
   }
 
   try {
@@ -180,9 +180,9 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/cart — clear entire cart or one line (?cartLineKey=...)
 export async function DELETE(req: NextRequest) {
-  const session = getSession(req);
+  const { session, error } = getSessionOrUnauthorized(req);
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    return error;
   }
   const actingUserId = resolveActingCustomerId(req, session);
   if (!actingUserId) {

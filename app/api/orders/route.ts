@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../lib/session-auth";
 import { orderTotalFromPairPrice } from "../../lib/lens-pricing";
 import { prisma } from "../../lib/prisma";
 import { requireStaffPermission } from "../../lib/staff-access";
@@ -46,10 +46,11 @@ import {
 // ADMIN: all orders (optional ?employeeId=)
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
 
   if (session.role === "EMPLOYEE") {
     const gate = await requireStaffPermission(session, [
@@ -188,10 +189,11 @@ export async function GET(req: NextRequest) {
 // Body: { userId?, user?: { name, email, password? }, lensType, quantity, lensId?, sph?, cyl?, axis?, add?, eye?, notes? }
 // ─────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
   }
+  const session = auth.session;
 
   if (session.role === "EMPLOYEE") {
     const gate = await requireStaffPermission(session, "orders.create_on_behalf");

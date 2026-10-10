@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { prisma } from "../../../lib/prisma";
 import { InvoiceStatus, NotificationType, OrderStatus, Prisma } from "@prisma/client";
 import {
@@ -52,8 +52,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
 
   try {
     const order = await prisma.order.findUnique({
@@ -115,8 +116,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
 
   try {
     const body = await req.json();
@@ -672,8 +674,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
   if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
@@ -834,8 +837,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = getSession(req);
-  if (!session) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) return auth.error;
+  const session = auth.session;
   if (session.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden. Admin only." }, { status: 403 });
   }

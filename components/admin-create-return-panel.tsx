@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
+import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
 import {
   type AdminOrder,
   formatCatalogSummary,
@@ -328,14 +329,11 @@ export function AdminCreateReturnPanel({
       );
 
       if (files.length > 0) {
-        const { getToken } = await import("@/app/lib/client-auth");
-        const token = getToken();
         for (const file of files) {
           const formData = new FormData();
           formData.set("photo", file);
-          const res = await fetch(`/api/returns/${created.id}/images`, {
+          const res = await adminAuthFetch(`/api/returns/${created.id}/images`, {
             method: "POST",
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
             body: formData,
           });
           if (!res.ok) {
