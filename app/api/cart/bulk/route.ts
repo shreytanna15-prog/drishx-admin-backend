@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "../../../lib/session-auth";
+import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { LensType } from "@prisma/client";
 import { CartLineType } from "../../../lib/cart-line-type";
 import {
@@ -81,9 +81,9 @@ function parseBulkLine(
 
 // POST /api/cart/bulk — add or replace many cart lines in one SQL upsert
 export async function POST(req: NextRequest) {
-  const session = getSession(req);
+  const { session, error } = getSessionOrUnauthorized(req);
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    return error;
   }
 
   try {

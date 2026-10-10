@@ -23,6 +23,15 @@ export default function LoginPage() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionExpired = params.get("session") === "expired";
+    if (sessionExpired) {
+      clearSession();
+      setError("Your session expired. Please sign in again.");
+      setChecking(false);
+      return;
+    }
+
     const token = getToken();
     const user = getStoredUser();
     if (token && isAdminUser(user)) {

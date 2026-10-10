@@ -115,29 +115,60 @@ export type RotateRefreshResult =
     }
   | { ok: false; code: "TOKEN_INVALID" | "TOKEN_EXPIRED" };
 
+/** Grace window where presenting a just-rotated refresh token is treated as a
+ * concurrent race (do not wipe the family) rather than token theft. */
+const REFRESH_ROTATION_GRACE_MS = 30_000;
+
 export async function rotateRefreshToken(rawToken: string): Promise<RotateRefreshResult> {
   const tokenHash = hashRefreshToken(rawToken);
   const existing = await prisma.refreshToken.findUnique({ where: { tokenHash } });
 
-  if (!existing || existing.revokedAt) {
-    if (existing?.revokedAt) {
-      await revokeRefreshFamily(existing.familyId);
-    }
+  if (!existing) {
     return { ok: false, code: "TOKEN_INVALID" };
   }
 
   if (existing.expiresAt.getTime() <= Date.now()) {
-    await prisma.refreshToken.update({
-      where: { id: existing.id },
-      data: { revokedAt: new Date() },
-    });
+    if (!existing.revokedAt) {
+      await prisma.refreshToken.update({
+        where: { id: existing.id },
+        data: { revokedAt: new Date() },
+      });
+    }
     return { ok: false, code: "TOKEN_EXPIRED" };
   }
 
-  await prisma.refreshToken.update({
-    where: { id: existing.id },
+  if (existing.revokedAt) {
+    // Concurrent refresh: another request already rotated this token. If a
+    // successor is still active within the grace window, do NOT revoke the
+    // whole family (that would log out tabs that just refreshed successfully).
+    const ageMs = Date.now() - existing.revokedAt.getTime();
+    if (ageMs < REFRESH_ROTATION_GRACE_MS) {
+      const successor = await prisma.refreshToken.findFirst({
+        where: {
+          familyId: existing.familyId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: { id: true },
+      });
+      if (successor) {
+        return { ok: false, code: "TOKEN_INVALID" };
+      }
+    }
+    await revokeRefreshFamily(existing.familyId);
+    return { ok: false, code: "TOKEN_INVALID" };
+  }
+
+  // Atomic claim — only one concurrent rotator wins.
+  const claimed = await prisma.refreshToken.updateMany({
+    where: { id: existing.id, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+
+  if (claimed.count === 0) {
+    // Lost the race; winner already issued a successor. Do not wipe family.
+    return { ok: false, code: "TOKEN_INVALID" };
+  }
 
   const rawNewToken = generateRawRefreshToken();
   const newHash = hashRefreshToken(rawNewToken);

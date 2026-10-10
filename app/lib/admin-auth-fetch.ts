@@ -83,7 +83,8 @@ export async function adminAuthFetch(
   const headers = new Headers(init?.headers);
   const token = getAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (init?.body && !headers.has("Content-Type")) {
+  // Do not force Content-Type for FormData — browser must set multipart boundary.
+  if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -95,6 +96,7 @@ export async function adminAuthFetch(
 
   const refreshed = await refreshAccessToken();
   if (!refreshed) {
+    clearSession();
     onAuthFailure?.();
     return res;
   }
@@ -102,12 +104,13 @@ export async function adminAuthFetch(
   const retryHeaders = new Headers(init?.headers);
   const nextToken = getAccessToken();
   if (nextToken) retryHeaders.set("Authorization", `Bearer ${nextToken}`);
-  if (init?.body && !retryHeaders.has("Content-Type")) {
+  if (init?.body && !(init.body instanceof FormData) && !retryHeaders.has("Content-Type")) {
     retryHeaders.set("Content-Type", "application/json");
   }
 
   res = await fetch(path, { ...init, headers: retryHeaders, credentials: "include" });
   if (res.status === 401) {
+    clearSession();
     onAuthFailure?.();
   }
   return res;

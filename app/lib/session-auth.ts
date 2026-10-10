@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken, type SessionPayload } from "./auth";
 import { unauthorizedResponse } from "./auth-errors";
 
@@ -10,12 +10,16 @@ export function getSession(req: NextRequest): SessionPayload | null {
   return result.ok ? result.payload : null;
 }
 
-export function getSessionOrUnauthorized(req: NextRequest) {
+export function getSessionOrUnauthorized(
+  req: NextRequest
+):
+  | { session: SessionPayload; error: null }
+  | { session: null; error: NextResponse } {
   const auth = req.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   if (!token) {
     return {
-      session: null as SessionPayload | null,
+      session: null,
       error: unauthorizedResponse("TOKEN_MISSING"),
     };
   }
@@ -23,7 +27,7 @@ export function getSessionOrUnauthorized(req: NextRequest) {
   const result = verifyAccessToken(token);
   if (!result.ok) {
     return {
-      session: null as SessionPayload | null,
+      session: null,
       error: unauthorizedResponse(result.code),
     };
   }
