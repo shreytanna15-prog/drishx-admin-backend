@@ -14,6 +14,16 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
+type StatusAction = "approve" | "reject" | "reopen" | "suspend" | "activate";
+
+const ACTIONS = new Set<StatusAction>([
+  "approve",
+  "reject",
+  "reopen",
+  "suspend",
+  "activate",
+]);
+
 export async function PUT(req: NextRequest, context: RouteContext) {
   const auth = getSessionOrUnauthorized(req);
   if (!auth.session) {
@@ -27,11 +37,19 @@ export async function PUT(req: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const body = await req.json();
-    const action = String(body.action ?? "").trim().toLowerCase();
-    const rejectionReason = body.rejectionReason ? String(body.rejectionReason).trim() : null;
+    const action = String(body.action ?? "").trim().toLowerCase() as StatusAction;
+    const rejectionReason = body.rejectionReason
+      ? String(body.rejectionReason).trim()
+      : null;
 
-    if (action !== "approve" && action !== "reject") {
-      return NextResponse.json({ error: "action must be approve or reject." }, { status: 400 });
+    if (!ACTIONS.has(action)) {
+      return NextResponse.json(
+        {
+          error:
+            "action must be approve, reject, reopen, suspend, or activate.",
+        },
+        { status: 400 }
+      );
     }
 
     const user = await prisma.user.findUnique({ where: { id } });
@@ -39,56 +57,142 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Customer account not found." }, { status: 404 });
     }
 
-    if (!user.gstNumber) {
-      return NextResponse.json({ error: "Customer has not submitted GST details yet." }, { status: 400 });
+    if (action === "approve") {
+      if (!user.gstNumber) {
+        return NextResponse.json(
+          {
+            error:
+              "Customer has not submitted GST details yet. Incomplete signups cannot be approved.",
+          },
+          { status: 400 }
+        );
+      }
     }
 
     if (action === "reject" && !rejectionReason) {
-      return NextResponse.json({ error: "rejectionReason is required when rejecting." }, { status: 400 });
+      return NextResponse.json(
+        { error: "rejectionReason is required when rejecting." },
+        { status: 400 }
+      );
     }
 
-    const updated = await prisma.user.update({
-      where: { id },
-      data:
-        action === "approve"
+    if (action === "suspend" && user.approvalStatus !== "APPROVED") {
+      return NextResponse.json(
+        { error: "Only approved customers can be suspended." },
+        { status: 400 }
+      );
+    }
+
+    if (action === "activate") {
+      if (user.approvalStatus !== "APPROVED" || user.isActive) {
+        return NextResponse.json(
+          { error: "Only suspended approved customers can be reactivated." },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (action === "reopen") {
+      if (
+        user.approvalStatus !== "APPROVED" &&
+        user.approvalStatus !== "REJECTED"
+      ) {
+        return NextResponse.json(
+          { error: "Only approved or rejected customers can be reopened to pending." },
+          { status: 400 }
+        );
+      }
+    }
+
+    const now = new Date();
+    const data =
+      action === "approve"
+        ? {
+            approvalStatus: "APPROVED" as const,
+            isApproved: true,
+            isActive: true,
+            approvedAt: now,
+            approvedById: session.userId,
+            rejectionReason: null,
+          }
+        : action === "reject"
           ? {
-              approvalStatus: "APPROVED",
-              isApproved: true,
-              isActive: true,
-              approvedAt: new Date(),
-              approvedById: session.userId,
-              rejectionReason: null,
-            }
-          : {
-              approvalStatus: "REJECTED",
+              approvalStatus: "REJECTED" as const,
               isApproved: false,
               isActive: false,
               approvedAt: null,
               approvedById: session.userId,
               rejectionReason: rejectionReason,
-            },
+            }
+          : action === "reopen"
+            ? {
+                approvalStatus: "PENDING_REVIEW" as const,
+                isApproved: false,
+                isActive: true,
+                approvedAt: null,
+                approvedById: null,
+                rejectionReason: null,
+              }
+            : action === "suspend"
+              ? {
+                  isActive: false,
+                }
+              : {
+                  // activate
+                  isActive: true,
+                };
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data,
     });
 
     const auditCtx = buildAuditRequestContext(req);
+    const auditAction =
+      action === "approve" || action === "reopen" || action === "activate"
+        ? AuditAction.CUSTOMER_APPROVED
+        : AuditAction.CUSTOMER_REJECTED;
+
+    const activityMessage =
+      action === "approve"
+        ? "Customer account approved"
+        : action === "reject"
+          ? "Customer account rejected"
+          : action === "reopen"
+            ? "Customer reopened to pending review"
+            : action === "suspend"
+              ? "Customer account suspended"
+              : "Customer account reactivated";
+
     await recordAuditEvent(prisma, {
-      action:
-        action === "approve"
-          ? AuditAction.CUSTOMER_APPROVED
-          : AuditAction.CUSTOMER_REJECTED,
+      action: auditAction,
       module: AuditModule.CUSTOMER,
       entityType: "User",
       entityId: id,
       actor: actorFromSession(session),
       request: auditCtx,
       reasonText: rejectionReason,
-      context: { email: user.email, gstNumber: user.gstNumber },
-      activityMessage:
-        action === "approve" ? "Customer account approved" : "Customer account rejected",
+      context: {
+        email: user.email,
+        gstNumber: user.gstNumber,
+        statusAction: action,
+        previousStatus: user.approvalStatus,
+        previousActive: user.isActive,
+      },
+      activityMessage,
     });
+
+    const messages: Record<StatusAction, string> = {
+      approve: "Customer approved.",
+      reject: "Customer rejected.",
+      reopen: "Customer reopened to pending review.",
+      suspend: "Customer suspended.",
+      activate: "Customer reactivated.",
+    };
 
     return NextResponse.json({
       user: toSafeUser(updated),
-      message: action === "approve" ? "Customer approved." : "Customer rejected.",
+      message: messages[action],
     });
   } catch (error) {
     console.error("PUT /api/users/[id]/approve error:", error);

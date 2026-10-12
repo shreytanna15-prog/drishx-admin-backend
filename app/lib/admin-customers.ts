@@ -62,6 +62,28 @@ export function formatApprovalStatus(status: string) {
     .join(" ");
 }
 
+/** Pending with GST — ready for approve/reject. */
+export function isPendingReady(customer: Pick<AdminCustomer, "approvalStatus" | "gstNumber">) {
+  return customer.approvalStatus === "PENDING_REVIEW" && Boolean(customer.gstNumber);
+}
+
+/** Abandoned / mid-wizard signup — no GST yet. */
+export function isIncompleteSignup(
+  customer: Pick<AdminCustomer, "approvalStatus" | "gstNumber">
+) {
+  return customer.approvalStatus === "PENDING_REVIEW" && !customer.gstNumber;
+}
+
+export function isSuspendedCustomer(
+  customer: Pick<AdminCustomer, "approvalStatus" | "isApproved" | "isActive">
+) {
+  return (
+    customer.approvalStatus === "APPROVED" &&
+    customer.isApproved &&
+    !customer.isActive
+  );
+}
+
 export function formatCustomerDate(value: string | null) {
   if (!value) return "—";
   const date = new Date(value);

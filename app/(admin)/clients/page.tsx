@@ -7,6 +7,7 @@ import { Check, ChevronRight, X } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { ListSkeleton } from "@/components/admin-skeletons";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
@@ -16,15 +17,19 @@ import {
   customerDisplayName,
   customerPersonName,
   formatCustomerDate,
+  isSuspendedCustomer,
   matchesCustomerSearch,
 } from "@/app/lib/admin-customers";
 import { useProgressiveList } from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
 
-type ClientsTab = "pending" | "approved";
+type ClientsTab = "pending" | "incomplete" | "approved" | "rejected";
 
 function parseTab(value: string | null): ClientsTab {
-  return value === "approved" ? "approved" : "pending";
+  if (value === "approved") return "approved";
+  if (value === "incomplete") return "incomplete";
+  if (value === "rejected") return "rejected";
+  return "pending";
 }
 
 function ClientsPageContent() {
@@ -36,8 +41,12 @@ function ClientsPageContent() {
     () => readListCache<AdminCustomer[]>("customers") ?? []
   );
   const [pending, setPending] = useState<AdminCustomer[]>([]);
+  const [incomplete, setIncomplete] = useState<AdminCustomer[]>([]);
+  const [rejected, setRejected] = useState<AdminCustomer[]>([]);
   const [loadingApproved, setLoadingApproved] = useState(customers.length === 0);
   const [loadingPending, setLoadingPending] = useState(true);
+  const [loadingIncomplete, setLoadingIncomplete] = useState(true);
+  const [loadingRejected, setLoadingRejected] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
   const [query, setQuery] = useState("");
@@ -63,7 +72,7 @@ function ClientsPageContent() {
 
     try {
       const data = await adminFetch<{ customers: AdminCustomer[] }>(
-        "/api/users/customers"
+        "/api/users/customers?status=approved"
       );
       const list = Array.isArray(data.customers) ? data.customers : [];
       writeListCache("customers", list);
@@ -85,7 +94,7 @@ function ClientsPageContent() {
     setLoadingPending(true);
     try {
       const data = await adminFetch<{ users: AdminCustomer[] }>(
-        "/api/users/pending"
+        "/api/users/pending?bucket=ready"
       );
       setPending(Array.isArray(data.users) ? data.users : []);
     } catch (err) {
@@ -99,12 +108,53 @@ function ClientsPageContent() {
     }
   }, []);
 
+  const loadIncomplete = useCallback(async () => {
+    setLoadingIncomplete(true);
+    try {
+      const data = await adminFetch<{ users: AdminCustomer[] }>(
+        "/api/users/pending?bucket=incomplete"
+      );
+      setIncomplete(Array.isArray(data.users) ? data.users : []);
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Failed to load incomplete signups."
+      );
+    } finally {
+      setLoadingIncomplete(false);
+    }
+  }, []);
+
+  const loadRejected = useCallback(async () => {
+    setLoadingRejected(true);
+    try {
+      const data = await adminFetch<{ customers: AdminCustomer[] }>(
+        "/api/users/customers?status=rejected"
+      );
+      setRejected(Array.isArray(data.customers) ? data.customers : []);
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Failed to load rejected customers."
+      );
+    } finally {
+      setLoadingRejected(false);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setError("");
-      await Promise.all([loadApproved(), loadPending()]);
+      await Promise.all([
+        loadApproved(),
+        loadPending(),
+        loadIncomplete(),
+        loadRejected(),
+      ]);
       if (cancelled) return;
     }
 
@@ -112,7 +162,7 @@ function ClientsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [loadApproved, loadPending]);
+  }, [loadApproved, loadPending, loadIncomplete, loadRejected]);
 
   const filteredApproved = useMemo(
     () => customers.filter((customer) => matchesCustomerSearch(customer, query)),
@@ -122,6 +172,16 @@ function ClientsPageContent() {
   const filteredPending = useMemo(
     () => pending.filter((customer) => matchesCustomerSearch(customer, query)),
     [pending, query]
+  );
+
+  const filteredIncomplete = useMemo(
+    () => incomplete.filter((customer) => matchesCustomerSearch(customer, query)),
+    [incomplete, query]
+  );
+
+  const filteredRejected = useMemo(
+    () => rejected.filter((customer) => matchesCustomerSearch(customer, query)),
+    [rejected, query]
   );
 
   const { visibleItems, hasMore, sentinelIndex, setSentinelNode } =
@@ -175,6 +235,8 @@ function ClientsPageContent() {
         body: JSON.stringify({ action: "reject", rejectionReason }),
       });
       setPending((prev) => prev.filter((item) => item.id !== customer.id));
+      setIncomplete((prev) => prev.filter((item) => item.id !== customer.id));
+      await loadRejected();
     } catch (err) {
       setActionError(
         err instanceof AdminApiError
@@ -186,19 +248,127 @@ function ClientsPageContent() {
     }
   }
 
-  const loading = tab === "pending" ? loadingPending : loadingApproved;
+  const loading =
+    tab === "pending"
+      ? loadingPending
+      : tab === "incomplete"
+        ? loadingIncomplete
+        : tab === "rejected"
+          ? loadingRejected
+          : loadingApproved;
+
   const listCount =
-    tab === "pending" ? filteredPending.length : filteredApproved.length;
+    tab === "pending"
+      ? filteredPending.length
+      : tab === "incomplete"
+        ? filteredIncomplete.length
+        : tab === "rejected"
+          ? filteredRejected.length
+          : filteredApproved.length;
+
+  const subtitle =
+    tab === "pending"
+      ? "GST submitted — ready to approve or reject"
+      : tab === "incomplete"
+        ? "Abandoned or mid-wizard signups (no GST yet)"
+        : tab === "rejected"
+          ? "Rejected applications"
+          : "Approved customers";
+
+  const tabs: { id: ClientsTab; label: string; count?: number }[] = [
+    { id: "pending", label: "Pending approvals", count: pending.length },
+    { id: "incomplete", label: "Incomplete", count: incomplete.length },
+    { id: "approved", label: "Approved" },
+    { id: "rejected", label: "Rejected", count: rejected.length },
+  ];
+
+  function renderActionList(
+    rows: AdminCustomer[],
+    emptyMsg: string,
+    options: { showApprove: boolean; from: ClientsTab }
+  ) {
+    if (rows.length === 0) {
+      return (
+        <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-16 text-center text-sm text-(--brand-text-muted)">
+          {query.trim() ? "No customers match your search." : emptyMsg}
+        </div>
+      );
+    }
+
+    return (
+      <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+        <ul className="divide-y divide-(--brand-card-border)">
+          {rows.map((customer) => (
+            <li
+              key={customer.id}
+              className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+            >
+              <Link
+                href={`/clients/${customer.id}?from=${options.from}`}
+                className="min-w-0 flex-1 transition hover:opacity-90"
+              >
+                <p className="truncate font-extrabold text-(--brand-text)">
+                  {customerDisplayName(customer)}
+                </p>
+                <p className="mt-0.5 truncate text-sm text-(--brand-text-muted)">
+                  {customerPersonName(customer)} · {customer.email}
+                </p>
+                <p className="mt-1 truncate text-xs text-(--brand-text-muted)">
+                  {[
+                    customer.gstNumber
+                      ? `GST ${customer.gstNumber}`
+                      : "No GST submitted",
+                    customer.shopName || customer.businessName,
+                    customer.mobileNumber,
+                    customer.city || customer.state,
+                    `Updated ${formatCustomerDate(customer.updatedAt)}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              </Link>
+
+              <div className="flex shrink-0 items-center gap-2">
+                {options.showApprove ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={actingId === customer.id}
+                    onClick={() => void handleApprove(customer)}
+                    className="h-9 gap-1.5 rounded-xl bg-(--brand-primary) px-3 font-bold text-black hover:bg-(--brand-primary)/90"
+                  >
+                    <Check className="size-3.5" />
+                    {actingId === customer.id ? "…" : "Approve"}
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  disabled={actingId === customer.id}
+                  onClick={() => void handleReject(customer)}
+                  className="h-9 gap-1.5 rounded-xl px-3 font-bold"
+                >
+                  <X className="size-3.5" />
+                  Reject
+                </Button>
+                <Link
+                  href={`/clients/${customer.id}?from=${options.from}`}
+                  className="inline-flex size-9 items-center justify-center rounded-xl border border-(--brand-card-border) text-(--brand-text-muted) hover:bg-[rgba(240,161,50,0.06)]"
+                  aria-label="View details"
+                >
+                  <ChevronRight className="size-4" />
+                </Link>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
 
   return (
-    <AdminPage
-      title="Clients"
-      subtitle={
-        tab === "pending"
-          ? "Pending registration approvals"
-          : "Approved customers"
-      }
-    >
+    <AdminPage title="Clients" subtitle={subtitle}>
       <div className="mb-5 flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -208,9 +378,7 @@ function ClientsPageContent() {
             <p className="mt-1 text-sm text-(--brand-text-muted)">
               {loading
                 ? "…"
-                : `${listCount} ${
-                    tab === "pending" ? "pending" : "approved"
-                  } customer${listCount === 1 ? "" : "s"}`}
+                : `${listCount} customer${listCount === 1 ? "" : "s"}`}
             </p>
           </div>
           <Input
@@ -221,36 +389,27 @@ function ClientsPageContent() {
           />
         </div>
 
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setTab("pending")}
-            className={cn(
-              "rounded-xl border px-4 py-2 text-sm font-bold transition",
-              tab === "pending"
-                ? "border-(--brand-primary) bg-[rgba(240,161,50,0.14)] text-(--brand-primary)"
-                : "border-(--brand-card-border) bg-(--brand-card) text-(--brand-text-muted) hover:bg-[rgba(240,161,50,0.06)]"
-            )}
-          >
-            Pending approvals
-            {pending.length > 0 ? (
-              <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-(--brand-primary) px-1.5 text-xs font-extrabold text-black">
-                {pending.length}
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("approved")}
-            className={cn(
-              "rounded-xl border px-4 py-2 text-sm font-bold transition",
-              tab === "approved"
-                ? "border-(--brand-primary) bg-[rgba(240,161,50,0.14)] text-(--brand-primary)"
-                : "border-(--brand-card-border) bg-(--brand-card) text-(--brand-text-muted) hover:bg-[rgba(240,161,50,0.06)]"
-            )}
-          >
-            Approved
-          </button>
+        <div className="flex flex-wrap gap-2">
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTab(item.id)}
+              className={cn(
+                "rounded-xl border px-4 py-2 text-sm font-bold transition",
+                tab === item.id
+                  ? "border-(--brand-primary) bg-[rgba(240,161,50,0.14)] text-(--brand-primary)"
+                  : "border-(--brand-card-border) bg-(--brand-card) text-(--brand-text-muted) hover:bg-[rgba(240,161,50,0.06)]"
+              )}
+            >
+              {item.label}
+              {item.count != null && item.count > 0 ? (
+                <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-(--brand-primary) px-1.5 text-xs font-extrabold text-black">
+                  {item.count}
+                </span>
+              ) : null}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -269,140 +428,136 @@ function ClientsPageContent() {
       {tab === "pending" ? (
         loadingPending ? (
           <ListSkeleton compact rows={6} />
-        ) : filteredPending.length === 0 ? (
+        ) : (
+          renderActionList(filteredPending, "No pending approval requests.", {
+            showApprove: true,
+            from: "pending",
+          })
+        )
+      ) : null}
+
+      {tab === "incomplete" ? (
+        loadingIncomplete ? (
+          <ListSkeleton compact rows={6} />
+        ) : (
+          renderActionList(
+            filteredIncomplete,
+            "No incomplete signups.",
+            { showApprove: false, from: "incomplete" }
+          )
+        )
+      ) : null}
+
+      {tab === "rejected" ? (
+        loadingRejected ? (
+          <ListSkeleton compact rows={6} />
+        ) : filteredRejected.length === 0 ? (
           <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-16 text-center text-sm text-(--brand-text-muted)">
             {query.trim()
-              ? "No pending requests match your search."
-              : "No pending approval requests."}
+              ? "No rejected customers match your search."
+              : "No rejected customers."}
           </div>
         ) : (
           <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
             <ul className="divide-y divide-(--brand-card-border)">
-              {filteredPending.map((customer) => (
-                <li
-                  key={customer.id}
-                  className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
-                >
+              {filteredRejected.map((customer) => (
+                <li key={customer.id}>
                   <Link
-                    href={`/clients/${customer.id}?from=pending`}
-                    className="min-w-0 flex-1 transition hover:opacity-90"
+                    href={`/clients/${customer.id}?from=rejected`}
+                    className="flex items-center justify-between gap-4 px-4 py-4 transition hover:bg-[rgba(240,161,50,0.06)] sm:px-5"
                   >
-                    <p className="truncate font-extrabold text-(--brand-text)">
-                      {customerDisplayName(customer)}
-                    </p>
-                    <p className="mt-0.5 truncate text-sm text-(--brand-text-muted)">
-                      {customerPersonName(customer)} · {customer.email}
-                    </p>
-                    <p className="mt-1 truncate text-xs text-(--brand-text-muted)">
-                      {[
-                        customer.gstNumber
-                          ? `GST ${customer.gstNumber}`
-                          : null,
-                        customer.shopName || customer.businessName,
-                        customer.mobileNumber,
-                        customer.city || customer.state,
-                        `Submitted ${formatCustomerDate(customer.updatedAt)}`,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
+                    <div className="min-w-0">
+                      <p className="truncate font-extrabold text-(--brand-text)">
+                        {customerDisplayName(customer)}
+                      </p>
+                      <p className="mt-0.5 truncate text-sm text-(--brand-text-muted)">
+                        {customer.email}
+                        {customer.rejectionReason
+                          ? ` · ${customer.rejectionReason}`
+                          : ""}
+                      </p>
+                    </div>
+                    <ChevronRight className="size-4 shrink-0 text-(--brand-text-muted)" />
                   </Link>
-
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={actingId === customer.id}
-                      onClick={() => void handleApprove(customer)}
-                      className="h-9 gap-1.5 rounded-xl bg-(--brand-primary) px-3 font-bold text-black hover:bg-(--brand-primary)/90"
-                    >
-                      <Check className="size-3.5" />
-                      {actingId === customer.id ? "…" : "Approve"}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="destructive"
-                      disabled={actingId === customer.id}
-                      onClick={() => void handleReject(customer)}
-                      className="h-9 gap-1.5 rounded-xl px-3 font-bold"
-                    >
-                      <X className="size-3.5" />
-                      Reject
-                    </Button>
-                    <Link
-                      href={`/clients/${customer.id}?from=pending`}
-                      className="inline-flex size-9 items-center justify-center rounded-xl border border-(--brand-card-border) text-(--brand-text-muted) hover:bg-[rgba(240,161,50,0.06)]"
-                      aria-label="View details"
-                    >
-                      <ChevronRight className="size-4" />
-                    </Link>
-                  </div>
                 </li>
               ))}
             </ul>
           </div>
         )
-      ) : loadingApproved ? (
-        <ListSkeleton compact rows={8} />
-      ) : filteredApproved.length === 0 ? (
-        <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-16 text-center text-sm text-(--brand-text-muted)">
-          {query.trim()
-            ? "No customers match your search."
-            : "No approved customers found yet."}
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
-          <ul className="divide-y divide-(--brand-card-border)">
-            {visibleItems.map((customer, index) => (
-              <li key={customer.id} className="relative">
-                <Link
-                  href={`/clients/${customer.id}`}
-                  className="flex items-center justify-between gap-4 px-4 py-4 transition hover:bg-[rgba(240,161,50,0.06)] sm:px-5"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-extrabold text-(--brand-text)">
-                      {customerDisplayName(customer)}
-                    </p>
-                    <p className="mt-0.5 truncate text-sm text-(--brand-text-muted)">
-                      {customerPersonName(customer)}
-                      {customer.businessName?.trim() && customer.name?.trim()
-                        ? ` · ${customer.email}`
-                        : ` · ${customer.email}`}
-                    </p>
-                    {(customer.gstNumber || customer.state) && (
-                      <p className="mt-1 truncate text-xs text-(--brand-text-muted)">
-                        {[
-                          customer.gstNumber
-                            ? `GST ${customer.gstNumber}`
-                            : null,
-                          customer.state,
-                          customer.pincode,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
+      ) : null}
+
+      {tab === "approved" ? (
+        loadingApproved ? (
+          <ListSkeleton compact rows={8} />
+        ) : filteredApproved.length === 0 ? (
+          <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-16 text-center text-sm text-(--brand-text-muted)">
+            {query.trim()
+              ? "No customers match your search."
+              : "No approved customers found yet."}
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+            <ul className="divide-y divide-(--brand-card-border)">
+              {visibleItems.map((customer, index) => (
+                <li key={customer.id} className="relative">
+                  <Link
+                    href={`/clients/${customer.id}`}
+                    className="flex items-center justify-between gap-4 px-4 py-4 transition hover:bg-[rgba(240,161,50,0.06)] sm:px-5"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-extrabold text-(--brand-text)">
+                          {customerDisplayName(customer)}
+                        </p>
+                        {isSuspendedCustomer(customer) ? (
+                          <Badge
+                            variant="outline"
+                            className="rounded-md border-amber-400/50 bg-amber-500/15 text-[10px] font-bold text-amber-100"
+                          >
+                            Suspended
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="mt-0.5 truncate text-sm text-(--brand-text-muted)">
+                        {customerPersonName(customer)}
+                        {customer.businessName?.trim() && customer.name?.trim()
+                          ? ` · ${customer.email}`
+                          : ` · ${customer.email}`}
                       </p>
-                    )}
-                  </div>
-                  <ChevronRight className="size-4 shrink-0 text-(--brand-text-muted)" />
-                </Link>
-                {index === sentinelIndex && hasMore ? (
-                  <InfiniteScrollSentinel
-                    active
-                    setSentinelNode={setSentinelNode}
-                  />
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          {hasMore && visibleItems.length <= sentinelIndex ? (
-            <InfiniteScrollSentinel
-              active
-              setSentinelNode={setSentinelNode}
-            />
-          ) : null}
-        </div>
-      )}
+                      {(customer.gstNumber || customer.state) && (
+                        <p className="mt-1 truncate text-xs text-(--brand-text-muted)">
+                          {[
+                            customer.gstNumber
+                              ? `GST ${customer.gstNumber}`
+                              : null,
+                            customer.state,
+                            customer.pincode,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronRight className="size-4 shrink-0 text-(--brand-text-muted)" />
+                  </Link>
+                  {index === sentinelIndex && hasMore ? (
+                    <InfiniteScrollSentinel
+                      active
+                      setSentinelNode={setSentinelNode}
+                    />
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {hasMore && visibleItems.length <= sentinelIndex ? (
+              <InfiniteScrollSentinel
+                active
+                setSentinelNode={setSentinelNode}
+              />
+            ) : null}
+          </div>
+        )
+      ) : null}
     </AdminPage>
   );
 }

@@ -14,9 +14,13 @@ export async function GET(req: NextRequest) {
 
   const query = new URL(req.url).searchParams.get("q")?.trim().toLowerCase() || "";
 
+  // Loyalty is for approved customers only — exclude incomplete / pending / rejected.
   const customers = await prisma.user.findMany({
     where: {
       role: "CUSTOMER",
+      isApproved: true,
+      approvalStatus: "APPROVED",
+      isActive: true,
       ...(query
         ? {
             OR: [
