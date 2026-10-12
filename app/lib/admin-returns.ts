@@ -8,6 +8,51 @@ export type AdminReturnStatus =
   | "REJECTED"
   | "CLOSED";
 
+/** Order snapshot attached to return items / primary order (Orders-screen fields). */
+export type AdminReturnOrderContext = {
+  id: string;
+  orderNumber: number | null;
+  status: string;
+  lineType: string;
+  lensType: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  notes?: string | null;
+  sph?: number | null;
+  cyl?: number | null;
+  axis?: number | null;
+  add?: number | null;
+  eye?: string | null;
+  createdAt: string;
+  user?: {
+    id: string;
+    name: string | null;
+    email: string;
+    businessName?: string | null;
+  } | null;
+  assignedTo?: {
+    id: string;
+    name: string | null;
+    email: string;
+  } | null;
+  singleVisionLens?: {
+    brand?: string | null;
+    coating?: string | null;
+    item?: string | null;
+  } | null;
+  kryptokLens?: {
+    brand?: string | null;
+    coating?: string | null;
+    item?: string | null;
+  } | null;
+  progressiveLens?: {
+    brand?: string | null;
+    coating?: string | null;
+    item?: string | null;
+  } | null;
+};
+
 export type AdminReturnRequest = {
   id: string;
   requestNumber: string;
@@ -33,6 +78,7 @@ export type AdminReturnRequest = {
     email: string;
     role?: string | null;
   } | null;
+  primaryOrder?: AdminReturnOrderContext | null;
   items: Array<{
     id: string;
     originalOrderId: string;
@@ -49,6 +95,7 @@ export type AdminReturnRequest = {
     requestedCyl?: number | null;
     requestedAxis?: number | null;
     requestedAdd?: number | null;
+    originalOrder?: AdminReturnOrderContext | null;
   }>;
   images: Array<{
     id: string;
@@ -73,6 +120,54 @@ export type AdminReturnRequest = {
     amount: number;
   } | null;
 };
+
+export function formatReturnOrderDisplayId(
+  order: Pick<AdminReturnOrderContext, "id" | "orderNumber">
+) {
+  if (order.orderNumber != null) return `#${order.orderNumber}`;
+  return `#${order.id.slice(0, 8).toUpperCase()}`;
+}
+
+export function formatReturnOrderCatalogSummary(
+  order: AdminReturnOrderContext
+): string {
+  const lens =
+    order.progressiveLens ?? order.kryptokLens ?? order.singleVisionLens ?? null;
+  if (!lens) {
+    return order.lensType
+      .toLowerCase()
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+  const parts = [lens.brand, lens.coating, lens.item]
+    .map((part) => part?.trim())
+    .filter(Boolean);
+  if (parts.length) return parts.join(" · ");
+  return order.lensType
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function formatReturnMoney(value: number | string) {
+  const amount = Number(value);
+  if (Number.isNaN(amount)) return "—";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+export function formatReturnOrderStatus(status: string) {
+  return status
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 export function formatReturnStatus(status: string) {
   const labels: Record<string, string> = {

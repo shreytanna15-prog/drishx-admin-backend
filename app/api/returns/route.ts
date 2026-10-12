@@ -13,6 +13,7 @@ import {
   resolveReplacementPowerForOrder,
   ReturnRequestStatus,
   serializeReturnItemPowers,
+  serializeReturnOrderContext,
 } from "../../lib/returns";
 import { notifyAdminsOfReturnSubmitted, notifyCustomerOfReturnSubmittedOnBehalf } from "../../lib/staff-notifications";
 import { requireStaffPermission } from "../../lib/staff-access";
@@ -45,6 +46,7 @@ async function serializeReturnRequest(
   return {
     ...input,
     approvedAmount: input.approvedAmount !== null ? Number(input.approvedAmount) : null,
+    primaryOrder: serializeReturnOrderContext(input.primaryOrder),
     primaryInvoice: input.primaryInvoice
       ? {
           ...input.primaryInvoice,

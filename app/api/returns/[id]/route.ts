@@ -6,6 +6,7 @@ import {
   getReturnRequestWithRelations,
   ReturnRequestStatus,
   serializeReturnItemPowers,
+  serializeReturnOrderContext,
   type ReturnRequestStatus as ReturnRequestStatusType,
 } from "../../../lib/returns";
 import { prisma } from "../../../lib/prisma";
@@ -35,6 +36,7 @@ async function serializeReturnRequest(id: string) {
   return {
     ...request,
     approvedAmount: request.approvedAmount !== null ? Number(request.approvedAmount) : null,
+    primaryOrder: serializeReturnOrderContext(request.primaryOrder),
     primaryInvoice: request.primaryInvoice
       ? {
           ...request.primaryInvoice,

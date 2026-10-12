@@ -317,6 +317,40 @@ export async function createCreditNoteForReturn(
   return { transaction, creditNote };
 }
 
+/** Order fields staff need on returns list/detail (aligned with Orders table). */
+const returnOrderContextSelect = {
+  id: true,
+  orderNumber: true,
+  status: true,
+  lineType: true,
+  lensType: true,
+  quantity: true,
+  unitPrice: true,
+  totalAmount: true,
+  notes: true,
+  sph: true,
+  cyl: true,
+  axis: true,
+  add: true,
+  eye: true,
+  createdAt: true,
+  user: {
+    select: { id: true, name: true, email: true, businessName: true },
+  },
+  assignedTo: {
+    select: { id: true, name: true, email: true },
+  },
+  singleVisionLens: {
+    select: { brand: true, coating: true, item: true },
+  },
+  kryptokLens: {
+    select: { brand: true, coating: true, item: true },
+  },
+  progressiveLens: {
+    select: { brand: true, coating: true, item: true },
+  },
+} as const;
+
 export async function getReturnRequestWithRelations(id: string) {
   return asReturnsDb(prisma).returnRequest.findUnique({
     where: { id },
@@ -331,14 +365,16 @@ export async function getReturnRequestWithRelations(id: string) {
         select: { id: true, name: true, email: true, role: true },
       },
       primaryOrder: {
-        include: {
-          singleVisionLens: true,
-          kryptokLens: true,
-          progressiveLens: true,
-        },
+        select: returnOrderContextSelect,
       },
       primaryInvoice: true,
-      items: true,
+      items: {
+        include: {
+          originalOrder: {
+            select: returnOrderContextSelect,
+          },
+        },
+      },
       images: {
         include: {
           uploadedBy: {
@@ -590,6 +626,90 @@ export async function resolveReplacementPowerForOrder(
   };
 }
 
+export function serializeReturnOrderContext(order: {
+  id: string;
+  orderNumber?: number | null;
+  status: string;
+  lineType: string;
+  lensType: string;
+  quantity: unknown;
+  unitPrice: unknown;
+  totalAmount: unknown;
+  notes?: string | null;
+  sph?: unknown;
+  cyl?: unknown;
+  axis?: number | null;
+  add?: unknown;
+  eye?: string | null;
+  createdAt: Date | string;
+  user?: {
+    id: string;
+    name: string | null;
+    email: string;
+    businessName?: string | null;
+  } | null;
+  assignedTo?: {
+    id: string;
+    name: string | null;
+    email: string;
+  } | null;
+  singleVisionLens?: {
+    brand?: string | null;
+    coating?: string | null;
+    item?: string | null;
+  } | null;
+  kryptokLens?: {
+    brand?: string | null;
+    coating?: string | null;
+    item?: string | null;
+  } | null;
+  progressiveLens?: {
+    brand?: string | null;
+    coating?: string | null;
+    item?: string | null;
+  } | null;
+} | null) {
+  if (!order) return null;
+  return {
+    id: order.id,
+    orderNumber: order.orderNumber ?? null,
+    status: order.status,
+    lineType: order.lineType,
+    lensType: order.lensType,
+    quantity: Number(order.quantity),
+    unitPrice: Number(order.unitPrice),
+    totalAmount: Number(order.totalAmount),
+    notes: order.notes ?? null,
+    sph: toNullableNumber(order.sph),
+    cyl: toNullableNumber(order.cyl),
+    axis: order.axis ?? null,
+    add: toNullableNumber(order.add),
+    eye: order.eye ?? null,
+    createdAt:
+      typeof order.createdAt === "string"
+        ? order.createdAt
+        : order.createdAt.toISOString(),
+    user: order.user
+      ? {
+          id: order.user.id,
+          name: order.user.name,
+          email: order.user.email,
+          businessName: order.user.businessName ?? null,
+        }
+      : null,
+    assignedTo: order.assignedTo
+      ? {
+          id: order.assignedTo.id,
+          name: order.assignedTo.name,
+          email: order.assignedTo.email,
+        }
+      : null,
+    singleVisionLens: order.singleVisionLens ?? null,
+    kryptokLens: order.kryptokLens ?? null,
+    progressiveLens: order.progressiveLens ?? null,
+  };
+}
+
 export function serializeReturnItemPowers(item: {
   originalSph?: unknown;
   originalCyl?: unknown;
@@ -599,10 +719,12 @@ export function serializeReturnItemPowers(item: {
   requestedCyl?: unknown;
   requestedAxis?: number | null;
   requestedAdd?: unknown;
+  originalOrder?: Parameters<typeof serializeReturnOrderContext>[0];
   [key: string]: unknown;
 }) {
+  const { originalOrder, ...rest } = item;
   return {
-    ...item,
+    ...rest,
     quantity: Number(item.quantity),
     originalSph: toNullableNumber(item.originalSph),
     originalCyl: toNullableNumber(item.originalCyl),
@@ -612,5 +734,6 @@ export function serializeReturnItemPowers(item: {
     requestedCyl: toNullableNumber(item.requestedCyl),
     requestedAxis: item.requestedAxis ?? null,
     requestedAdd: toNullableNumber(item.requestedAdd),
+    originalOrder: serializeReturnOrderContext(originalOrder ?? null),
   };
 }
