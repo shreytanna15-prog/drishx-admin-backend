@@ -245,6 +245,95 @@ export function matchesOrderFilters(
   return true;
 }
 
+/** Shared list filters for `/orders` table and `/orders/overview` card view. */
+export type OrdersListFilters = {
+  q: string;
+  status: string;
+  lineType: string;
+  orderKind: string;
+  assigneeId: string;
+  dateFrom: string;
+  dateTo: string;
+};
+
+export const ORDERS_LIST_FILTER_KEYS = [
+  "q",
+  "status",
+  "lineType",
+  "orderKind",
+  "assigneeId",
+  "dateFrom",
+  "dateTo",
+] as const;
+
+export const EMPTY_ORDERS_LIST_FILTERS: OrdersListFilters = {
+  q: "",
+  status: "",
+  lineType: "",
+  orderKind: "",
+  assigneeId: "",
+  dateFrom: "",
+  dateTo: "",
+};
+
+export function parseOrdersListFilters(
+  searchParams: Pick<URLSearchParams, "get">
+): OrdersListFilters {
+  return {
+    q: searchParams.get("q")?.trim() ?? "",
+    status: searchParams.get("status")?.trim() ?? "",
+    lineType: searchParams.get("lineType")?.trim() ?? "",
+    orderKind: searchParams.get("orderKind")?.trim() ?? "",
+    assigneeId: searchParams.get("assigneeId")?.trim() ?? "",
+    dateFrom: searchParams.get("dateFrom")?.trim() ?? "",
+    dateTo: searchParams.get("dateTo")?.trim() ?? "",
+  };
+}
+
+/** Write shared filter keys onto a copy of `base`, clearing empty values. */
+export function applyOrdersListFiltersToSearchParams(
+  base: URLSearchParams,
+  filters: OrdersListFilters
+): URLSearchParams {
+  const next = new URLSearchParams(base.toString());
+  for (const key of ORDERS_LIST_FILTER_KEYS) {
+    next.delete(key);
+  }
+  if (filters.q.trim()) next.set("q", filters.q.trim());
+  if (filters.status.trim()) next.set("status", filters.status.trim());
+  if (filters.lineType.trim()) next.set("lineType", filters.lineType.trim());
+  if (filters.orderKind.trim()) next.set("orderKind", filters.orderKind.trim());
+  if (filters.assigneeId.trim()) next.set("assigneeId", filters.assigneeId.trim());
+  if (filters.dateFrom.trim()) next.set("dateFrom", filters.dateFrom.trim());
+  if (filters.dateTo.trim()) next.set("dateTo", filters.dateTo.trim());
+  return next;
+}
+
+export function buildOrdersListHref(
+  path: string,
+  filters: OrdersListFilters,
+  extra?: URLSearchParams | Record<string, string | undefined | null>
+): string {
+  const base =
+    extra instanceof URLSearchParams
+      ? new URLSearchParams(extra.toString())
+      : new URLSearchParams();
+  if (extra && !(extra instanceof URLSearchParams)) {
+    for (const [key, value] of Object.entries(extra)) {
+      if (value != null && String(value).trim()) {
+        base.set(key, String(value).trim());
+      }
+    }
+  }
+  // Drop overview-only params when linking to table (and vice versa callers omit them).
+  for (const key of ["group", "groupSort", "lineSort"] as const) {
+    if (path === "/orders") base.delete(key);
+  }
+  const params = applyOrdersListFiltersToSearchParams(base, filters);
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
 export function formatOrderDisplayId(
   order: Pick<AdminOrder, "id" | "orderNumber">
 ) {

@@ -1,18 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback } from "react";
+import { Suspense, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { FlaskConical } from "lucide-react";
+import { FlaskConical, LayoutGrid } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { AdminOrdersTable } from "@/components/admin-orders-table";
 import { Button } from "@/components/ui/button";
-import { filterNonRxOrders, type AdminOrder } from "@/app/lib/admin-orders";
+import {
+  buildOrdersListHref,
+  filterNonRxOrders,
+  parseOrdersListFilters,
+  type AdminOrder,
+} from "@/app/lib/admin-orders";
 
 function OrdersPageContent() {
   const searchParams = useSearchParams();
   const createReturnMode = searchParams.get("createReturn") === "1";
+  const overviewHref = useMemo(() => {
+    const filters = parseOrdersListFilters(searchParams);
+    return buildOrdersListHref("/orders/overview", filters);
+  }, [searchParams]);
 
   const filterOrders = useCallback(
     (orders: AdminOrder[]) => filterNonRxOrders(orders),
@@ -46,20 +55,29 @@ function OrdersPageContent() {
         emptyMessage="No orders found yet."
         showFilters
         hideRxOrderKind
+        persistFiltersInUrl
         filterOrders={filterOrders}
         orderDetailHash={
           createReturnMode ? "create-return-on-behalf" : undefined
         }
         headerActions={
-          <Button
-            asChild
-            className="h-10 rounded-xl bg-(--brand-primary) px-4 text-sm font-extrabold text-(--brand-primary-text) hover:opacity-95"
-          >
-            <Link href="/orders/rx-lab">
-              <FlaskConical className="size-4" />
-              Rx Orders
-            </Link>
-          </Button>
+          <>
+            <Button asChild variant="outline" size="sm" className="h-10 rounded-xl">
+              <Link href={overviewHref}>
+                <LayoutGrid className="size-4" />
+                Card view
+              </Link>
+            </Button>
+            <Button
+              asChild
+              className="h-10 rounded-xl bg-(--brand-primary) px-4 text-sm font-extrabold text-(--brand-primary-text) hover:opacity-95"
+            >
+              <Link href="/orders/rx-lab">
+                <FlaskConical className="size-4" />
+                Rx Orders
+              </Link>
+            </Button>
+          </>
         }
       />
     </AdminPage>

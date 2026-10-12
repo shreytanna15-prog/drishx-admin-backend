@@ -1,7 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  usePathname,
+  useRouter,
+  useSearchParams,
+  type ReadonlyURLSearchParams,
+} from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,7 +29,9 @@ import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import { readListCache, writeListCache } from "@/app/lib/admin-cache";
 import {
   type AdminOrder,
+  type OrdersListFilters,
   ORDER_STATUS_FILTERS,
+  applyOrdersListFiltersToSearchParams,
   formatDate,
   formatLensType,
   formatMoney,
@@ -27,6 +40,7 @@ import {
   formatStatus,
   matchesOrderFilters,
   matchesOrderSearch,
+  parseOrdersListFilters,
   statusBadgeClass,
 } from "@/app/lib/admin-orders";
 import type { AdminEmployee } from "@/app/lib/admin-employees";
@@ -51,9 +65,43 @@ type AdminOrdersTableProps = {
   headerActions?: ReactNode;
   /** When set, order row navigation appends this hash (e.g. create-return flow). */
   orderDetailHash?: string;
+  /**
+   * Sync search/filters with the URL so overview ↔ table view can share them.
+   * Only enable on the main `/orders` list.
+   */
+  persistFiltersInUrl?: boolean;
 };
 
-export function AdminOrdersTable({
+type UrlBridge = {
+  searchParams: ReadonlyURLSearchParams;
+  pathname: string;
+  router: ReturnType<typeof useRouter>;
+};
+
+/** Public entry — URL sync is opt-in and Suspense-wrapped. */
+export function AdminOrdersTable(props: AdminOrdersTableProps) {
+  if (props.persistFiltersInUrl) {
+    return (
+      <Suspense fallback={<TableSkeleton compact columns={7} rows={8} />}>
+        <AdminOrdersTableUrlBound {...props} />
+      </Suspense>
+    );
+  }
+  return <AdminOrdersTableImpl {...props} urlBridge={null} />;
+}
+
+function AdminOrdersTableUrlBound(props: AdminOrdersTableProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const urlBridge = useMemo(
+    () => ({ searchParams, pathname, router }),
+    [searchParams, pathname, router]
+  );
+  return <AdminOrdersTableImpl {...props} urlBridge={urlBridge} />;
+}
+
+function AdminOrdersTableImpl({
   title,
   description,
   searchPlaceholder = "Search by customer, order #, status…",
@@ -67,8 +115,14 @@ export function AdminOrdersTable({
   defaultStatus = "",
   headerActions,
   orderDetailHash,
-}: AdminOrdersTableProps) {
-  const router = useRouter();
+  urlBridge,
+}: AdminOrdersTableProps & { urlBridge: UrlBridge | null }) {
+  const fallbackRouter = useRouter();
+  const router = urlBridge?.router ?? fallbackRouter;
+  const urlFilters: OrdersListFilters | null = urlBridge
+    ? parseOrdersListFilters(urlBridge.searchParams)
+    : null;
+
   const openOrder = (orderId: string) => {
     const path = `/orders/${orderId}`;
     router.push(orderDetailHash ? `${path}#${orderDetailHash}` : path);
@@ -80,13 +134,15 @@ export function AdminOrdersTable({
   });
   const [loading, setLoading] = useState(orders.length === 0);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState(defaultStatus);
-  const [lineType, setLineType] = useState("");
-  const [orderKind, setOrderKind] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [query, setQuery] = useState(urlFilters?.q ?? "");
+  const [status, setStatus] = useState(
+    urlFilters?.status || defaultStatus
+  );
+  const [lineType, setLineType] = useState(urlFilters?.lineType ?? "");
+  const [orderKind, setOrderKind] = useState(urlFilters?.orderKind ?? "");
+  const [assigneeId, setAssigneeId] = useState(urlFilters?.assigneeId ?? "");
+  const [dateFrom, setDateFrom] = useState(urlFilters?.dateFrom ?? "");
+  const [dateTo, setDateTo] = useState(urlFilters?.dateTo ?? "");
   const [employees, setEmployees] = useState<AdminEmployee[]>([]);
 
   useEffect(() => {
@@ -147,6 +203,41 @@ export function AdminOrdersTable({
       cancelled = true;
     };
   }, [showFilters]);
+
+  // Persist shared filters in the URL (main /orders ↔ overview handoff).
+  useEffect(() => {
+    if (!urlBridge) return;
+
+    const preserved = new URLSearchParams();
+    const createReturn = urlBridge.searchParams.get("createReturn");
+    if (createReturn) preserved.set("createReturn", createReturn);
+
+    const next = applyOrdersListFiltersToSearchParams(preserved, {
+      q: query,
+      status,
+      lineType,
+      orderKind,
+      assigneeId,
+      dateFrom,
+      dateTo,
+    });
+    const nextQs = next.toString();
+    const currentQs = urlBridge.searchParams.toString();
+    if (nextQs === currentQs) return;
+    urlBridge.router.replace(
+      nextQs ? `${urlBridge.pathname}?${nextQs}` : urlBridge.pathname,
+      { scroll: false }
+    );
+  }, [
+    urlBridge,
+    query,
+    status,
+    lineType,
+    orderKind,
+    assigneeId,
+    dateFrom,
+    dateTo,
+  ]);
 
   const filtered = useMemo(() => {
     return orders.filter((order) => {
@@ -304,7 +395,13 @@ export function AdminOrdersTable({
                   colSpan={colSpan}
                   className="h-28 text-center text-(--brand-text-muted)"
                 >
-                  {query.trim() || status || lineType || orderKind || assigneeId
+                  {query.trim() ||
+                  status ||
+                  lineType ||
+                  orderKind ||
+                  assigneeId ||
+                  dateFrom ||
+                  dateTo
                     ? emptySearchMessage
                     : emptyMessage}
                 </TableCell>

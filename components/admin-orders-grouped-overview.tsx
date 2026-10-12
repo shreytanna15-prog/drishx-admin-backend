@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { LayoutGrid, List } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,8 @@ import {
   ORDER_GROUP_SORT_OPTIONS,
   ORDER_LINE_SORT_OPTIONS,
   ORDER_STATUS_FILTERS,
+  applyOrdersListFiltersToSearchParams,
+  buildOrdersListHref,
   filterNonRxOrders,
   formatCatalogSummary,
   formatDate,
@@ -28,6 +30,7 @@ import {
   groupOrdersByDate,
   matchesOrderFilters,
   matchesOrderSearch,
+  parseOrdersListFilters,
   sortOrderGroups,
   sortOrdersInGroup,
   statusBadgeClass,
@@ -41,25 +44,49 @@ const selectClass =
 
 type GroupMode = "date" | "customer";
 
+function parseGroupMode(value: string | null): GroupMode {
+  return value === "customer" ? "customer" : "date";
+}
+
+function parseGroupSort(value: string | null): OrderGroupSort {
+  const match = ORDER_GROUP_SORT_OPTIONS.find((opt) => opt.id === value);
+  return match?.id ?? "newest";
+}
+
+function parseLineSort(value: string | null): OrderLineSort {
+  const match = ORDER_LINE_SORT_OPTIONS.find((opt) => opt.id === value);
+  return match?.id ?? "newest";
+}
+
 export function AdminOrdersGroupedOverview() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const initialFilters = parseOrdersListFilters(searchParams);
+
   const [orders, setOrders] = useState<AdminOrder[]>(() => {
     const cached = readListCache<AdminOrder[]>("orders");
     return cached ? filterNonRxOrders(cached) : [];
   });
   const [loading, setLoading] = useState(orders.length === 0);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("");
-  const [lineType, setLineType] = useState("");
-  const [orderKind, setOrderKind] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [query, setQuery] = useState(initialFilters.q);
+  const [status, setStatus] = useState(initialFilters.status);
+  const [lineType, setLineType] = useState(initialFilters.lineType);
+  const [orderKind, setOrderKind] = useState(initialFilters.orderKind);
+  const [assigneeId, setAssigneeId] = useState(initialFilters.assigneeId);
+  const [dateFrom, setDateFrom] = useState(initialFilters.dateFrom);
+  const [dateTo, setDateTo] = useState(initialFilters.dateTo);
   const [employees, setEmployees] = useState<AdminEmployee[]>([]);
-  const [groupMode, setGroupMode] = useState<GroupMode>("date");
-  const [groupSort, setGroupSort] = useState<OrderGroupSort>("newest");
-  const [lineSort, setLineSort] = useState<OrderLineSort>("newest");
+  const [groupMode, setGroupMode] = useState<GroupMode>(() =>
+    parseGroupMode(searchParams.get("group"))
+  );
+  const [groupSort, setGroupSort] = useState<OrderGroupSort>(() =>
+    parseGroupSort(searchParams.get("groupSort"))
+  );
+  const [lineSort, setLineSort] = useState<OrderLineSort>(() =>
+    parseLineSort(searchParams.get("lineSort"))
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +146,60 @@ export function AdminOrdersGroupedOverview() {
     };
   }, []);
 
+  // Keep overview URL in sync so Table view / refresh preserve filters & sort.
+  useEffect(() => {
+    const next = applyOrdersListFiltersToSearchParams(
+      new URLSearchParams(),
+      {
+        q: query,
+        status,
+        lineType,
+        orderKind,
+        assigneeId,
+        dateFrom,
+        dateTo,
+      }
+    );
+    if (groupMode !== "date") next.set("group", groupMode);
+    if (groupSort !== "newest") next.set("groupSort", groupSort);
+    if (lineSort !== "newest") next.set("lineSort", lineSort);
+
+    const nextQs = next.toString();
+    const currentQs = searchParams.toString();
+    if (nextQs === currentQs) return;
+    router.replace(nextQs ? `${pathname}?${nextQs}` : pathname, {
+      scroll: false,
+    });
+  }, [
+    query,
+    status,
+    lineType,
+    orderKind,
+    assigneeId,
+    dateFrom,
+    dateTo,
+    groupMode,
+    groupSort,
+    lineSort,
+    pathname,
+    router,
+    searchParams,
+  ]);
+
+  const tableViewHref = useMemo(
+    () =>
+      buildOrdersListHref("/orders", {
+        q: query,
+        status,
+        lineType,
+        orderKind,
+        assigneeId,
+        dateFrom,
+        dateTo,
+      }),
+    [query, status, lineType, orderKind, assigneeId, dateFrom, dateTo]
+  );
+
   const filtered = useMemo(() => {
     return orders.filter((order) => {
       if (!matchesOrderSearch(order, query)) return false;
@@ -172,7 +253,7 @@ export function AdminOrdersGroupedOverview() {
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button asChild variant="outline" size="sm" className="h-10 rounded-xl">
-            <Link href="/orders">
+            <Link href={tableViewHref}>
               <List className="size-4" />
               Table view
             </Link>
