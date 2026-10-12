@@ -7,6 +7,7 @@ import {
   rotateRefreshToken,
   signAccessToken,
 } from "../../../lib/auth";
+import { shouldClearRefreshCookie } from "../../../lib/auth-refresh-policy";
 import { unauthorizedResponse } from "../../../lib/auth-errors";
 import { prisma, withDbRetry } from "../../../lib/prisma";
 import { toSafeUser } from "../../../lib/user-public";
@@ -32,8 +33,22 @@ export async function POST(req: NextRequest) {
   try {
     const rotated = await withDbRetry(() => rotateRefreshToken(rawRefreshToken!));
     if (!rotated.ok) {
+      // Concurrent / in-flight race: keep the cookie so the winner's Set-Cookie
+      // (or a client retry) can recover the session.
+      if (rotated.retryable) {
+        return NextResponse.json(
+          {
+            error: "Refresh in progress. Please try again.",
+            code: "TOKEN_INVALID",
+          },
+          { status: 503 }
+        );
+      }
+
       const response = unauthorizedResponse(rotated.code);
-      response.headers.append("Set-Cookie", clearRefreshCookie());
+      if (shouldClearRefreshCookie(rotated)) {
+        response.headers.append("Set-Cookie", clearRefreshCookie());
+      }
       return response;
     }
 
@@ -57,12 +72,21 @@ export async function POST(req: NextRequest) {
       token: accessToken,
     };
 
+    // Concurrent loser: mint access only. Do not clear or overwrite refresh
+    // cookie / mobile refresh token — the winner already rotated it.
+    if (rotated.kind === "concurrent") {
+      return NextResponse.json(body);
+    }
+
     if (isMobileClient(req)) {
       body.refreshToken = rotated.rawToken;
     }
 
     const response = NextResponse.json(body);
-    response.headers.append("Set-Cookie", buildRefreshCookie(rotated.rawToken, rotated.expiresAt));
+    response.headers.append(
+      "Set-Cookie",
+      buildRefreshCookie(rotated.rawToken, rotated.expiresAt)
+    );
     return response;
   } catch {
     // Infra / DB blip — keep the refresh cookie; clients treat 5xx as transient.

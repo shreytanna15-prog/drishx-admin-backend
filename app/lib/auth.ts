@@ -2,7 +2,19 @@ import bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "crypto";
 import jwt from "jsonwebtoken";
 import type { UserRole } from "@prisma/client";
+import {
+  decideRevokedRefreshPresentation,
+  type RotateRefreshResult,
+} from "./auth-refresh-policy";
 import { prisma } from "./prisma";
+
+export {
+  REFRESH_ROTATION_GRACE_MS,
+  decideRevokedRefreshPresentation,
+  shouldClearRefreshCookie,
+  shouldSetNewRefreshCookie,
+  type RotateRefreshResult,
+} from "./auth-refresh-policy";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET ?? process.env.JWT_SECRET;
@@ -105,26 +117,23 @@ export async function createRefreshToken(userId: string, userAgent?: string | nu
   return { rawToken, familyId, expiresAt };
 }
 
-export type RotateRefreshResult =
-  | {
-      ok: true;
-      userId: string;
-      rawToken: string;
-      familyId: string;
-      expiresAt: Date;
-    }
-  | { ok: false; code: "TOKEN_INVALID" | "TOKEN_EXPIRED" };
-
-/** Grace window where presenting a just-rotated refresh token is treated as a
- * concurrent race (do not wipe the family) rather than token theft. */
-const REFRESH_ROTATION_GRACE_MS = 30_000;
+async function findActiveRefreshSuccessor(familyId: string) {
+  return prisma.refreshToken.findFirst({
+    where: {
+      familyId,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    select: { id: true },
+  });
+}
 
 export async function rotateRefreshToken(rawToken: string): Promise<RotateRefreshResult> {
   const tokenHash = hashRefreshToken(rawToken);
   const existing = await prisma.refreshToken.findUnique({ where: { tokenHash } });
 
   if (!existing) {
-    return { ok: false, code: "TOKEN_INVALID" };
+    return { ok: false, code: "TOKEN_INVALID", clearCookie: true };
   }
 
   if (existing.expiresAt.getTime() <= Date.now()) {
@@ -134,29 +143,38 @@ export async function rotateRefreshToken(rawToken: string): Promise<RotateRefres
         data: { revokedAt: new Date() },
       });
     }
-    return { ok: false, code: "TOKEN_EXPIRED" };
+    return { ok: false, code: "TOKEN_EXPIRED", clearCookie: true };
   }
 
   if (existing.revokedAt) {
-    // Concurrent refresh: another request already rotated this token. If a
-    // successor is still active within the grace window, do NOT revoke the
-    // whole family (that would log out tabs that just refreshed successfully).
-    const ageMs = Date.now() - existing.revokedAt.getTime();
-    if (ageMs < REFRESH_ROTATION_GRACE_MS) {
-      const successor = await prisma.refreshToken.findFirst({
-        where: {
-          familyId: existing.familyId,
-          revokedAt: null,
-          expiresAt: { gt: new Date() },
-        },
-        select: { id: true },
-      });
-      if (successor) {
-        return { ok: false, code: "TOKEN_INVALID" };
-      }
+    const successor = await findActiveRefreshSuccessor(existing.familyId);
+    const decision = decideRevokedRefreshPresentation({
+      revokedAt: existing.revokedAt,
+      hasActiveSuccessor: Boolean(successor),
+      userId: existing.userId,
+      familyId: existing.familyId,
+    });
+
+    if (decision.action === "concurrent") {
+      return {
+        ok: true,
+        kind: "concurrent",
+        userId: decision.userId,
+        familyId: decision.familyId,
+      };
     }
+    if (decision.action === "retryable") {
+      return {
+        ok: false,
+        code: "TOKEN_INVALID",
+        clearCookie: false,
+        retryable: true,
+      };
+    }
+
+    // Outside grace: reuse of a revoked token → revoke family (theft detection).
     await revokeRefreshFamily(existing.familyId);
-    return { ok: false, code: "TOKEN_INVALID" };
+    return { ok: false, code: "TOKEN_INVALID", clearCookie: true };
   }
 
   // Claim + issue successor in one transaction so a failed create cannot
@@ -188,12 +206,28 @@ export async function rotateRefreshToken(rawToken: string): Promise<RotateRefres
   });
 
   if (!issued) {
-    // Lost the race; winner already issued a successor. Do not wipe family.
-    return { ok: false, code: "TOKEN_INVALID" };
+    // Lost the race; winner already claimed. Prefer concurrent recovery so the
+    // loser cannot clear the winner's Set-Cookie.
+    const successor = await findActiveRefreshSuccessor(existing.familyId);
+    if (successor) {
+      return {
+        ok: true,
+        kind: "concurrent",
+        userId: existing.userId,
+        familyId: existing.familyId,
+      };
+    }
+    return {
+      ok: false,
+      code: "TOKEN_INVALID",
+      clearCookie: false,
+      retryable: true,
+    };
   }
 
   return {
     ok: true,
+    kind: "rotated",
     userId: existing.userId,
     rawToken: rawNewToken,
     familyId: existing.familyId,
