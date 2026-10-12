@@ -2,17 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import { prisma } from "@/app/lib/prisma";
 import { getCustomerOutstanding } from "@/app/lib/finance/credit-limit";
-
-function agingBucket(issuedAt: Date | null, now: Date): string {
-  if (!issuedAt) return "0-30";
-  const days = Math.floor(
-    (now.getTime() - issuedAt.getTime()) / (1000 * 60 * 60 * 24)
-  );
-  if (days <= 30) return "0-30";
-  if (days <= 60) return "31-60";
-  if (days <= 90) return "61-90";
-  return "90+";
-}
+import { agingBucket } from "@/app/lib/reports/aging";
 
 export async function GET(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);

@@ -31,7 +31,8 @@ function stockAuditPayload<M extends "STOCK_PICKED" | "STOCK_DECREMENTED" | "STO
   };
 }
 
-const ACTIVE_RESERVATION_STATUSES: OrderStatus[] = [
+/** Order statuses that hold reserved (not yet picked) stock. */
+export const ACTIVE_RESERVATION_STATUSES: OrderStatus[] = [
   OrderStatus.PENDING,
   OrderStatus.PICKING,
   OrderStatus.PACKED,

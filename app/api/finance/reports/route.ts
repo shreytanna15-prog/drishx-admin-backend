@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import { prisma } from "@/app/lib/prisma";
-import { financialYearBounds, getFinancialYear } from "@/app/lib/finance/financial-year";
+import {
+  financialYearBounds,
+  getFinancialYear,
+} from "@/app/lib/finance/financial-year";
+import { computeGstSummary } from "@/app/lib/reports/gst-summary";
 
 export async function GET(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);
@@ -9,7 +13,7 @@ export async function GET(req: NextRequest) {
     return auth.error;
   }
   const session = auth.session;
-  if ((session.role !== "ADMIN" && session.role !== "EMPLOYEE")) {
+  if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
@@ -19,61 +23,8 @@ export async function GET(req: NextRequest) {
   const { start, end } = financialYearBounds(fy);
 
   if (report === "gst-summary") {
-    const invoices = await prisma.invoice.findMany({
-      where: {
-        issuedAt: { gte: start, lte: end },
-        status: { notIn: ["CANCELLED", "VOID"] },
-      },
-      select: {
-        taxableAmount: true,
-        cgstAmount: true,
-        sgstAmount: true,
-        igstAmount: true,
-        isInterState: true,
-      },
-    });
-    const purchases = await prisma.purchaseBill.findMany({
-      where: {
-        billDate: { gte: start, lte: end },
-        status: { notIn: ["DRAFT", "CANCELLED"] },
-      },
-      select: {
-        taxableAmount: true,
-        cgstAmount: true,
-        sgstAmount: true,
-        igstAmount: true,
-      },
-    });
-
-    const output = invoices.reduce(
-      (acc, i) => {
-        acc.taxable += Number(i.taxableAmount);
-        acc.cgst += Number(i.cgstAmount);
-        acc.sgst += Number(i.sgstAmount);
-        acc.igst += Number(i.igstAmount);
-        return acc;
-      },
-      { taxable: 0, cgst: 0, sgst: 0, igst: 0 }
-    );
-    const input = purchases.reduce(
-      (acc, i) => {
-        acc.taxable += Number(i.taxableAmount);
-        acc.cgst += Number(i.cgstAmount);
-        acc.sgst += Number(i.sgstAmount);
-        acc.igst += Number(i.igstAmount);
-        return acc;
-      },
-      { taxable: 0, cgst: 0, sgst: 0, igst: 0 }
-    );
-    const outputGst = output.cgst + output.sgst + output.igst;
-    const inputGst = input.cgst + input.sgst + input.igst;
-
-    return NextResponse.json({
-      financialYear: fy,
-      output: { ...output, totalGst: outputGst },
-      input: { ...input, totalGst: inputGst },
-      netGstPayable: outputGst - inputGst,
-    });
+    const summary = await computeGstSummary(fy);
+    return NextResponse.json(summary);
   }
 
   if (report === "hsn") {

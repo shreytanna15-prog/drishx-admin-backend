@@ -158,15 +158,16 @@ const NAV_SECTIONS: NavSection[] = [
       },
       { title: "Expenses", icon: List, href: "/finance/expenses" },
       {
-        title: "GST & Reports",
-        icon: BarChart3,
-        href: "/finance/reports",
-      },
-      {
         title: "Finance Settings",
         icon: Settings,
         href: "/finance/settings",
       },
+    ],
+  },
+  {
+    title: "Reports",
+    items: [
+      { title: "Reports hub", icon: BarChart3, href: "/reports" },
     ],
   },
   {
@@ -190,7 +191,10 @@ function resolveActiveTitle(pathname: string) {
   if (pathname.startsWith("/finance/receivables")) return "Receivables";
   if (pathname.startsWith("/finance/purchases")) return "Purchases";
   if (pathname.startsWith("/finance/payables")) return "Payables";
-  if (pathname.startsWith("/finance/reports")) return "GST & Reports";
+  if (pathname.startsWith("/finance/reports")) return "Reports hub";
+  if (pathname === "/reports" || pathname.startsWith("/reports/")) {
+    return "Reports hub";
+  }
   if (pathname.startsWith("/finance/settings")) return "Finance Settings";
   if (
     pathname === "/finance/expenses" ||
