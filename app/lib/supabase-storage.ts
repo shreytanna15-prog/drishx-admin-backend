@@ -5,7 +5,7 @@ function normalizeSupabaseUrl(raw: string) {
   return raw.replace(/\/rest\/v1\/?$/i, "").replace(/\/+$/, "");
 }
 
-function getSupabaseAdmin() {
+export function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL?.trim();
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 

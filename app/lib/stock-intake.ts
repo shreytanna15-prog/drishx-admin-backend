@@ -39,17 +39,21 @@ export type StockIntakeItemInput = {
  *  2. write the StockMovement row (procurement PDF §36 — stock must never be
  *     edited without a movement record; `StockMovementType.RECEIVED` was
  *     previously never written),
- *  3. advance any unresolved ProcurementRequest for this SKU.
+ *  3. advance any unresolved ProcurementRequest for this SKU — unless the
+ *     caller settles requests itself (`settleProcurementRequests: false`, used
+ *     by PO Confirm Receipt, which settles exactly the PO's allocated requests).
  */
 export async function receiveStockLine(input: {
   lensType: LensType;
   lensId: string;
   quantityAdded: number;
-  costPrice: number;
+  /** null keeps the lens's current cost price unchanged. */
+  costPrice: number | null;
   sellingPrice: number;
   orderId?: string | null;
   actorUserId: string;
   referenceId?: string | null;
+  settleProcurementRequests?: boolean;
   client: DbClient;
 }) {
   const quantityBefore =
@@ -78,6 +82,10 @@ export async function receiveStockLine(input: {
     client: input.client,
   });
 
+  if (input.settleProcurementRequests === false) {
+    return { lens, settledRequests: [] };
+  }
+
   const settledRequests = await recordProcurementReceipt({
     lensType: input.lensType,
     lensId: input.lensId,
@@ -94,14 +102,14 @@ export async function applyStockIntake(
   lensType: LensType,
   lensId: string,
   quantityAdded: number,
-  costPrice: number,
+  costPrice: number | null,
   sellingPrice: number,
   client: DbClient = prisma
 ) {
   if (quantityAdded <= 0) {
     throw new Error("quantityAdded must be greater than 0.");
   }
-  if (!Number.isFinite(costPrice) || costPrice < 0) {
+  if (costPrice !== null && (!Number.isFinite(costPrice) || costPrice < 0)) {
     throw new Error("costPrice must be a valid non-negative number.");
   }
   if (!Number.isFinite(sellingPrice) || sellingPrice <= 0) {
@@ -110,7 +118,7 @@ export async function applyStockIntake(
 
   const priceData = {
     quantity: { increment: quantityAdded },
-    costPrice,
+    ...(costPrice === null ? {} : { costPrice }),
     price: sellingPrice,
   };
 
