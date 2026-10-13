@@ -1,11 +1,14 @@
 "use client";
 
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import {
   Banknote,
   BarChart3,
   Bell,
+  ChevronDown,
   CircleDollarSign,
   ClipboardList,
   Clock,
@@ -13,6 +16,7 @@ import {
   FileText,
   FlaskConical,
   Gauge,
+  Grid3x3,
   Home,
   LayoutGrid,
   Layers,
@@ -24,6 +28,7 @@ import {
   Shield,
   ShoppingCart,
   Sparkles,
+  Store,
   TrendingUp,
   Truck,
   User,
@@ -32,6 +37,12 @@ import {
 } from "lucide-react";
 
 import { BrandMark } from "@/app/components/brand-logo";
+import { resolveActiveTitle } from "@/app/lib/admin-nav-active";
+import {
+  getReportDefinition,
+  groupReportsByCategory,
+  listReportDefinitions,
+} from "@/app/lib/reports/registry";
 import {
   Sidebar,
   SidebarContent,
@@ -44,7 +55,12 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 
 type NavItem = {
   title: string;
@@ -56,7 +72,23 @@ type NavItem = {
 type NavSection = {
   title?: string;
   items: NavItem[];
+  /** When true, render expandable report categories instead of flat items. */
+  reportsExpandable?: boolean;
 };
+
+const REPORT_CATEGORY_GROUPS = groupReportsByCategory(
+  listReportDefinitions({ phaseMax: 1 })
+).filter((group) => group.category !== "power");
+
+const REPORT_CATEGORY_NAV = REPORT_CATEGORY_GROUPS.map((group) => ({
+  category: group.category,
+  label: group.label,
+  firstKey: group.reports[0]!.key,
+  href: `/reports?report=${group.reports[0]!.key}`,
+}));
+
+/** Default Reports entry: Financial → GST Summary. */
+const REPORTS_DEFAULT_HREF = "/reports?report=gst-summary";
 
 const NAV_SECTIONS: NavSection[] = [
   {
@@ -99,9 +131,24 @@ const NAV_SECTIONS: NavSection[] = [
         href: "/inventory/power-wise-stock",
       },
       {
+        title: "Stock Matrix",
+        icon: Grid3x3,
+        href: "/inventory/stock-matrix",
+      },
+      {
         title: "Procurement Requests",
         icon: ClipboardList,
         href: "/procurement/requests",
+      },
+      {
+        title: "Purchase Orders",
+        icon: FileText,
+        href: "/procurement/purchase-orders",
+      },
+      {
+        title: "Suppliers",
+        icon: Store,
+        href: "/procurement/suppliers",
       },
       {
         title: "Products & catalog",
@@ -166,9 +213,8 @@ const NAV_SECTIONS: NavSection[] = [
   },
   {
     title: "Reports",
-    items: [
-      { title: "Reports hub", icon: BarChart3, href: "/reports" },
-    ],
+    reportsExpandable: true,
+    items: [],
   },
   {
     title: "System",
@@ -186,87 +232,113 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-function resolveActiveTitle(pathname: string) {
-  if (pathname.startsWith("/finance/payments")) return "Payments & Claims";
-  if (pathname.startsWith("/finance/receivables")) return "Receivables";
-  if (pathname.startsWith("/finance/purchases")) return "Purchases";
-  if (pathname.startsWith("/finance/payables")) return "Payables";
-  if (pathname.startsWith("/finance/reports")) return "Reports hub";
-  if (pathname === "/reports" || pathname.startsWith("/reports/")) {
-    return "Reports hub";
-  }
-  if (pathname.startsWith("/finance/settings")) return "Finance Settings";
-  if (
-    pathname === "/finance/expenses" ||
-    pathname.startsWith("/finance/expenses/")
-  ) {
-    return "Expenses";
-  }
-  if (
-    pathname === "/finance/invoices" ||
-    pathname.startsWith("/finance/invoices/")
-  ) {
-    return "Sales & Invoices";
-  }
-  if (pathname === "/employees/roles" || pathname.startsWith("/employees/roles/")) {
-    return "Roles & Permissions";
-  }
-  if (pathname === "/employees" || pathname.startsWith("/employees/")) {
-    return "Employees";
-  }
-  if (pathname === "/clients" || pathname.startsWith("/clients/")) {
-    return "Clients";
-  }
-  if (pathname.startsWith("/loyalty/settings")) return "Loyalty Settings";
-  if (pathname.startsWith("/loyalty/customers")) return "Loyalty & Wallet";
-  if (pathname.startsWith("/loyalty")) return "Loyalty & Wallet";
-  if (
-    pathname === "/inventory/stock-overview" ||
-    pathname.startsWith("/inventory/stock-overview/")
-  ) {
-    return "Stock Overview";
-  }
-  if (
-    pathname === "/inventory/power-wise-stock" ||
-    pathname.startsWith("/inventory/power-wise-stock/")
-  ) {
-    return "Power wise stock";
-  }
-  if (
-    pathname === "/inventory/products-catalog" ||
-    pathname.startsWith("/inventory/products-catalog/")
-  ) {
-    return "Products & catalog";
-  }
-  if (pathname === "/orders/rx-lab" || pathname.startsWith("/orders/rx-lab/")) {
-    return "Rx Orders";
-  }
-  if (
-    pathname === "/orders/dispatch" ||
-    pathname.startsWith("/orders/dispatch/")
-  ) {
-    return "Dispatch Management";
-  }
-  if (
-    pathname === "/orders/procurement" ||
-    pathname.startsWith("/orders/procurement/")
-  ) {
-    return "Procurement";
-  }
-  if (pathname === "/returns" || pathname.startsWith("/returns/")) {
-    return "Returns & Replacements";
-  }
-  if (pathname === "/orders" || pathname.startsWith("/orders/")) {
-    return "Orders";
-  }
-  for (const section of NAV_SECTIONS) {
-    for (const item of section.items) {
-      if (item.href && item.href !== "/" && pathname.startsWith(item.href)) {
-        return item.title;
-      }
-    }
-  }
-  return "Dashboard";
+function isReportsPath(pathname: string) {
+  return (
+    pathname === "/reports" ||
+    pathname.startsWith("/reports/") ||
+    pathname.startsWith("/finance/reports")
+  );
+}
+
+const NAV_FALLBACK_ITEMS = NAV_SECTIONS.flatMap((section) => section.items);
+
+function ReportsNavSection({ onReportsPath }: { onReportsPath: boolean }) {
+  const { state } = useSidebar();
+  const searchParams = useSearchParams();
+  const reportKey = searchParams.get("report")?.trim() || "";
+  const activeCategory = useMemo(() => {
+    if (!onReportsPath || !reportKey) return null;
+    return getReportDefinition(reportKey)?.category ?? null;
+  }, [onReportsPath, reportKey]);
+
+  const [open, setOpen] = useState(onReportsPath);
+  const iconCollapsed = state === "collapsed";
+
+  useEffect(() => {
+    if (onReportsPath) setOpen(true);
+  }, [onReportsPath]);
+
+  const activeClass = onReportsPath
+    ? "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground"
+    : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+
+  return (
+    <SidebarMenuItem>
+      {iconCollapsed ? (
+        <SidebarMenuButton
+          asChild
+          isActive={onReportsPath}
+          tooltip="Reports"
+          className={activeClass}
+        >
+          <Link href={REPORTS_DEFAULT_HREF}>
+            <BarChart3 />
+            <span>Reports</span>
+          </Link>
+        </SidebarMenuButton>
+      ) : (
+        <>
+          <div className="relative flex w-full min-w-0 items-center">
+            <SidebarMenuButton
+              asChild
+              isActive={onReportsPath}
+              tooltip="Reports"
+              className={cn(activeClass, "pr-8")}
+            >
+              <Link
+                href={REPORTS_DEFAULT_HREF}
+                onClick={() => setOpen(true)}
+              >
+                <BarChart3 />
+                <span>Reports</span>
+              </Link>
+            </SidebarMenuButton>
+            <button
+              type="button"
+              aria-label={
+                open ? "Collapse report categories" : "Expand report categories"
+              }
+              aria-expanded={open}
+              aria-controls="sidebar-reports-categories"
+              onClick={() => setOpen((prev) => !prev)}
+              className="absolute top-1/2 right-1 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              <ChevronDown
+                className={cn(
+                  "size-4 shrink-0 transition-transform duration-200",
+                  open ? "rotate-0" : "-rotate-90"
+                )}
+              />
+            </button>
+          </div>
+          {open ? (
+            <SidebarMenuSub id="sidebar-reports-categories">
+              {REPORT_CATEGORY_NAV.map((item) => {
+                const isActive =
+                  onReportsPath && activeCategory === item.category;
+                return (
+                  <SidebarMenuSubItem key={item.category}>
+                    <SidebarMenuSubButton
+                      asChild
+                      size="sm"
+                      isActive={isActive}
+                      className={
+                        isActive
+                          ? "bg-sidebar-primary/20 font-semibold text-sidebar-primary data-active:bg-sidebar-primary/20 data-active:text-sidebar-primary"
+                          : undefined
+                      }
+                    >
+                      <Link href={item.href}>{item.label}</Link>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                );
+              })}
+            </SidebarMenuSub>
+          ) : null}
+        </>
+      )}
+    </SidebarMenuItem>
+  );
 }
 
 type AdminSidebarProps = {
@@ -278,7 +350,9 @@ export function AdminSidebar({
   pathname = "/",
   activeItem,
 }: AdminSidebarProps) {
-  const current = activeItem ?? resolveActiveTitle(pathname);
+  const current =
+    activeItem ?? resolveActiveTitle(pathname, NAV_FALLBACK_ITEMS);
+  const onReportsPath = isReportsPath(pathname);
 
   return (
     <Sidebar
@@ -312,46 +386,72 @@ export function AdminSidebar({
             ) : null}
             <SidebarGroupContent>
               <SidebarMenu>
-                {section.items.map((item) => {
-                  const isActive = item.title === current;
-                  const hasRoute = Boolean(item.href);
-
-                  return (
-                    <SidebarMenuItem key={item.title}>
-                      {hasRoute ? (
+                {section.reportsExpandable ? (
+                  <Suspense
+                    fallback={
+                      <SidebarMenuItem>
                         <SidebarMenuButton
                           asChild
-                          isActive={isActive}
-                          tooltip={item.title}
+                          isActive={onReportsPath}
+                          tooltip="Reports"
                           className={
-                            isActive
-                              ? "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground"
-                              : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                            onReportsPath
+                              ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                              : "text-sidebar-foreground/80"
                           }
                         >
-                          <Link href={item.href!}>
-                            <item.icon />
-                            <span>{item.title}</span>
+                          <Link href={REPORTS_DEFAULT_HREF}>
+                            <BarChart3 />
+                            <span>Reports</span>
                           </Link>
                         </SidebarMenuButton>
-                      ) : (
-                        <SidebarMenuButton
-                          isActive={isActive}
-                          tooltip={item.title}
-                          className="cursor-default text-sidebar-foreground/80 opacity-80"
-                        >
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </SidebarMenuButton>
-                      )}
-                      {item.badge ? (
-                        <SidebarMenuBadge className="bg-sidebar-primary text-[10px] font-bold text-sidebar-primary-foreground">
-                          {item.badge}
-                        </SidebarMenuBadge>
-                      ) : null}
-                    </SidebarMenuItem>
-                  );
-                })}
+                      </SidebarMenuItem>
+                    }
+                  >
+                    <ReportsNavSection onReportsPath={onReportsPath} />
+                  </Suspense>
+                ) : (
+                  section.items.map((item) => {
+                    const isActive = item.title === current;
+                    const hasRoute = Boolean(item.href);
+
+                    return (
+                      <SidebarMenuItem key={item.title}>
+                        {hasRoute ? (
+                          <SidebarMenuButton
+                            asChild
+                            isActive={isActive}
+                            tooltip={item.title}
+                            className={
+                              isActive
+                                ? "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground"
+                                : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                            }
+                          >
+                            <Link href={item.href!}>
+                              <item.icon />
+                              <span>{item.title}</span>
+                            </Link>
+                          </SidebarMenuButton>
+                        ) : (
+                          <SidebarMenuButton
+                            isActive={isActive}
+                            tooltip={item.title}
+                            className="cursor-default text-sidebar-foreground/80 opacity-80"
+                          >
+                            <item.icon />
+                            <span>{item.title}</span>
+                          </SidebarMenuButton>
+                        )}
+                        {item.badge ? (
+                          <SidebarMenuBadge className="bg-sidebar-primary text-[10px] font-bold text-sidebar-primary-foreground">
+                            {item.badge}
+                          </SidebarMenuBadge>
+                        ) : null}
+                      </SidebarMenuItem>
+                    );
+                  })
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
