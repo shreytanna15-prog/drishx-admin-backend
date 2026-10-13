@@ -20,8 +20,15 @@ import {
   orderLensIdField,
 } from "./procurement-rules";
 import { readLensDescriptor, type DbClient, type LensDescriptor } from "./procurement-lens";
+import {
+  combineIncomingQuantities,
+  OPEN_PO_STATUSES_FOR_INCOMING,
+  openPoLineOutstanding,
+  openPurchaseOrderSuppression,
+  unallocatedProcurementQuantity,
+} from "./purchase-order-math";
 
-export { calculateRequiredQuantity, deriveReorderPriority };
+export { calculateRequiredQuantity, deriveReorderPriority, openPurchaseOrderSuppression };
 
 /**
  * Statuses that still count as "we owe someone stock".
@@ -34,7 +41,7 @@ export const OPEN_REQUEST_STATUSES: readonly ProcurementRequestStatus[] = [
 ] as const;
 
 /** Order statuses that hold stock (mirrors ACTIVE_RESERVATION_STATUSES in order-inventory.ts). */
-const RESERVING_ORDER_STATUSES: readonly OrderStatus[] = [
+export const RESERVING_ORDER_STATUSES: readonly OrderStatus[] = [
   OrderStatus.PENDING,
   OrderStatus.PICKING,
   OrderStatus.PACKED,
@@ -54,24 +61,40 @@ export type StockPosition = {
 };
 
 /**
- * Units already requested but not yet received, for one SKU.
- * This is the "incoming stock" of procurement PDF §6 — derived, never stored,
- * so it can never drift out of sync with the open requests.
+ * Incoming for reorder (RW-08):
+ *  - unallocated open PR qty (requested − ordered), plus
+ *  - outstanding qty on approved/open PO lines (po − received − cancelled).
+ * Draft POs are excluded. Allocated PR qty is not double-counted with PO qty.
  */
 export async function getIncomingQuantity(
   client: DbClient,
   lensType: LensType,
   lensId: string
 ): Promise<number> {
-  const rows = await client.procurementRequest.findMany({
+  const prRows = await client.procurementRequest.findMany({
     where: { lensType, lensId, status: { in: [...OPEN_REQUEST_STATUSES] } },
-    select: { requestedQuantity: true, receivedQuantity: true },
+    select: { requestedQuantity: true, orderedQuantity: true },
   });
-
-  return rows.reduce(
-    (sum, row) => sum + Math.max(0, row.requestedQuantity - row.receivedQuantity),
+  const unallocatedPrOutstanding = prRows.reduce(
+    (sum, row) => sum + unallocatedProcurementQuantity(row),
     0
   );
+
+  // No silent fallback: under-counting incoming would double-order stock.
+  const poLines = await client.purchaseOrderLine.findMany({
+    where: {
+      lensType,
+      lensId,
+      purchaseOrder: { status: { in: [...OPEN_PO_STATUSES_FOR_INCOMING] } },
+    },
+    select: { poQuantity: true, receivedQuantity: true, cancelledQuantity: true },
+  });
+  const openPoOutstanding = poLines.reduce(
+    (sum, row) => sum + openPoLineOutstanding(row),
+    0
+  );
+
+  return combineIncomingQuantities({ openPoOutstanding, unallocatedPrOutstanding });
 }
 
 /** Reserved-but-not-picked units for one SKU, client-aware. */
@@ -121,6 +144,11 @@ export async function getStockPosition(
 export type ReorderCheckResult =
   | { outcome: "created"; request: ProcurementRequestRecord }
   | { outcome: "suppressed_existing"; request: ProcurementRequestRecord; reason: string }
+  | {
+      outcome: "suppressed_open_po";
+      purchaseOrder: { id: string; publicId: string; status: string };
+      reason: string;
+    }
   | { outcome: "not_needed"; reason: string };
 
 type ProcurementRequestRecord = {
@@ -173,6 +201,21 @@ export async function runReorderCheck(
     return { outcome: "not_needed", reason: "Auto procurement is off for this SKU." };
   }
 
+  // RW-08 hard rule: while an approved PO is open for this power, Run Reorder
+  // must not raise it again. Reorder resumes once that PO is closed/cancelled.
+  const openLock = await db.openPurchaseOrderPower.findUnique({
+    where: { lensType_lensId: { lensType: input.lensType, lensId: input.lensId } },
+    include: { purchaseOrder: { select: { id: true, publicId: true, status: true } } },
+  });
+  const openPoReason = openPurchaseOrderSuppression(openLock?.purchaseOrder ?? null);
+  if (openLock && openPoReason) {
+    return {
+      outcome: "suppressed_open_po",
+      purchaseOrder: openLock.purchaseOrder,
+      reason: openPoReason,
+    };
+  }
+
   const position = await getStockPosition(db, input.lensType, input.lensId);
 
   if (position.available > rule.minStock) {
@@ -209,17 +252,18 @@ export async function runReorderCheck(
     orderBy: { createdAt: "asc" },
   });
 
+  // `position.incoming` already includes unallocated PR + open PO outstanding.
   const outstanding = existing.reduce(
-    (sum, row) => sum + Math.max(0, row.requestedQuantity - row.receivedQuantity),
+    (sum, row) =>
+      sum + Math.max(0, row.requestedQuantity - row.orderedQuantity),
     0
   );
-  const coveredTotal = position.available + position.incoming + outstanding;
-
+  const coveredTotal = position.available + position.incoming;
   if (existing.length > 0 && coveredTotal >= rule.targetStock) {
     return {
       outcome: "suppressed_existing",
       request: existing[0],
-      reason: `${existing.length} open request(s) already cover this SKU (${outstanding} units outstanding, ${coveredTotal}/${rule.targetStock} covered).`,
+      reason: `${existing.length} open request(s) already cover this SKU (${outstanding} units unallocated, ${coveredTotal}/${rule.targetStock} covered).`,
     };
   }
 
@@ -230,7 +274,7 @@ export async function runReorderCheck(
     `Available ${position.available} <= minimum ${rule.minStock}`,
     `Target ${rule.targetStock}, incoming ${position.incoming}`,
     `Required ${required}${rule.moq ? ` (raised to MOQ ${rule.moq})` : ""}`,
-    outstanding > 0 ? `Existing outstanding ${outstanding} was insufficient` : null,
+    outstanding > 0 ? `Existing unallocated ${outstanding} was insufficient` : null,
   ]
     .filter(Boolean)
     .join(" | ");
@@ -279,7 +323,7 @@ export async function runReorderCheck(
   return { outcome: "created", request: created };
 }
 
-/** Run the checker across every auto-enabled rule. Used by the nightly cron. */
+/** Run the checker across every active, reorder-enabled rule (manual Run Reorder). */
 export async function runReorderCheckAll(input?: {
   actor?: AuditActor;
   request?: AuditRequestContext | null;
@@ -323,6 +367,14 @@ export async function runReorderCheckAll(input?: {
         lensId: rule.lensId,
         outcome: "created",
         publicId: outcome.request.publicId,
+      });
+    } else if (outcome.outcome === "suppressed_open_po") {
+      suppressed += 1;
+      results.push({
+        lensType: rule.lensType,
+        lensId: rule.lensId,
+        outcome: "suppressed_open_po",
+        publicId: outcome.purchaseOrder.publicId,
       });
     } else if (outcome.outcome === "suppressed_existing") {
       suppressed += 1;
