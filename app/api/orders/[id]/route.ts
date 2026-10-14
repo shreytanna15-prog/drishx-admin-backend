@@ -43,6 +43,11 @@ import {
   orderDetailInclude,
   serializeOrderDetail,
 } from "../../../lib/order-detail";
+import {
+  employeeMayAccessOrder,
+  shouldNotifyStaffOnEligibilityChange,
+} from "../../../lib/prescription-order-hold";
+import { notifyStaffOfNewOrder } from "../../../lib/staff-notifications";
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/orders/:id
@@ -67,14 +72,6 @@ export async function GET(
     if (session.role === "CUSTOMER" && order.userId !== session.userId) {
       return NextResponse.json({ error: "Forbidden. Not your order." }, { status: 403 });
     }
-    if (
-      session.role === "EMPLOYEE" &&
-      order.assignedToId &&
-      order.assignedToId !== session.userId
-    ) {
-      return NextResponse.json({ error: "Forbidden. Not your assigned order." }, { status: 403 });
-    }
-
     if (session.role === "EMPLOYEE") {
       const gate = await requireStaffPermission(session, [
         "orders.view",
@@ -83,6 +80,24 @@ export async function GET(
         "orders.dispatch",
       ]);
       if ("error" in gate) return gate.error;
+      if (
+        !employeeMayAccessOrder(
+          {
+            assignedToId: order.assignedToId,
+            warehouseHold: order.warehouseHold,
+            warehouseReleasedAt: order.warehouseReleasedAt,
+          },
+          session.userId
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Forbidden. This order is not assigned to you or is still held for admin release.",
+          },
+          { status: 403 }
+        );
+      }
     }
 
     return NextResponse.json(await serializeOrderDetail(order, session.role));
@@ -224,9 +239,21 @@ export async function PUT(
         );
       }
     } else if (session.role === "EMPLOYEE") {
-      if (existingOrder.assignedToId && existingOrder.assignedToId !== session.userId) {
+      if (
+        !employeeMayAccessOrder(
+          {
+            assignedToId: existingOrder.assignedToId,
+            warehouseHold: existingOrder.warehouseHold,
+            warehouseReleasedAt: existingOrder.warehouseReleasedAt,
+          },
+          session.userId
+        )
+      ) {
         return NextResponse.json(
-          { error: "Forbidden. Not your assigned order." },
+          {
+            error:
+              "Forbidden. This order is not assigned to you or is still held for admin release.",
+          },
           { status: 403 }
         );
       }
@@ -597,6 +624,26 @@ export async function PUT(
           to: assignedToId,
         },
       });
+      // RW-05: notify only when assignment newly makes a released hold order eligible.
+      const previouslyEligible =
+        Boolean(existingOrder.assignedToId) &&
+        (!existingOrder.warehouseHold ||
+          Boolean(existingOrder.warehouseReleasedAt));
+      const notify = shouldNotifyStaffOnEligibilityChange({
+        previouslyEligible,
+        nowAssignedToId: assignedToId,
+        warehouseHold: existingOrder.warehouseHold,
+        warehouseReleasedAt: existingOrder.warehouseReleasedAt,
+      });
+      if (notify.notify && notify.assigneeId) {
+        const customer = await prisma.user.findUnique({
+          where: { id: existingOrder.userId },
+          select: { name: true, email: true },
+        });
+        const label =
+          customer?.name?.trim() || customer?.email || "Customer";
+        await notifyStaffOfNewOrder(id, label, notify.assigneeId);
+      }
     }
     if (pickedQuantity !== null && session.role !== "CUSTOMER") {
       await logOrderActivity(prisma, {

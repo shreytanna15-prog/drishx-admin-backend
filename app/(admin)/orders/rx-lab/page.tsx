@@ -15,13 +15,16 @@ export default function RxLabPage() {
   );
 
   return (
-    <AdminPage title="Rx Orders" subtitle="Custom prescription RX orders">
+    <AdminPage
+      title="Rx & photo orders"
+      subtitle="Prescription RX and photo orders — admin review, assign, then release to warehouse"
+    >
       <AdminOrdersTable
-        title="Rx Orders"
-        description="All RX prescription orders"
-        searchPlaceholder="Search RX orders by customer, order #…"
-        emptyMessage="No RX orders found yet."
-        emptySearchMessage="No RX orders match your search."
+        title="Rx & photo orders"
+        description="Held for admin until Mark available at warehouse. Assignment alone does not expose them to staff queues."
+        searchPlaceholder="Search RX / photo orders by customer, order #…"
+        emptyMessage="No RX or photo prescription orders found yet."
+        emptySearchMessage="No RX or photo orders match your search."
         filterOrders={filterOrders}
         showNotes
         showFilters

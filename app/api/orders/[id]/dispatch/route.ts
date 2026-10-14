@@ -23,6 +23,7 @@ import {
   orderDetailInclude,
   serializeOrderDetail,
 } from "../../../../lib/order-detail";
+import { employeeMayAccessOrder } from "../../../../lib/prescription-order-hold";
 
 function parseDispatchField(value: unknown, maxLen = 200): string | null {
   if (typeof value !== "string") return null;
@@ -73,8 +74,23 @@ export async function POST(
     if (session.role === "EMPLOYEE") {
       const gate = await requireStaffPermission(session, "orders.dispatch");
       if ("error" in gate) return gate.error;
-      if (order.assignedToId && order.assignedToId !== session.userId) {
-        return NextResponse.json({ error: "Forbidden. Not your assigned order." }, { status: 403 });
+      if (
+        !employeeMayAccessOrder(
+          {
+            assignedToId: order.assignedToId,
+            warehouseHold: order.warehouseHold,
+            warehouseReleasedAt: order.warehouseReleasedAt,
+          },
+          session.userId
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Forbidden. This order is not assigned to you or is still held for admin release.",
+          },
+          { status: 403 }
+        );
       }
     }
 

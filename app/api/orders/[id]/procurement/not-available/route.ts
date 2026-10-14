@@ -5,10 +5,15 @@ import {
   serializeAlternateSuggestion,
   serializePowerVersion,
 } from "../../../../../lib/alternate-power-workflow";
+import {
+  employeeOrderAccessForbidden,
+  loadOrderForEmployeeAccess,
+} from "../../../../../lib/employee-order-access";
 
 /**
  * POST /api/orders/:id/procurement/not-available
  * Staff marks retail ordered power as not available and generates alternate suggestions.
+ * RW-05: employees cannot act on unreleased warehouse-hold orders.
  */
 export async function POST(
   req: NextRequest,
@@ -25,6 +30,13 @@ export async function POST(
   }
 
   try {
+    const order = await loadOrderForEmployeeAccess(id);
+    if (!order) {
+      return NextResponse.json({ error: "Order not found." }, { status: 404 });
+    }
+    const holdGate = employeeOrderAccessForbidden(order, session);
+    if (holdGate) return holdGate;
+
     const body = await req.json().catch(() => ({}));
     const supplierOptions = Array.isArray(body?.supplierOptions)
       ? body.supplierOptions
@@ -63,11 +75,7 @@ export async function POST(
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Internal Server Error";
-    const status =
-      message.includes("not found") || message.includes("only")
-        ? 400
-        : 500;
     console.error("POST /api/orders/[id]/procurement/not-available error:", error);
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

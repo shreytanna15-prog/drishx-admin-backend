@@ -4,15 +4,11 @@ import { LensType } from "@prisma/client";
 
 import { prisma } from "../../../lib/prisma";
 import { generateUniqueOrderNumber } from "../../../lib/order-numbers";
-import { notifyStaffOfNewOrder } from "../../../lib/staff-notifications";
-import {
-  assignmentCreateFields,
-  resolveOrderAssigneeId,
-} from "../../../lib/assign-order-to-employee";
 import { isCustomerApproved } from "../../../lib/user-public";
 import { getSignedOrderImageUrl, uploadOrderImage } from "../../../lib/supabase-storage";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
 import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
+import { warehouseReleaseCreateFields } from "../../../lib/prescription-order-hold";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic"]);
@@ -58,7 +54,6 @@ export async function POST(req: NextRequest) {
 
     const storedImageUrl = await uploadOrderImage(session.userId, file);
     const orderNumber = await generateUniqueOrderNumber();
-    const assignedToId = await resolveOrderAssigneeId();
 
     let deliveryServiceId: string | null = null;
     try {
@@ -67,11 +62,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Selected delivery service is not available." }, { status: 400 });
     }
 
+    // RW-05: photo prescription stays admin-held — no auto-assign / staff notify.
     const order = await prisma.order.create({
       data: {
         orderNumber,
         userId: session.userId,
-        ...assignmentCreateFields(assignedToId),
+        ...warehouseReleaseCreateFields(),
         lensType: LensType.SINGLE_VISION,
         quantity: 0,
         unitPrice: 0,
@@ -93,20 +89,19 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const customerLabel = customer.name?.trim() || customer.email;
-    await notifyStaffOfNewOrder(order.id, customerLabel, assignedToId);
-
     const signedImageUrl = await getSignedOrderImageUrl(storedImageUrl);
 
     return NextResponse.json(
       {
         order: {
           ...order,
+          warehouseReleasedAt: null,
           orderImageUrl: signedImageUrl,
           createdAt: order.createdAt.toISOString(),
           updatedAt: order.updatedAt.toISOString(),
         },
-        message: "Your order will be placed soon. Our team will process your prescription photo.",
+        message:
+          "Your order will be placed soon. Our team will process your prescription photo.",
       },
       { status: 201 }
     );

@@ -10,16 +10,12 @@ import {
   type RxOrderRequest,
 } from "../../../lib/rx-order";
 import { prisma } from "../../../lib/prisma";
-import { notifyStaffOfNewOrder } from "../../../lib/staff-notifications";
-import {
-  assignmentCreateFields,
-  resolveOrderAssigneeId,
-} from "../../../lib/assign-order-to-employee";
 import { getSignedOrderImageUrl } from "../../../lib/supabase-storage";
 import { isCustomerApproved } from "../../../lib/user-public";
 import { requireStaffPermission } from "../../../lib/staff-access";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
 import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
+import { warehouseReleaseCreateFields } from "../../../lib/prescription-order-hold";
 
 function isStaffRole(role: string): boolean {
   return role === "ADMIN" || role === "EMPLOYEE";
@@ -120,14 +116,14 @@ export async function POST(req: NextRequest) {
 
     const prescriptionImage = body.prescriptionImageUrl?.trim() || null;
     const orderNumber = await generateUniqueOrderNumber();
-    const assignedToId = await resolveOrderAssigneeId();
     const cutoffSlot = await dispatchSlotForNow();
 
+    // RW-05: RX stays admin-held — no auto-assign / staff notify until warehouse release.
     const order = await prisma.order.create({
       data: {
         orderNumber,
         userId: targetUserId,
-        ...assignmentCreateFields(assignedToId),
+        ...warehouseReleaseCreateFields(),
         lensType: prismaLensType,
         quantity,
         reservedQuantity: 0,
@@ -157,10 +153,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const customerLabel =
-      order.user?.name?.trim() || order.user?.email || "Customer";
-    await notifyStaffOfNewOrder(order.id, customerLabel, assignedToId);
-
     const signedImageUrl = order.orderImageUrl
       ? await getSignedOrderImageUrl(order.orderImageUrl)
       : null;
@@ -169,14 +161,14 @@ export async function POST(req: NextRequest) {
       {
         order: {
           ...order,
-          orderImageUrl: signedImageUrl,
+          warehouseReleasedAt: null,
           createdAt: order.createdAt.toISOString(),
           updatedAt: order.updatedAt.toISOString(),
         },
         message:
           session.role === "CUSTOMER"
             ? "Your prescription order has been placed. Our team will confirm pricing and delivery."
-            : "Prescription order placed for the customer. Our team will confirm pricing and delivery.",
+            : "Prescription order placed for the customer. Held for admin review before warehouse.",
       },
       { status: 201 }
     );

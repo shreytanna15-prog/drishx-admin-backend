@@ -5,6 +5,7 @@ import {
   listAlternateSuggestions,
   serializeAlternateSuggestion,
 } from "../../../../lib/alternate-power-workflow";
+import { employeeMayAccessOrder } from "../../../../lib/prescription-order-hold";
 
 /** GET /api/orders/:id/alternate-suggestions */
 export async function GET(
@@ -20,7 +21,13 @@ export async function GET(
   try {
     const order = await prisma.order.findUnique({
       where: { id },
-      select: { id: true, userId: true, assignedToId: true },
+      select: {
+        id: true,
+        userId: true,
+        assignedToId: true,
+        warehouseHold: true,
+        warehouseReleasedAt: true,
+      },
     });
     if (!order) {
       return NextResponse.json({ error: "Order not found." }, { status: 404 });
@@ -31,8 +38,7 @@ export async function GET(
     }
     if (
       session.role === "EMPLOYEE" &&
-      order.assignedToId &&
-      order.assignedToId !== session.userId
+      !employeeMayAccessOrder(order, session.userId)
     ) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }

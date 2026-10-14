@@ -14,7 +14,9 @@ import {
   formatMoney,
   formatStatus,
   getStaffStatusOptions,
+  isAdminHeldWarehouseOrder,
   isEditableOrderStatus,
+  isPrescriptionLabOrder,
 } from "@/app/lib/admin-orders";
 import type { AdminEmployee } from "@/app/lib/admin-employees";
 
@@ -181,6 +183,30 @@ export function AdminOrderControlPanel({
       },
       "assign"
     );
+  }
+
+  async function handleWarehouseRelease() {
+    setBusy("release");
+    setError("");
+    setMessage("");
+    try {
+      const res = await adminFetch<{ order: AdminOrder; message?: string }>(
+        `/api/orders/${order.id}/warehouse-release`,
+        { method: "POST", body: "{}" }
+      );
+      invalidateListCache("orders");
+      onUpdated(res.order);
+      setMessage(
+        res.message ||
+          "Order released to warehouse. Assigned staff can now see it."
+      );
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError ? err.message : "Warehouse release failed."
+      );
+    } finally {
+      setBusy("");
+    }
   }
 
   async function handleNotesSave() {
@@ -513,6 +539,12 @@ export function AdminOrderControlPanel({
               </option>
             ))}
           </select>
+          {isAdminHeldWarehouseOrder(order) ? (
+            <p className="mt-1.5 text-xs text-(--brand-text-muted)">
+              Assignment alone does not show this RX/photo order to warehouse
+              staff. Release to warehouse when ready.
+            </p>
+          ) : null}
         </div>
         <div className="flex items-end">
           <Button
@@ -525,6 +557,34 @@ export function AdminOrderControlPanel({
           </Button>
         </div>
       </div>
+
+      {isPrescriptionLabOrder(order) ? (
+        <div className="mb-5 rounded-lg border border-(--brand-card-border) bg-(--brand-muted)/40 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-(--brand-text)">
+                Warehouse visibility
+              </p>
+              <p className="mt-1 text-sm text-(--brand-text-muted)">
+                {isAdminHeldWarehouseOrder(order)
+                  ? "Admin hold — employees cannot see or process this order yet."
+                  : order.warehouseReleasedAt
+                    ? `Released ${formatDate(order.warehouseReleasedAt)}. Assigned staff can work it.`
+                    : "Not on warehouse hold."}
+              </p>
+            </div>
+            {isAdminHeldWarehouseOrder(order) ? (
+              <Button
+                type="button"
+                onClick={() => void handleWarehouseRelease()}
+                disabled={Boolean(busy)}
+              >
+                {busy === "release" ? "Releasing…" : "Mark available at warehouse"}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mb-5 grid gap-3 border-b border-(--brand-card-border) pb-5">
         <div>

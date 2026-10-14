@@ -38,6 +38,8 @@ import {
   formatOrderDisplayId,
   formatPrescription,
   formatStatus,
+  isAdminHeldWarehouseOrder,
+  isPrescriptionLabOrder,
   matchesOrderFilters,
   matchesOrderSearch,
   parseOrdersListFilters,
@@ -493,6 +495,22 @@ function AdminOrdersTableImpl({
                         >
                           {formatStatus(order.status)}
                         </Badge>
+                        {isAdminHeldWarehouseOrder(order) ? (
+                          <Badge
+                            variant="outline"
+                            className="rounded-lg font-bold border-(--brand-warning-border,rgba(180,83,9,0.35)) text-amber-800 dark:text-amber-300"
+                          >
+                            Admin hold
+                          </Badge>
+                        ) : isPrescriptionLabOrder(order) &&
+                          order.warehouseReleasedAt ? (
+                          <Badge
+                            variant="outline"
+                            className="rounded-lg font-bold border-(--brand-success-border) text-(--brand-success)"
+                          >
+                            At warehouse
+                          </Badge>
+                        ) : null}
                         {(order.alternateSuggestions?.length ?? 0) > 0 ? (
                           <Badge
                             variant="outline"

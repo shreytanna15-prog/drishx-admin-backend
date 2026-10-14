@@ -10,6 +10,7 @@ import { sanitizeOrderForRole } from "../../../lib/order-activity";
 import { serializeDeliveryService } from "../../../lib/delivery-service";
 import { serializeDeliveryForRole } from "../../../lib/delivery-pack";
 import { getSignedOrderImageUrl } from "../../../lib/supabase-storage";
+import { employeeOrdersWhere } from "../../../lib/prescription-order-hold";
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/dispatch/pending
@@ -31,16 +32,20 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const where =
+    const staffScope =
       session.role === "EMPLOYEE"
-        ? { assignedToId: session.userId }
+        ? employeeOrdersWhere(session.userId)
         : {};
 
     const orders = await prisma.order.findMany({
       where: {
-        ...where,
-        status: "PACKED",
-        OR: [{ courierName: null }, { trackingNumber: null }],
+        AND: [
+          staffScope,
+          {
+            status: "PACKED",
+            OR: [{ courierName: null }, { trackingNumber: null }],
+          },
+        ],
       },
       include: {
         user: {

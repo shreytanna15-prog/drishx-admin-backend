@@ -38,6 +38,7 @@ import {
   LedgerEntryType,
   OrderStatus,
 } from "@prisma/client";
+import { employeeOrdersWhere } from "../../lib/prescription-order-hold";
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/orders
@@ -73,7 +74,7 @@ export async function GET(req: NextRequest) {
       session.role === "CUSTOMER"
         ? { userId: session.userId }
         : session.role === "EMPLOYEE"
-          ? { assignedToId: session.userId }
+          ? employeeOrdersWhere(session.userId)
           : {
               ...(employeeId ? { assignedToId: employeeId } : {}),
               ...(customerId ? { userId: customerId } : {}),
@@ -166,6 +167,10 @@ export async function GET(req: NextRequest) {
             createdAt: order.createdAt.toISOString(),
             updatedAt: order.updatedAt.toISOString(),
             assignedAt: order.assignedAt?.toISOString() ?? null,
+            warehouseHold: order.warehouseHold ?? false,
+            warehouseReleasedAt:
+              order.warehouseReleasedAt?.toISOString() ?? null,
+            warehouseReleasedById: order.warehouseReleasedById ?? null,
             dispatchDate: order.dispatchDate?.toISOString() ?? null,
             cutoffDeferred: order.cutoffDeferred ?? false,
             dispatchOverridden: Boolean(order.dispatchOverrideStamp),

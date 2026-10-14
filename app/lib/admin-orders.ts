@@ -92,6 +92,9 @@ export type AdminOrder = {
   updatedAt?: string;
   assignedToId?: string | null;
   assignedAt?: string | null;
+  warehouseHold?: boolean;
+  warehouseReleasedAt?: string | null;
+  warehouseReleasedById?: string | null;
   assignedTo?: OrderAssignee | null;
   user: OrderCustomer;
   invoice?: {
@@ -363,18 +366,41 @@ export function isRxOrder(order: Pick<AdminOrder, "notes">) {
   return order.notes?.includes("[RX Order]") ?? false;
 }
 
-/** Catalog / color / wholesale list — excludes prescription RX orders. */
-export function filterNonRxOrders(orders: AdminOrder[]) {
-  return orders.filter((order) => !isRxOrder(order));
-}
-
-/** Prescription RX orders only (`[RX Order]` marker in notes). */
-export function filterRxOrders(orders: AdminOrder[]) {
-  return orders.filter(isRxOrder);
-}
-
 export function isColorLensOrder(order: Pick<AdminOrder, "notes">) {
   return order.notes?.includes("[Color Lens]") ?? false;
+}
+
+/** Photo prescription (image present, not RX form / color). */
+export function isPhotoPrescriptionOrder(
+  order: Pick<AdminOrder, "notes" | "orderImageUrl">
+) {
+  if (!order.orderImageUrl) return false;
+  if (isRxOrder(order) || isColorLensOrder(order)) return false;
+  return true;
+}
+
+/** RX form or photo prescription — subject to admin hold → warehouse release. */
+export function isPrescriptionLabOrder(
+  order: Pick<AdminOrder, "notes" | "orderImageUrl" | "warehouseHold">
+) {
+  if (order.warehouseHold) return true;
+  return isRxOrder(order) || isPhotoPrescriptionOrder(order);
+}
+
+export function isAdminHeldWarehouseOrder(
+  order: Pick<AdminOrder, "warehouseHold" | "warehouseReleasedAt">
+) {
+  return Boolean(order.warehouseHold) && !order.warehouseReleasedAt;
+}
+
+/** Catalog / color / wholesale list — excludes prescription RX/photo lab orders. */
+export function filterNonRxOrders(orders: AdminOrder[]) {
+  return orders.filter((order) => !isPrescriptionLabOrder(order));
+}
+
+/** Prescription RX + photo orders for the Rx Lab screen. */
+export function filterRxOrders(orders: AdminOrder[]) {
+  return orders.filter(isPrescriptionLabOrder);
 }
 
 export function isDispatchedOrder(order: Pick<AdminOrder, "status">) {
