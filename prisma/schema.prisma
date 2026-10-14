@@ -564,6 +564,11 @@ model Order {
   assignedTo         User?                    @relation("AssignedOrdersToEmployee", fields: [assignedToId], references: [id])
   assignedToId       String?
   assignedAt         DateTime?
+  /// RW-05: true for RX / photo-prescription orders that stay admin-only until release.
+  warehouseHold      Boolean                  @default(false)
+  /// When set, assigned staff may see/work the order on warehouse queues.
+  warehouseReleasedAt DateTime?
+  warehouseReleasedById String?
   lineType           CartLineType             @default(RETAIL)
   wholesaleSpec      Json?
   lensType           LensType
@@ -632,6 +637,7 @@ model Order {
   @@index([assignedToId, status])
   @@index([status])
   @@index([dispatchDate])
+  @@index([warehouseHold, warehouseReleasedAt])
 }
 
 /// Immutable power history for retail orders. Version 1 is always the original ordered power.
@@ -1380,10 +1386,23 @@ model Supplier {
   address         String?
   phone           String?
   email           String?
+  /// RW-08 Phase C supplier profile. All optional so legacy rows stay valid.
+  /// PROPRIETORSHIP | PARTNERSHIP | LLP | PRIVATE_LIMITED | PUBLIC_LIMITED | OTHER
+  businessEntityType String?
+  contactPerson   String?
+  alternatePhone  String?
+  pan             String?
+  city            String?
+  pincode         String?
+  /// Dispatch / warehouse address when different from the registered address.
+  dispatchAddress String?
+  notes           String?
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   purchaseBills   PurchaseBill[]
+  purchaseOrders  PurchaseOrder[]
+  goodsReceipts   GoodsReceipt[]
   supplierPayments SupplierPayment[]
   ledgerEntries   SupplierLedgerEntry[]
   reorderRules    ReorderRule[]
@@ -1417,11 +1436,16 @@ model PurchaseBill {
   amountPaid         Decimal            @default(0)
   amountOutstanding  Decimal            @default(0)
   notes              String?
+  /// Private storage object path of the supplier bill document (RW-08).
+  documentStoragePath String?
+  documentFileName    String?
+  documentMimeType    String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   lines              PurchaseBillLine[]
   paymentAllocations SupplierPaymentAllocation[]
   ledgerEntries      SupplierLedgerEntry[]
+  goodsReceipt       GoodsReceipt?
 
   @@index([supplierId, status])
   @@index([status, billDate])
@@ -1882,8 +1906,229 @@ model ProcurementRequest {
   approvedAt   DateTime?
   approvedById String?
 
+  purchaseOrderLines PurchaseOrderLine[]
+  purchaseOrderAllocations PurchaseOrderAllocation[]
+
   @@index([lensType, lensId, status])
   @@index([status, source])
   @@index([orderId])
   @@index([createdAt])
+}
+
+/// Purchase Order lifecycle (RW-08 Phase A). Stock is never posted here.
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  OPEN
+  /// Approved PO confirmed as dispatched to the supplier (email/manual).
+  SENT
+  PARTIALLY_RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id               String              @id @default(cuid())
+  /// Human-facing reference, e.g. PO-2026-000001.
+  publicId         String              @unique
+  status           PurchaseOrderStatus @default(DRAFT)
+  supplierId       String
+  supplier         Supplier            @relation(fields: [supplierId], references: [id])
+  /// Warehouse stub — Main today; extensible later.
+  warehouseCode    String              @default("MAIN")
+  expectedDelivery DateTime?
+  notes            String?
+  subtotal         Decimal             @default(0)
+  totalAmount      Decimal             @default(0)
+  createdById      String?
+  approvedAt       DateTime?
+  approvedById     String?
+  cancelledAt      DateTime?
+  cancelledById    String?
+  cancelReason     String?
+  /// Supplier dispatch tracking — set only on an explicit, authorized "sent" record.
+  sentAt           DateTime?
+  sentById         String?
+  /// EMAIL | WHATSAPP | COURIER | HAND_DELIVERY | PHONE | OTHER
+  sentVia          String?
+  sentTo           String?
+  sentNote         String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  lines            PurchaseOrderLine[]
+  powerLocks       OpenPurchaseOrderPower[]
+  allocations      PurchaseOrderAllocation[]
+  goodsReceipts    GoodsReceipt[]
+
+  @@index([status, createdAt])
+  @@index([supplierId, status])
+}
+
+model PurchaseOrderLine {
+  id                   String              @id @default(cuid())
+  purchaseOrderId      String
+  purchaseOrder        PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  lineNumber           Int
+  lensType             LensType
+  lensId               String
+  productLabel         String?
+  rangeLabel           String?
+  powerLabel           String?
+  requiredQuantity     Int
+  poQuantity           Int
+  rate                 Decimal?
+  amount               Decimal             @default(0)
+  receivedQuantity     Int                 @default(0)
+  cancelledQuantity    Int                 @default(0)
+  procurementRequestId String?
+  procurementRequest   ProcurementRequest? @relation(fields: [procurementRequestId], references: [id], onDelete: SetNull)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  powerLock            OpenPurchaseOrderPower?
+  allocations          PurchaseOrderAllocation[]
+  goodsReceiptLines    GoodsReceiptLine[]
+
+  @@unique([purchaseOrderId, lineNumber])
+  @@index([lensType, lensId])
+  @@index([procurementRequestId])
+  @@index([purchaseOrderId])
+}
+
+/// Exact PR→PO line allocation created on approve only. Cancel reverses these rows.
+model PurchaseOrderAllocation {
+  id                   String              @id @default(cuid())
+  purchaseOrderId      String
+  purchaseOrder        PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrderLineId  String
+  purchaseOrderLine    PurchaseOrderLine   @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Cascade)
+  procurementRequestId String
+  procurementRequest   ProcurementRequest  @relation(fields: [procurementRequestId], references: [id], onDelete: Restrict)
+  quantity             Int
+  /// Portion already reversed (cancel / close outstanding). Active = quantity − reversedQuantity.
+  reversedQuantity     Int                 @default(0)
+  /// Portion received via Confirm Receipt. Never reversible.
+  receivedQuantity     Int                 @default(0)
+  /// Set when fully reversed — prevents double-reverse of residual.
+  reversedAt           DateTime?
+  createdAt            DateTime            @default(now())
+
+  @@unique([purchaseOrderLineId, procurementRequestId])
+  @@index([purchaseOrderId, reversedAt])
+  @@index([procurementRequestId])
+}
+
+enum GoodsReceiptStatus {
+  DRAFT
+  VALIDATED
+  CONFIRMED
+  CANCELLED
+}
+
+enum GoodsReceiptLineStatus {
+  MATCHED
+  SHORT
+  EXTRA
+  INVALID
+  DAMAGED
+  PENDING
+}
+
+/// Goods receipt (GRN) — stock posts only when status = CONFIRMED.
+model GoodsReceipt {
+  id                String             @id @default(cuid())
+  publicId          String             @unique
+  purchaseOrderId   String
+  purchaseOrder     PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  status            GoodsReceiptStatus @default(DRAFT)
+  /// Client/server idempotency key for Confirm Receipt (unique when set).
+  confirmationKey   String?            @unique
+  warehouseCode     String             @default("MAIN")
+  supplierId        String
+  supplier          Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  courier           String?
+  awb               String?
+  dispatchDate      DateTime?
+  packageCount      Int?
+  notes             String?
+  billStoragePath   String?
+  billFileName      String?
+  billMimeType      String?
+  excelStoragePath  String?
+  excelFileName     String?
+  excelMimeType     String?
+  purchaseBillId    String?            @unique
+  purchaseBill      PurchaseBill?      @relation(fields: [purchaseBillId], references: [id], onDelete: SetNull)
+  closeReason       String?
+  confirmedAt       DateTime?
+  confirmedById     String?
+  createdById       String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lines             GoodsReceiptLine[]
+  billSummaries     GoodsReceiptBillSummary[]
+
+  @@index([purchaseOrderId, status])
+  @@index([status, createdAt])
+}
+
+model GoodsReceiptLine {
+  id                    String                 @id @default(cuid())
+  goodsReceiptId        String
+  goodsReceipt          GoodsReceipt           @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderLineId   String?
+  purchaseOrderLine     PurchaseOrderLine?     @relation(fields: [purchaseOrderLineId], references: [id], onDelete: SetNull)
+  lensType              LensType?
+  lensId                String?
+  productLabel          String?
+  rangeLabel            String?
+  powerLabel            String?
+  orderedQuantity       Int                    @default(0)
+  previouslyReceived    Int                    @default(0)
+  outstandingBefore     Int                    @default(0)
+  deliveredQuantity     Int                    @default(0)
+  acceptedQuantity      Int                    @default(0)
+  damagedQuantity       Int                    @default(0)
+  shortQuantity         Int                    @default(0)
+  excessQuantity        Int                    @default(0)
+  lineStatus            GoodsReceiptLineStatus @default(PENDING)
+  /// KEEP_PENDING | MARK_DAMAGED | ACCEPT_SHORT | REJECT_EXTRA
+  actionCode            String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@index([goodsReceiptId])
+  @@index([purchaseOrderLineId])
+  @@index([lensType, lensId])
+}
+
+/// Human-entered supplier bill range totals for range-wise reconciliation (no OCR).
+model GoodsReceiptBillSummary {
+  id             String       @id @default(cuid())
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  productLabel   String
+  rangeLabel     String?
+  billQuantity   Int
+  excelQuantity  Int          @default(0)
+  difference     Int          @default(0)
+  /// BILL_CORRECTION | EXCEL_CORRECTION | ACCEPT_EXCEL | KEEP_PENDING
+  resolution     String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([goodsReceiptId])
+}
+
+/// Atomic open-power lock: one approved/open PO may cover a power at a time.
+model OpenPurchaseOrderPower {
+  lensType            LensType
+  lensId              String
+  purchaseOrderId     String
+  purchaseOrder       PurchaseOrder     @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrderLineId String            @unique
+  purchaseOrderLine   PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Cascade)
+  createdAt           DateTime          @default(now())
+
+  @@id([lensType, lensId])
+  @@index([purchaseOrderId])
 }
