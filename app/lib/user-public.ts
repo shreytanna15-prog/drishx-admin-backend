@@ -112,11 +112,18 @@ export function toSafeUser(
   };
 }
 
-export function isCustomerApproved(user: Pick<User, "role" | "isApproved" | "approvalStatus">) {
+/** Approved *and* not suspended — suspended customers keep APPROVED status with isActive=false. */
+export function isCustomerApproved(
+  user: Pick<User, "role" | "isApproved" | "approvalStatus" | "isActive">
+) {
   if (user.role !== "CUSTOMER") {
     return true;
   }
-  return user.isApproved && user.approvalStatus === "APPROVED";
+  return (
+    user.isApproved &&
+    user.approvalStatus === "APPROVED" &&
+    user.isActive
+  );
 }
 
 export function customerNeedsGst(user: Pick<User, "role" | "gstNumber">) {

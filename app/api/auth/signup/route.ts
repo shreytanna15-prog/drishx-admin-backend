@@ -2,18 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
 import { hashPassword } from "../../../lib/auth";
 import { toSafeUser } from "../../../lib/user-public";
-
-function optionalTrim(value: unknown): string | null {
-  if (value == null) return null;
-  const trimmed = String(value).trim();
-  return trimmed ? trimmed : null;
-}
+import { optionalTrim } from "../../../lib/customer-registration";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const email = String(body.email ?? "").trim().toLowerCase();
   const password = String(body.password ?? "").trim();
   const name = optionalTrim(body.name);
+  // RW-07: business name is optional
   const businessName = optionalTrim(body.businessName);
   const mobileNumber = optionalTrim(body.mobileNumber);
   const alternateMobileNumber = optionalTrim(body.alternateMobileNumber);
@@ -25,10 +21,6 @@ export async function POST(req: NextRequest) {
 
   if (!name) {
     return NextResponse.json({ error: "Full name is required." }, { status: 400 });
-  }
-
-  if (!businessName) {
-    return NextResponse.json({ error: "Business name is required." }, { status: 400 });
   }
 
   if (!mobileNumber) {
@@ -64,7 +56,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(
     {
       user: toSafeUser(user),
-      message: "Account created. Please continue with business details.",
+      message:
+        "Account created. You can continue with optional business details or skip them for now.",
     },
     { status: 201 }
   );
