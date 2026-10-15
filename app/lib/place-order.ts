@@ -30,6 +30,11 @@ import {
   applyOrderRedemption,
   resolveCheckoutRedemption,
 } from "./loyalty/redeem";
+import {
+  buildOnBehalfActivityMessage,
+  resolveOrderAttribution,
+} from "./order-attribution";
+import { logOrderActivity } from "./order-activity";
 
 export type PlaceOrderLineInput = {
   lensType: LensType;
@@ -53,6 +58,8 @@ export type PlaceOrderLineInput = {
 
 export type PlaceOrderContext = {
   actingUserId: string;
+  /** Session role used for RW-10 attribution (never from client body). */
+  actingRole: string;
   resolvedUserId: string;
   checkoutBatchId?: string | null;
   followsCustomerProcurementFlow: boolean;
@@ -162,6 +169,10 @@ export async function placeOrderLine(
   });
 
   const cutoffSlot = await dispatchSlotForNow();
+  const attribution = resolveOrderAttribution({
+    session: { role: context.actingRole, userId: context.actingUserId },
+    customerUserId: context.resolvedUserId,
+  });
 
   const newOrder = await prisma.order.create({
     data: {
@@ -169,6 +180,7 @@ export async function placeOrderLine(
       checkoutBatchId: normalizedBatchId,
       userId: context.resolvedUserId,
       ...assignmentCreateFields(assignedToId),
+      ...attribution,
       lineType: CartLineType.RETAIL,
       lensType: input.lensType,
       singleVisionLensId:
@@ -220,15 +232,25 @@ export async function placeOrderLine(
     loyaltyDiscount: redemption.loyaltyDiscount,
   });
 
+  const customer = await prisma.user.findUnique({
+    where: { id: context.resolvedUserId },
+    select: { name: true, email: true, businessName: true },
+  });
+  const customerLabel =
+    customer?.businessName?.trim() ||
+    customer?.name?.trim() ||
+    customer?.email ||
+    "A customer";
+
   if (context.notifyStaff) {
-    const customer = await prisma.user.findUnique({
-      where: { id: context.resolvedUserId },
-      select: { name: true, email: true },
-    });
-    const customerLabel =
-      customer?.name?.trim() || customer?.email || "A customer";
     await notifyStaffOfNewOrder(newOrder.id, customerLabel, assignedToId);
   }
+
+  const actor = await prisma.user.findUnique({
+    where: { id: context.actingUserId },
+    select: { name: true, email: true },
+  });
+  const actorLabel = actor?.name?.trim() || actor?.email || null;
 
   await recordAuditEvent(prisma, {
     action: AuditAction.ORDER_CREATED,
@@ -238,7 +260,7 @@ export async function placeOrderLine(
     actor: {
       actorType: "HUMAN",
       actorUserId: context.actingUserId,
-      actorName: null,
+      actorName: actorLabel,
     },
     context: {
       orderNumber: newOrder.orderNumber,
@@ -250,11 +272,39 @@ export async function placeOrderLine(
       cyl: prescription.cyl,
       axis: prescription.axis,
       add: prescription.add,
+      orderSource: attribution.orderSource,
+      customerUserId: context.resolvedUserId,
+      placedByUserId: attribution.placedByUserId,
     },
     relatedRefs: { transactionId: newTransaction.id },
-    activityMessage: `Order #${newOrder.orderNumber ?? newOrder.id.slice(-6)} created`,
+    activityMessage: buildOnBehalfActivityMessage({
+      orderNumber: newOrder.orderNumber,
+      orderId: newOrder.id,
+      customerLabel,
+      sessionRole: context.actingRole,
+      actorLabel,
+    }),
     message: `Order created (${newOrder.status})`,
   });
+
+  if (attribution.placedByUserId) {
+    await logOrderActivity(prisma, {
+      orderId: newOrder.id,
+      actorUserId: context.actingUserId,
+      action: "ORDER_CREATED_ON_BEHALF",
+      message: buildOnBehalfActivityMessage({
+        orderNumber: newOrder.orderNumber,
+        orderId: newOrder.id,
+        customerLabel,
+        sessionRole: context.actingRole,
+        actorLabel,
+      }),
+      metadata: {
+        orderSource: attribution.orderSource,
+        customerUserId: context.resolvedUserId,
+      },
+    });
+  }
 
   return {
     orderId: newOrder.id,

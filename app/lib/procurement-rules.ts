@@ -105,6 +105,35 @@ export function deriveReorderPriority(
   return ProcurementPriority.NORMAL;
 }
 
+/**
+ * Configured-rule low-stock predicate used by Reorder Rules list / banner.
+ * Matches Run Reorder's stock gate: available ≤ minStock (including minStock = 0 → only when available is 0).
+ * Unconfigured SKUs have no minimum and must not be treated as "below minimum".
+ */
+export function isAtOrBelowMinimum(
+  available: number,
+  minStock: number
+): boolean {
+  return available <= minStock;
+}
+
+/**
+ * Whether Run Reorder would even consider this rule for raising a request
+ * (stock + auto flags). Open-PO / existing-request suppression is applied later.
+ */
+export function isReorderCheckCandidate(input: {
+  available: number;
+  minStock: number;
+  autoProcure: boolean;
+  isActive: boolean;
+}): boolean {
+  return (
+    input.isActive &&
+    input.autoProcure &&
+    isAtOrBelowMinimum(input.available, input.minStock)
+  );
+}
+
 /** Validate a reorder rule payload. Returns an error string, or null when valid. */
 export function validateReorderRule(input: {
   lensType?: unknown;

@@ -9,6 +9,7 @@ import { getSignedOrderImageUrl, uploadOrderImage } from "../../../lib/supabase-
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
 import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
 import { warehouseReleaseCreateFields } from "../../../lib/prescription-order-hold";
+import { resolveOrderAttribution } from "../../../lib/order-attribution";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic"]);
@@ -62,12 +63,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Selected delivery service is not available." }, { status: 400 });
     }
 
+    const attribution = resolveOrderAttribution({
+      session: { role: session.role, userId: session.userId },
+      customerUserId: session.userId,
+    });
+
     // RW-05: photo prescription stays admin-held — no auto-assign / staff notify.
     const order = await prisma.order.create({
       data: {
         orderNumber,
         userId: session.userId,
         ...warehouseReleaseCreateFields(),
+        ...attribution,
         lensType: LensType.SINGLE_VISION,
         quantity: 0,
         unitPrice: 0,

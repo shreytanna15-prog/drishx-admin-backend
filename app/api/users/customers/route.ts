@@ -21,7 +21,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const status = new URL(req.url).searchParams.get("status")?.trim().toLowerCase() || "approved";
+    const searchParams = new URL(req.url).searchParams;
+    const status = searchParams.get("status")?.trim().toLowerCase() || "approved";
+    const activeOnly = searchParams.get("activeOnly") === "1" || searchParams.get("activeOnly") === "true";
+    const q = searchParams.get("q")?.trim().toLowerCase() || "";
 
     let where: {
       role: "CUSTOMER";
@@ -42,6 +45,9 @@ export async function GET(req: NextRequest) {
     } else {
       // approved (active + suspended both have isApproved; default list = all approved)
       where = { role: "CUSTOMER", isApproved: true, approvalStatus: "APPROVED" };
+      if (activeOnly) {
+        where.isActive = true;
+      }
     }
 
     const customers = await prisma.user.findMany({
@@ -52,9 +58,26 @@ export async function GET(req: NextRequest) {
       ],
     });
 
+    const filtered = q
+      ? customers.filter((c) => {
+          const hay = [
+            c.name,
+            c.businessName,
+            c.shopName,
+            c.email,
+            c.mobileNumber,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return hay.includes(q);
+        })
+      : customers;
+
     return NextResponse.json({
-      customers: customers.map(toSafeUser),
+      customers: filtered.map(toSafeUser),
       status,
+      activeOnly,
     });
   } catch (error) {
     console.error("GET /api/users/customers error:", error);

@@ -49,6 +49,7 @@ export function resolveActiveTitle(
   if (pathMatchesRoute(pathname, "/procurement/requests")) {
     return "Procurement Requests";
   }
+  if (pathMatchesRoute(pathname, "/orders/new")) return "Create Order";
   if (pathMatchesRoute(pathname, "/orders/overview")) return "Orders overview";
   if (pathMatchesRoute(pathname, "/orders/rx-lab")) return "Rx Orders";
   if (pathMatchesRoute(pathname, "/orders/dispatch")) {

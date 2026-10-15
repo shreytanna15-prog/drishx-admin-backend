@@ -25,6 +25,7 @@ import {
   applyOrderRedemption,
   resolveCheckoutRedemption,
 } from "./loyalty/redeem";
+import { resolveOrderAttribution } from "./order-attribution";
 
 export type WholesaleCheckoutBatchInput = {
   cartRows: CartReservation[];
@@ -33,6 +34,8 @@ export type WholesaleCheckoutBatchInput = {
 
 export type WholesaleCheckoutContext = {
   actingUserId: string;
+  /** Session role for RW-10 attribution. */
+  actingRole: string;
   resolvedUserId: string;
   checkoutBatchId: string;
   orderNotes: string | null;
@@ -280,11 +283,20 @@ export async function placeWholesaleCheckoutBatches(
           },
         });
 
+        const attribution = resolveOrderAttribution({
+          session: {
+            role: context.actingRole,
+            userId: context.actingUserId,
+          },
+          customerUserId: context.resolvedUserId,
+        });
+
         const orderData: Prisma.OrderUncheckedCreateInput = {
           orderNumber,
           checkoutBatchId: context.checkoutBatchId,
           userId: context.resolvedUserId,
           ...assignmentCreateFields(assignedToId),
+          ...attribution,
           lineType: CartLineType.WHOLESALE,
           wholesaleSpec:
             wholesaleSpecValue === null || wholesaleSpecValue === undefined

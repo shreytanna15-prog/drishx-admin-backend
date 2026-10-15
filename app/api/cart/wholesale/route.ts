@@ -134,26 +134,27 @@ function parseWholesaleBody(body: Record<string, unknown>): {
 }
 
 async function lensExistsForCart(lensType: LensType, lensId: string): Promise<boolean> {
+  // RW-09: held/archived leaves are not orderable via wholesale cart.
   if (lensType === LensType.SINGLE_VISION) {
     const row = await prisma.singleVisionLens.findUnique({
       where: { id: lensId },
-      select: { id: true },
+      select: { id: true, isDisabled: true },
     });
-    return Boolean(row);
+    return Boolean(row && !row.isDisabled);
   }
   if (lensType === LensType.KRYPTOK) {
     const row = await prisma.kryptokLens.findUnique({
       where: { id: lensId },
-      select: { id: true },
+      select: { id: true, isDisabled: true },
     });
-    return Boolean(row);
+    return Boolean(row && !row.isDisabled);
   }
   if (lensType === LensType.PROGRESSIVE) {
     const row = await prisma.progressiveLens.findUnique({
       where: { id: lensId },
-      select: { id: true },
+      select: { id: true, isDisabled: true },
     });
-    return Boolean(row);
+    return Boolean(row && !row.isDisabled);
   }
   return false;
 }

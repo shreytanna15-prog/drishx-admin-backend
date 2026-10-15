@@ -8,6 +8,7 @@ import {
   signAccessToken,
 } from "../../../lib/auth";
 import { shouldClearRefreshCookie } from "../../../lib/auth-refresh-policy";
+import { accountAccessErrorResponse } from "../../../lib/account-access";
 import { unauthorizedResponse } from "../../../lib/auth-errors";
 import { prisma, withDbRetry } from "../../../lib/prisma";
 import { toSafeUser } from "../../../lib/user-public";
@@ -59,10 +60,17 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    if (!user || (user.role !== "CUSTOMER" && !user.isActive)) {
+    if (!user) {
       const response = unauthorizedResponse("TOKEN_INVALID");
       response.headers.append("Set-Cookie", clearRefreshCookie());
       return response;
+    }
+
+    // RW-04: suspended / rejected customers and inactive staff cannot refresh.
+    const accessDenied = accountAccessErrorResponse(user);
+    if (accessDenied) {
+      accessDenied.headers.append("Set-Cookie", clearRefreshCookie());
+      return accessDenied;
     }
 
     const accessToken = signAccessToken({ userId: user.id, role: user.role });

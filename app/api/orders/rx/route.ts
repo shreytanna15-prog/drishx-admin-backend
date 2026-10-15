@@ -16,6 +16,17 @@ import { requireStaffPermission } from "../../../lib/staff-access";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
 import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
 import { warehouseReleaseCreateFields } from "../../../lib/prescription-order-hold";
+import {
+  buildOnBehalfActivityMessage,
+  resolveOrderAttribution,
+  stripClientOrderAttribution,
+} from "../../../lib/order-attribution";
+import {
+  AuditAction,
+  AuditModule,
+  recordAuditEvent,
+} from "../../../lib/audit";
+import { logOrderActivity } from "../../../lib/order-activity";
 
 function isStaffRole(role: string): boolean {
   return role === "ADMIN" || role === "EMPLOYEE";
@@ -40,7 +51,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = (await req.json()) as RxOrderRequest & { userId?: string };
+    const rawBody = (await req.json()) as Record<string, unknown>;
+    const body = stripClientOrderAttribution(rawBody) as RxOrderRequest & {
+      userId?: string;
+    };
 
     let targetUserId = session.userId;
     if (session.role === "CUSTOMER") {
@@ -66,12 +80,20 @@ export async function POST(req: NextRequest) {
       }
       if (!isCustomerApproved(customer)) {
         return NextResponse.json(
-          { error: "This customer account is pending approval." },
+          {
+            error:
+              "This customer cannot place orders (pending approval, rejected, or suspended).",
+          },
           { status: 403 }
         );
       }
       targetUserId = onBehalfUserId;
     }
+
+    const attribution = resolveOrderAttribution({
+      session: { role: session.role, userId: session.userId },
+      customerUserId: targetUserId,
+    });
 
     const prismaLensType = mapColorLensTypeToPrisma(body.lensType);
     if (!prismaLensType) {
@@ -124,6 +146,7 @@ export async function POST(req: NextRequest) {
         orderNumber,
         userId: targetUserId,
         ...warehouseReleaseCreateFields(),
+        ...attribution,
         lensType: prismaLensType,
         quantity,
         reservedQuantity: 0,
@@ -150,12 +173,66 @@ export async function POST(req: NextRequest) {
             businessName: true,
           },
         },
+        placedBy: {
+          select: { id: true, name: true, email: true, role: true },
+        },
       },
     });
 
     const signedImageUrl = order.orderImageUrl
       ? await getSignedOrderImageUrl(order.orderImageUrl)
       : null;
+
+    const customerLabel =
+      order.user?.businessName?.trim() ||
+      order.user?.name?.trim() ||
+      order.user?.email ||
+      "Customer";
+    const actorLabel =
+      order.placedBy?.name?.trim() || order.placedBy?.email || null;
+    const activityMessage = buildOnBehalfActivityMessage({
+      orderNumber: order.orderNumber,
+      orderId: order.id,
+      customerLabel,
+      sessionRole: session.role,
+      actorLabel,
+    });
+
+    await recordAuditEvent(prisma, {
+      action: AuditAction.ORDER_CREATED,
+      module: AuditModule.ORDER,
+      entityType: "Order",
+      entityId: order.id,
+      actor: {
+        actorType: "HUMAN",
+        actorUserId: session.userId,
+        actorName: actorLabel,
+      },
+      context: {
+        orderNumber: order.orderNumber,
+        orderSource: attribution.orderSource,
+        customerUserId: targetUserId,
+        placedByUserId: attribution.placedByUserId,
+        channel: "RX",
+        warehouseHold: true,
+      },
+      activityMessage,
+      message: `RX order created (${order.status})`,
+    });
+
+    if (attribution.placedByUserId) {
+      await logOrderActivity(prisma, {
+        orderId: order.id,
+        actorUserId: session.userId,
+        action: "ORDER_CREATED_ON_BEHALF",
+        message: activityMessage,
+        metadata: {
+          orderSource: attribution.orderSource,
+          customerUserId: targetUserId,
+          channel: "RX",
+        },
+      });
+    }
 
     return NextResponse.json(
       {

@@ -26,6 +26,10 @@ import {
   type ReorderCheckResponse,
   type StockPositionInfo,
 } from "@/app/lib/admin-procurement";
+import {
+  isAtOrBelowMinimum,
+  isReorderCheckCandidate,
+} from "@/app/lib/procurement-rules";
 import { cn } from "@/lib/utils";
 
 type Draft = {
@@ -85,7 +89,8 @@ export default function PowerWiseStockPage() {
       const params = new URLSearchParams();
       if (lensType) params.set("lensType", lensType);
       if (onlyBelowMin) params.set("belowMin", "true");
-      params.set("includeUnconfigured", "true");
+      // Unconfigured SKUs have no minimum — never mix them into "below minimum".
+      if (!onlyBelowMin) params.set("includeUnconfigured", "true");
 
       const res = await adminFetch<ReorderRulesResponse>(
         `/api/inventory/reorder-rules?${params.toString()}`
@@ -108,19 +113,21 @@ export default function PowerWiseStockPage() {
 
       // Surface SKUs that have stock but no threshold yet, so an admin can
       // configure the catalogue without hunting through a lens picker.
-      const unconfigured: EditableRow[] = (res.unconfigured ?? []).map((entry) => {
-        const draft = toDraft(null, entry.position);
-        return {
-          key: `${entry.lensType}:${entry.lensId}`,
-          lensType: entry.lensType,
-          lensId: entry.lensId,
-          lens: entry.lens,
-          position: entry.position,
-          draft,
-          original: { ...draft },
-          isNew: true,
-        };
-      });
+      const unconfigured: EditableRow[] = onlyBelowMin
+        ? []
+        : (res.unconfigured ?? []).map((entry) => {
+            const draft = toDraft(null, entry.position);
+            return {
+              key: `${entry.lensType}:${entry.lensId}`,
+              lensType: entry.lensType,
+              lensId: entry.lensId,
+              lens: entry.lens,
+              position: entry.position,
+              draft,
+              original: { ...draft },
+              isNew: true,
+            };
+          });
 
       setRows([...configured, ...unconfigured]);
     } catch (err) {
@@ -237,9 +244,28 @@ export default function PowerWiseStockPage() {
     }
   }
 
-  const belowMinCount = useMemo(
-    () => rows.filter((row) => !row.isNew && row.position.available <= toInt(row.draft.minStock)).length,
+  const belowMinConfigured = useMemo(
+    () =>
+      rows.filter(
+        (row) =>
+          !row.isNew &&
+          isAtOrBelowMinimum(row.position.available, toInt(row.draft.minStock))
+      ),
     [rows]
+  );
+  const belowMinCount = belowMinConfigured.length;
+  const actionableBelowMinCount = useMemo(
+    () =>
+      belowMinConfigured.filter((row) =>
+        isReorderCheckCandidate({
+          available: row.position.available,
+          minStock: toInt(row.draft.minStock),
+          autoProcure: row.draft.autoProcure,
+          // Rule pause is not editable on this grid; treat listed rules as active.
+          isActive: true,
+        })
+      ).length,
+    [belowMinConfigured]
   );
 
   return (
@@ -294,7 +320,10 @@ export default function PowerWiseStockPage() {
             {tab.label}
           </button>
         ))}
-        <label className="ml-auto flex items-center gap-2 text-sm text-(--brand-text-muted)">
+        <label
+          className="ml-auto flex items-center gap-2 text-sm text-(--brand-text-muted)"
+          title="Configured rules where available stock is at or below the minimum. Unconfigured SKUs are hidden."
+        >
           <input
             type="checkbox"
             checked={onlyBelowMin}
@@ -315,11 +344,25 @@ export default function PowerWiseStockPage() {
       </div>
 
       {belowMinCount > 0 ? (
-        <div className="mb-4 flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+        <div className="mb-4 flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>
-            <strong>{belowMinCount}</strong> SKU{belowMinCount === 1 ? "" : "s"} at or
-            below the minimum. Run the check to raise procurement requests.
+            <strong>{belowMinCount}</strong> configured SKU
+            {belowMinCount === 1 ? "" : "s"} at or below{" "}
+            {belowMinCount === 1 ? "its" : "their"} minimum.
+            {actionableBelowMinCount > 0 ? (
+              <>
+                {" "}
+                <strong>{actionableBelowMinCount}</strong> with Auto Reorder on
+                may raise a request when you run the check.
+              </>
+            ) : (
+              <>
+                {" "}
+                None have Auto Reorder on — Run check will not raise requests for
+                these until Auto is enabled.
+              </>
+            )}
           </span>
         </div>
       ) : null}
@@ -375,9 +418,11 @@ export default function PowerWiseStockPage() {
                     colSpan={12}
                     className="h-28 text-center text-(--brand-text-muted)"
                   >
-                    {query.trim() || onlyBelowMin
-                      ? "No SKUs match the current filters."
-                      : "No reorder rules yet. Search above to configure a SKU."}
+                    {onlyBelowMin
+                      ? "No configured SKUs are at or below their minimum."
+                      : query.trim()
+                        ? "No SKUs match the current filters."
+                        : "No reorder rules yet. Search above to configure a SKU."}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -419,7 +464,7 @@ function RuleRow({
   const min = toInt(row.draft.minStock);
   const target = toInt(row.draft.targetStock);
   const available = row.position.available;
-  const belowMin = !row.isNew && available <= min;
+  const belowMin = !row.isNew && isAtOrBelowMinimum(available, min);
   const outOfStock = !row.isNew && available <= 0;
   const invalid = row.draft.minStock !== "" && target <= min;
 

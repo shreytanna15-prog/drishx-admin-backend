@@ -81,6 +81,8 @@ model User {
   transactions           Transaction[]
   orders                 Order[]               @relation("CustomerOrders")
   assignedOrders         Order[]               @relation("AssignedOrdersToEmployee")
+  /// Orders this staff member placed on behalf of a customer (RW-10).
+  placedOrders           Order[]               @relation("OrdersPlacedByStaff")
   notifications          Notification[]
   invoices               Invoice[]
   assignedTasks          Task[]                @relation("AssignedTasksToEmployee")
@@ -400,6 +402,13 @@ enum OrderStatus {
   CANCELLED
 }
 
+/// Origin of order placement. Null on legacy rows (do not guess).
+enum OrderSource {
+  CUSTOMER_APP
+  EMPLOYEE_ON_BEHALF
+  ADMIN_PANEL
+}
+
 enum InvoiceStatus {
   DRAFT
   ISSUED
@@ -564,6 +573,11 @@ model Order {
   assignedTo         User?                    @relation("AssignedOrdersToEmployee", fields: [assignedToId], references: [id])
   assignedToId       String?
   assignedAt         DateTime?
+  /// RW-10: who actually placed the order (admin/employee). Null for customer self-checkout and legacy rows.
+  placedBy           User?                    @relation("OrdersPlacedByStaff", fields: [placedByUserId], references: [id])
+  placedByUserId     String?
+  /// RW-10: placement channel. Null = legacy (unknown); never invent a backfill.
+  orderSource        OrderSource?
   /// RW-05: true for RX / photo-prescription orders that stay admin-only until release.
   warehouseHold      Boolean                  @default(false)
   /// When set, assigned staff may see/work the order on warehouse queues.
@@ -635,6 +649,8 @@ model Order {
   @@index([checkoutBatchId])
   @@index([assignedToId])
   @@index([assignedToId, status])
+  @@index([placedByUserId])
+  @@index([orderSource])
   @@index([status])
   @@index([dispatchDate])
   @@index([warehouseHold, warehouseReleasedAt])
@@ -1007,6 +1023,110 @@ model InventoryMovement {
   createdAt       DateTime         @default(now())
 
   @@index([returnRequestId, createdAt])
+}
+
+/// RW-09: admin product-master status (soft visibility — never hard-deletes lens leaves).
+enum CatalogProductStatus {
+  ACTIVE
+  HELD
+  ARCHIVED
+}
+
+/// RW-09: lens family for CatalogProduct (subset of LensType sold in shop).
+enum CatalogLensFamily {
+  SINGLE_VISION
+  KRYPTOK
+  PROGRESSIVE
+}
+
+/// RW-09 product master facade. Stock/order FKs still point at lens leaf tables.
+/// identityKey encodes type+brand/line+index+coating (see app/lib/catalog/product-identity.ts).
+model CatalogProduct {
+  id               String               @id @default(cuid())
+  lensFamily       CatalogLensFamily
+  category         String?
+  brand            String
+  item             String?
+  /// Refractive index (required for SV / Progressive).
+  index            Decimal?
+  coating          String
+  /// Progressive design/type label (maps to ProgressiveLens.type).
+  progressiveType  String?
+  defaultPrice     Decimal
+  defaultCostPrice Decimal?
+  status           CatalogProductStatus @default(ACTIVE)
+  identityKey      String               @unique
+  notes            String?
+  heldAt           DateTime?
+  heldByUserId     String?
+  archivedAt       DateTime?
+  archivedByUserId String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  ranges           CatalogRange[]
+
+  @@index([lensFamily, status])
+  @@index([brand])
+  @@index([coating])
+  @@index([status])
+}
+
+/// How leaves under a CatalogRange are stored.
+/// LEGACY_BAND: one shared-quantity band row (historical price-sheet SKU).
+/// POWER_WISE: one exact-power leaf per sellable SPH×CYL (and family extras).
+enum CatalogLeafStorage {
+  LEGACY_BAND
+  POWER_WISE
+}
+
+/// RW-09 range attached to a product.
+/// Bounds describe coverage; leaves[] are the stock SKUs (1 band or N exact powers).
+model CatalogRange {
+  id            String            @id @default(cuid())
+  product       CatalogProduct    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId     String
+  label         String
+  sphStart      Decimal
+  sphEnd        Decimal
+  cylStart      Decimal?
+  cylEnd        Decimal?
+  /// Kryptok / Progressive extras stored on each leaf as well.
+  add           Decimal?
+  axis          Int?
+  eye           Eye?
+  price         Decimal
+  costPrice     Decimal?
+  /// Count of linked leaves (exact powers or 1 for a legacy band).
+  powerCount    Int               @default(0)
+  leafStorage   CatalogLeafStorage @default(POWER_WISE)
+  /// Lens family for linked leaves (polymorphic with CatalogRangeLeaf.lensId).
+  lensType      LensType
+  /// Representative leaf id (legacy band id, or first exact-power leaf). Optional when leaves[] is source of truth.
+  lensId        String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  leaves        CatalogRangeLeaf[]
+
+  @@unique([productId, label])
+  @@index([productId])
+  @@index([lensType, lensId])
+}
+
+/// Maps a catalog range to one or more lens table rows (no cross-table FK).
+/// Unique (lensType, lensId) ensures a leaf belongs to at most one managed range.
+model CatalogRangeLeaf {
+  id                     String      @id @default(cuid())
+  range                  CatalogRange @relation(fields: [rangeId], references: [id], onDelete: Cascade)
+  rangeId                String
+  lensType               LensType
+  lensId                 String
+  /// Set when product Hold/Archive disabled this leaf; cleared on unhold if we own the disable.
+  disabledByProductHold  Boolean     @default(false)
+  createdAt              DateTime    @default(now())
+
+  @@unique([lensType, lensId])
+  @@unique([rangeId, lensId])
+  @@index([rangeId])
 }
 
 /// Admin-managed shop/stock product lines under a lens type (e.g. BRC, HC KT).

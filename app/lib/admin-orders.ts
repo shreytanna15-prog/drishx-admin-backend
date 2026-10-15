@@ -96,6 +96,10 @@ export type AdminOrder = {
   warehouseReleasedAt?: string | null;
   warehouseReleasedById?: string | null;
   assignedTo?: OrderAssignee | null;
+  /** RW-10: placement channel; null on legacy rows. */
+  orderSource?: "CUSTOMER_APP" | "EMPLOYEE_ON_BEHALF" | "ADMIN_PANEL" | null;
+  placedByUserId?: string | null;
+  placedBy?: OrderAssignee | null;
   user: OrderCustomer;
   invoice?: {
     id: string;

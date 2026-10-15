@@ -9,9 +9,13 @@ import {
 import { diffFields, recordAuditEvent } from "./audit";
 import { readLensDescriptor, type DbClient, type LensDescriptor } from "./procurement-lens";
 import { getStockPosition, type StockPosition } from "./procurement-requests";
-import { PROCUREMENT_LENS_TYPES, validateReorderRule } from "./procurement-rules";
+import {
+  PROCUREMENT_LENS_TYPES,
+  isAtOrBelowMinimum,
+  validateReorderRule,
+} from "./procurement-rules";
 
-export { validateReorderRule };
+export { validateReorderRule, isAtOrBelowMinimum };
 
 export type ReorderRuleInput = {
   lensType: LensType;
@@ -170,7 +174,7 @@ export async function listReorderRules(opts?: {
     const lens = await readLensDescriptor(db, rule.lensType, rule.lensId);
     const position = await getStockPosition(db, rule.lensType, rule.lensId);
     const hasOpenRequest = (openCountBySku.get(`${rule.lensType}:${rule.lensId}`) ?? 0) > 0;
-    const belowMin = position.available <= rule.minStock;
+    const belowMin = isAtOrBelowMinimum(position.available, rule.minStock);
 
     if (opts?.onlyBelowMin && !belowMin) continue;
 

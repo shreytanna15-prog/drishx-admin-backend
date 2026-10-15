@@ -45,6 +45,7 @@ import {
   parseOrdersListFilters,
   statusBadgeClass,
 } from "@/app/lib/admin-orders";
+import { formatPlacedByAdminBadge, isAdminPanelOrder } from "@/app/lib/order-attribution";
 import type { AdminEmployee } from "@/app/lib/admin-employees";
 import { useProgressiveList } from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
@@ -517,6 +518,15 @@ function AdminOrdersTableImpl({
                             className="rounded-lg font-bold border-amber-500/40 text-amber-700"
                           >
                             Alternate pending
+                          </Badge>
+                        ) : null}
+                        {isAdminPanelOrder(order) ? (
+                          <Badge
+                            variant="outline"
+                            className="rounded-lg font-bold border-(--brand-primary)/40 text-(--brand-primary)"
+                            title={formatPlacedByAdminBadge(order) ?? undefined}
+                          >
+                            Placed by admin
                           </Badge>
                         ) : null}
                       </div>

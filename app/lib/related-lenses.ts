@@ -97,6 +97,7 @@ export async function findKryptokSiblings(lensId: string) {
         category: lens.category,
         brand: lens.brand,
         coating: lens.coating,
+        isDisabled: false,
       },
       orderBy: { createdAt: "desc" },
     })
@@ -120,6 +121,7 @@ export async function findProgressiveSiblings(lensId: string) {
         coating: lens.coating,
         index: lens.index,
         type: lens.type,
+        isDisabled: false,
       },
       orderBy: { createdAt: "desc" },
     })
@@ -142,6 +144,7 @@ export async function findSingleVisionSiblings(lensId: string) {
         item: lens.item,
         coating: lens.coating,
         index: lens.index,
+        isDisabled: false,
       },
       orderBy: { createdAt: "desc" },
     })
@@ -159,6 +162,7 @@ export async function findKryptokFallback(brand: string | null | undefined, excl
       where: {
         brand,
         id: { notIn: excludeIds },
+        isDisabled: false,
       },
       orderBy: { createdAt: "desc" },
       take: 40,
@@ -172,6 +176,7 @@ export async function findProgressiveFallback(brand: string, excludeIds: string[
       where: {
         brand,
         id: { notIn: excludeIds },
+        isDisabled: false,
       },
       orderBy: { createdAt: "desc" },
       take: 40,
@@ -185,6 +190,7 @@ export async function findSingleVisionFallback(brand: string, excludeIds: string
       where: {
         brand,
         id: { notIn: excludeIds },
+        isDisabled: false,
       },
       orderBy: { createdAt: "desc" },
       take: 40,

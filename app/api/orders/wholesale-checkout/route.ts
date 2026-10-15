@@ -144,6 +144,7 @@ export async function POST(req: NextRequest) {
 
     const result = await placeWholesaleCheckoutBatches(batches, {
       actingUserId: session.userId,
+      actingRole: session.role,
       resolvedUserId: targetCustomerId,
       checkoutBatchId,
       orderNotes,

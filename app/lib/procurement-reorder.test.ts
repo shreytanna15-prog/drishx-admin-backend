@@ -4,7 +4,9 @@ import {
   calculateRequiredQuantity,
   deriveReorderPriority,
   formatLensPower,
+  isAtOrBelowMinimum,
   isProcurementLensType,
+  isReorderCheckCandidate,
   orderLensIdField,
   procurementBatchReferenceFor,
   procurementReferenceFor,
@@ -106,6 +108,88 @@ describe("calculateRequiredQuantity — procurement PDF §4", () => {
       calculateRequiredQuantity({ available: 0, targetStock: 0, incoming: 0 }),
       0
     );
+  });
+});
+
+describe("isAtOrBelowMinimum / isReorderCheckCandidate", () => {
+  it("flags available 0 vs positive minimum with Auto ON as below min + actionable", () => {
+    assert.equal(isAtOrBelowMinimum(0, 5), true);
+    assert.equal(
+      isReorderCheckCandidate({
+        available: 0,
+        minStock: 5,
+        autoProcure: true,
+        isActive: true,
+      }),
+      true
+    );
+  });
+
+  it("treats available 0 / minimum 0 as at-or-below, but Auto OFF is not a run-check candidate", () => {
+    assert.equal(isAtOrBelowMinimum(0, 0), true);
+    assert.equal(
+      isReorderCheckCandidate({
+        available: 0,
+        minStock: 0,
+        autoProcure: false,
+        isActive: true,
+      }),
+      false
+    );
+  });
+
+  it("keeps available 0 / minimum 0 / Auto ON as a run-check stock candidate", () => {
+    assert.equal(
+      isReorderCheckCandidate({
+        available: 0,
+        minStock: 0,
+        autoProcure: true,
+        isActive: true,
+      }),
+      true
+    );
+  });
+
+  it("includes available exactly equal to a positive minimum", () => {
+    assert.equal(isAtOrBelowMinimum(5, 5), true);
+    assert.equal(isAtOrBelowMinimum(6, 5), false);
+  });
+
+  it("excludes available above minimum", () => {
+    assert.equal(isAtOrBelowMinimum(10, 5), false);
+    assert.equal(
+      isReorderCheckCandidate({
+        available: 10,
+        minStock: 5,
+        autoProcure: true,
+        isActive: true,
+      }),
+      false
+    );
+  });
+
+  it("excludes paused (inactive) rules from run-check candidacy", () => {
+    assert.equal(isAtOrBelowMinimum(0, 5), true);
+    assert.equal(
+      isReorderCheckCandidate({
+        available: 0,
+        minStock: 5,
+        autoProcure: true,
+        isActive: false,
+      }),
+      false
+    );
+  });
+
+  it("documents that unconfigured SKUs are not below-minimum without a rule", () => {
+    // UI must not mix unconfigured rows into the below-min filter. They have no
+    // saved minStock; a draft default of 0 must not invent "below minimum".
+    const unconfiguredDraftMin = 0;
+    const available = 0;
+    const hasConfiguredRule = false;
+    const showInBelowMinFilter =
+      hasConfiguredRule && isAtOrBelowMinimum(available, unconfiguredDraftMin);
+    assert.equal(showInBelowMinFilter, false);
   });
 });
 

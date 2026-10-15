@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   allocateProcurementQuantity,
   findDuplicatePowersInDraft,
+  findDuplicateProcurementRequestIdsInDraft,
   incomingForPowerState,
   planLineAllocations,
   reverseAllocationQuantity,
@@ -155,6 +156,25 @@ describe("concurrent same-power approval guard (draft uniqueness + lock semantic
         { lensType: "KRYPTOK", lensId: "x" },
       ]),
       ["KRYPTOK::x"]
+    );
+  });
+
+  it("rejects the same procurement request on more than one draft line", () => {
+    assert.deepEqual(
+      findDuplicateProcurementRequestIdsInDraft([
+        { procurementRequestId: "pr_1" },
+        { procurementRequestId: "pr_2" },
+        { procurementRequestId: "pr_1" },
+      ]),
+      ["pr_1"]
+    );
+    assert.deepEqual(
+      findDuplicateProcurementRequestIdsInDraft([
+        { procurementRequestId: "pr_1" },
+        { procurementRequestId: null },
+        { procurementRequestId: "" },
+      ]),
+      []
     );
   });
 

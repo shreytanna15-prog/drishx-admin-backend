@@ -7,6 +7,7 @@ import {
   signAccessToken,
   type SessionPayload,
 } from "./auth";
+import { accountAccessErrorResponse } from "./account-access";
 import { toSafeUser } from "./user-public";
 import type { User } from "@prisma/client";
 import type { StaffRole } from "@prisma/client";
@@ -39,14 +40,11 @@ export async function issueAuthTokens(
   return response;
 }
 
-export function inactiveStaffLoginError(user: Pick<User, "role" | "isActive">) {
-  if (user.role !== "CUSTOMER" && !user.isActive) {
-    return NextResponse.json(
-      { error: "Your account is inactive. Contact an administrator.", code: "ACCOUNT_INACTIVE" },
-      { status: 403 }
-    );
-  }
-  return null;
+/** Login gate for inactive staff and suspended/rejected customers (RW-04). */
+export function inactiveStaffLoginError(
+  user: Pick<User, "role" | "isActive" | "isApproved" | "approvalStatus">
+) {
+  return accountAccessErrorResponse(user);
 }
 
 export function sessionPayload(user: Pick<User, "id" | "role">): SessionPayload {

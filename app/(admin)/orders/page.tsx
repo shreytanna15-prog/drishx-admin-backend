@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Suspense, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { FlaskConical, LayoutGrid } from "lucide-react";
+import { FlaskConical, LayoutGrid, Plus } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { AdminOrdersTable } from "@/components/admin-orders-table";
@@ -68,13 +68,19 @@ function OrdersPageContent() {
                 Card view
               </Link>
             </Button>
+            <Button asChild variant="outline" size="sm" className="h-10 rounded-xl">
+              <Link href="/orders/rx-lab">
+                <FlaskConical className="size-4" />
+                Rx Orders
+              </Link>
+            </Button>
             <Button
               asChild
               className="h-10 rounded-xl bg-(--brand-primary) px-4 text-sm font-extrabold text-(--brand-primary-text) hover:opacity-95"
             >
-              <Link href="/orders/rx-lab">
-                <FlaskConical className="size-4" />
-                Rx Orders
+              <Link href="/orders/new">
+                <Plus className="size-4" />
+                Create Order
               </Link>
             </Button>
           </>

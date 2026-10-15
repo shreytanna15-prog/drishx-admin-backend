@@ -19,6 +19,10 @@ import { getSignedOrderImageUrl } from "../../../lib/supabase-storage";
 import { isCustomerApproved } from "../../../lib/user-public";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
 import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
+import {
+  resolveOrderAttribution,
+  stripClientOrderAttribution,
+} from "../../../lib/order-attribution";
 
 function isStaffRole(role: string): boolean {
   return role === "ADMIN" || role === "EMPLOYEE";
@@ -36,7 +40,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = (await req.json()) as ColorLensOrderRequest & { userId?: string };
+    const rawBody = (await req.json()) as Record<string, unknown>;
+    const body = stripClientOrderAttribution(rawBody) as ColorLensOrderRequest & {
+      userId?: string;
+    };
 
     let targetUserId = session.userId;
     if (session.role === "CUSTOMER") {
@@ -68,6 +75,11 @@ export async function POST(req: NextRequest) {
       }
       targetUserId = onBehalfUserId;
     }
+
+    const attribution = resolveOrderAttribution({
+      session: { role: session.role, userId: session.userId },
+      customerUserId: targetUserId,
+    });
 
     const prismaLensType = mapColorLensTypeToPrisma(body.lensType);
     if (!prismaLensType) {
@@ -105,6 +117,7 @@ export async function POST(req: NextRequest) {
         orderNumber,
         userId: targetUserId,
         ...assignmentCreateFields(assignedToId),
+        ...attribution,
         lensType: prismaLensType,
         quantity: 1,
         reservedQuantity: 0,

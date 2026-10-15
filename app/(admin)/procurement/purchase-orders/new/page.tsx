@@ -39,21 +39,27 @@ import {
   type ReorderQueueItem,
 } from "@/app/lib/admin-purchase-orders";
 import { LENS_TYPE_LABELS, PRIORITY_BADGE_CLASS } from "@/app/lib/admin-procurement";
+import {
+  DUPLICATE_IMPORT_CONFIRM_MESSAGE,
+  PO_WIZARD_STEPS,
+  contributedProcurementRequestIds,
+  decideDuplicateImport,
+  fingerprintImportBytes,
+  formatCountLabel,
+  importNoticeShouldClear,
+  mergePoWizardLines,
+  poWizardBackAction,
+  poWizardLineAmountDisplay,
+  poWizardLineError,
+  poWizardSummaryAmountLabel,
+  poWizardSummaryValidationMessage,
+  pruneImportFingerprints,
+  summarizePoWizardLines,
+  type PoWizardDraftLine,
+} from "@/app/lib/purchase-order-wizard";
 import { cn } from "@/lib/utils";
 
-type LineForm = {
-  key: string;
-  lensType: string;
-  lensId: string;
-  requiredQuantity: number;
-  poQuantity: string;
-  rate: string;
-  procurementRequestId: string | null;
-  productLabel: string | null;
-  rangeLabel: string | null;
-  powerLabel: string | null;
-  openPurchaseOrder: string | null;
-};
+type LineForm = PoWizardDraftLine;
 
 const ERROR_BANNER =
   "rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200";
@@ -62,18 +68,6 @@ const SELECT_CLASS =
 
 function powerKeyOf(line: { lensType: string; lensId: string }) {
   return `${line.lensType}::${line.lensId}`;
-}
-
-function lineError(line: LineForm): string | null {
-  const qty = Number(line.poQuantity);
-  if (!/^\d+$/.test(line.poQuantity.trim()) || !Number.isInteger(qty) || qty <= 0) {
-    return "PO qty must be a whole number > 0";
-  }
-  if (line.rate.trim() !== "") {
-    const rate = Number(line.rate);
-    if (!Number.isFinite(rate) || rate < 0) return "Rate must be ≥ 0";
-  }
-  return null;
 }
 
 function NewPurchaseOrderInner() {
@@ -87,6 +81,10 @@ function NewPurchaseOrderInner() {
   const [error, setError] = useState("");
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importNotice, setImportNotice] = useState("");
+  const [importNoticeKeys, setImportNoticeKeys] = useState<string[]>([]);
+  const [importedFingerprints, setImportedFingerprints] = useState<Set<string>>(
+    () => new Set()
+  );
   const [importing, setImporting] = useState(false);
   const [queue, setQueue] = useState<ReorderQueueItem[]>([]);
   const [suppliers, setSuppliers] = useState<Array<{ id: string; name: string }>>([]);
@@ -120,19 +118,24 @@ function NewPurchaseOrderInner() {
         setExpectedDelivery(po.expectedDelivery ? po.expectedDelivery.slice(0, 10) : "");
         setNotes(po.notes ?? "");
         setLines(
-          po.lines.map((l) => ({
-            key: powerKeyOf(l),
-            lensType: l.lensType,
-            lensId: l.lensId,
-            requiredQuantity: l.requiredQuantity,
-            poQuantity: String(l.poQuantity),
-            rate: l.rate == null ? "" : String(l.rate),
-            procurementRequestId: l.procurementRequestId,
-            productLabel: l.productLabel,
-            rangeLabel: l.rangeLabel,
-            powerLabel: l.powerLabel,
-            openPurchaseOrder: null,
-          }))
+          po.lines.map((l) => {
+            const prId = l.procurementRequestId;
+            return {
+              key: powerKeyOf(l),
+              lensType: l.lensType,
+              lensId: l.lensId,
+              requiredQuantity: l.requiredQuantity,
+              poQuantity: String(l.poQuantity),
+              rate: l.rate == null ? "" : String(l.rate),
+              procurementRequestId: prId,
+              procurementRequestIds: prId ? [prId] : [],
+              productLabel: l.productLabel,
+              rangeLabel: l.rangeLabel,
+              powerLabel: l.powerLabel,
+              openPurchaseOrder: null,
+              importFingerprint: null,
+            };
+          })
         );
       } else if (listRes.suppliers[0]) {
         setSupplierId(listRes.suppliers[0].id);
@@ -148,6 +151,21 @@ function NewPurchaseOrderInner() {
     void load();
   }, [load]);
 
+  // Drop stale import success copy and session fingerprints when their lines go away.
+  useEffect(() => {
+    setImportedFingerprints((prev) => {
+      const next = pruneImportFingerprints(prev, lines);
+      if (next.size === prev.size && [...next].every((fp) => prev.has(fp))) {
+        return prev;
+      }
+      return next;
+    });
+    if (importNoticeShouldClear(importNoticeKeys, lines)) {
+      setImportNotice("");
+      setImportNoticeKeys([]);
+    }
+  }, [lines, importNoticeKeys]);
+
   const filteredQueue = useMemo(() => {
     const q = queueQuery.trim().toLowerCase();
     if (!q) return queue;
@@ -159,30 +177,31 @@ function NewPurchaseOrderInner() {
     );
   }, [queue, queueQuery]);
 
-  const totals = useMemo(() => {
-    let qty = 0;
-    let amount = 0;
-    let unpriced = 0;
-    for (const line of lines) {
-      const q = Number(line.poQuantity) || 0;
-      qty += q;
-      if (line.rate.trim() === "") unpriced += 1;
-      else amount += q * (Number(line.rate) || 0);
-    }
-    return { qty, amount: Math.round(amount * 100) / 100, unpriced };
-  }, [lines]);
+  const totals = useMemo(
+    () => summarizePoWizardLines(lines),
+    [lines]
+  );
 
   const lineErrors = useMemo(() => {
     const out: Record<string, string> = {};
     for (const line of lines) {
-      const err = lineError(line);
+      const err = poWizardLineError(line);
       if (err) out[line.key] = err;
     }
     return out;
   }, [lines]);
 
+  const saveDisabled =
+    Boolean(saving) || !supplierId || !totals.canSave;
+
+  const addedRequestIds = useMemo(
+    () => contributedProcurementRequestIds(lines),
+    [lines]
+  );
+
   function toggleQueueItem(item: ReorderQueueItem) {
     if (item.openPurchaseOrder) return;
+    if (addedRequestIds.has(item.id)) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(item.id)) next.delete(item.id);
@@ -191,28 +210,23 @@ function NewPurchaseOrderInner() {
     });
   }
 
-  /** Merge lines by power; quantities of the same power add up. */
+  /** Merge by power; same PR id is idempotent; distinct PRs aggregate. */
   function mergeLines(incoming: LineForm[]) {
-    setLines((prev) => {
-      const byPower = new Map(prev.map((l) => [l.key, { ...l }]));
-      for (const line of incoming) {
-        const existing = byPower.get(line.key);
-        if (existing) {
-          existing.requiredQuantity += line.requiredQuantity;
-          existing.poQuantity = String((Number(existing.poQuantity) || 0) + (Number(line.poQuantity) || 0));
-          if (!existing.rate && line.rate) existing.rate = line.rate;
-        } else {
-          byPower.set(line.key, line);
-        }
-      }
-      return [...byPower.values()];
-    });
+    setLines((prev) => mergePoWizardLines(prev, incoming));
   }
 
   function continueFromQueue() {
-    const picked = queue.filter((item) => selectedIds.has(item.id));
+    const picked = queue.filter(
+      (item) => selectedIds.has(item.id) && !addedRequestIds.has(item.id)
+    );
     if (!picked.length && !lines.length) {
       setError("Select at least one item from the reorder queue, or import an Excel file.");
+      return;
+    }
+    if (!picked.length && lines.length) {
+      setSelectedIds(new Set());
+      setError("");
+      setStep("review");
       return;
     }
     mergeLines(
@@ -224,10 +238,12 @@ function NewPurchaseOrderInner() {
         poQuantity: String(item.unallocatedQuantity),
         rate: "",
         procurementRequestId: item.id,
+        procurementRequestIds: [item.id],
         productLabel: item.productLabel,
         rangeLabel: null,
         powerLabel: item.powerLabel,
         openPurchaseOrder: null,
+        importFingerprint: null,
       }))
     );
     setSelectedIds(new Set());
@@ -235,34 +251,64 @@ function NewPurchaseOrderInner() {
     setStep("review");
   }
 
-  async function onImportFile(file: File | null) {
+  async function onImportFile(
+    file: File | null,
+    options?: { userConfirmedRepeat?: boolean }
+  ) {
     if (!file) return;
     setImporting(true);
     setImportErrors([]);
-    setImportNotice("");
     setError("");
     try {
+      const bytes = await file.arrayBuffer();
+      const fingerprint = await fingerprintImportBytes(bytes);
+      const decision = decideDuplicateImport({
+        alreadyImported: importedFingerprints.has(fingerprint),
+        userConfirmedRepeat: Boolean(options?.userConfirmedRepeat),
+      });
+      if (decision.action === "block") {
+        setImporting(false);
+        if (fileRef.current) fileRef.current.value = "";
+        const confirmed = window.confirm(DUPLICATE_IMPORT_CONFIRM_MESSAGE);
+        if (!confirmed) {
+          setError(
+            "Import cancelled. Re-importing the same Excel file would add quantities again."
+          );
+          return;
+        }
+        await onImportFile(file, { userConfirmedRepeat: true });
+        return;
+      }
+
       const res = await importPurchaseOrderLines(file);
-      mergeLines(
-        res.lines.map((l) => ({
-          key: powerKeyOf(l),
-          lensType: l.lensType,
-          lensId: l.lensId,
-          requiredQuantity: l.requiredQuantity,
-          poQuantity: String(l.poQuantity),
-          rate: l.rate == null ? "" : String(l.rate),
-          procurementRequestId: null,
-          productLabel: l.productLabel,
-          rangeLabel: null,
-          powerLabel: l.powerLabel,
-          openPurchaseOrder: l.openPurchaseOrder,
-        }))
-      );
+      const mapped: LineForm[] = res.lines.map((l) => ({
+        key: powerKeyOf(l),
+        lensType: l.lensType,
+        lensId: l.lensId,
+        requiredQuantity: l.requiredQuantity,
+        poQuantity: String(l.poQuantity),
+        rate: l.rate == null ? "" : String(l.rate),
+        procurementRequestId: null,
+        procurementRequestIds: [],
+        productLabel: l.productLabel,
+        rangeLabel: null,
+        powerLabel: l.powerLabel,
+        openPurchaseOrder: l.openPurchaseOrder,
+        importFingerprint: fingerprint,
+      }));
+      mergeLines(mapped);
+      setImportedFingerprints((prev) => new Set(prev).add(fingerprint));
       setImportNotice(
-        [`Imported ${res.lines.length} line(s).`, ...res.warnings].join(" ")
+        [
+          `Imported ${formatCountLabel(res.lines.length, "line")}.`,
+          ...res.warnings,
+        ].join(" ")
       );
+      setImportNoticeKeys(mapped.map((l) => l.key));
       setStep("review");
     } catch (err) {
+      setImportNotice("");
+      setImportNoticeKeys([]);
       if (err instanceof AdminApiError) {
         setError(err.message);
         const list = err.details.errors;
@@ -298,7 +344,7 @@ function NewPurchaseOrderInner() {
       setError("Add at least one line.");
       return;
     }
-    if (Object.keys(lineErrors).length) {
+    if (!totals.canSave || Object.keys(lineErrors).length) {
       setError("Fix the highlighted lines before saving.");
       return;
     }
@@ -338,39 +384,55 @@ function NewPurchaseOrderInner() {
     }
   }
 
-  const steps = [
-    { key: "select", label: "1. Select items" },
-    { key: "review", label: "2. Review & edit" },
-    { key: "approve", label: "3. Approve" },
-  ];
+  const amountLabelKind = poWizardSummaryAmountLabel(totals);
+  const validationMessage = poWizardSummaryValidationMessage(totals);
+  const backAction = poWizardBackAction(step, { draftId });
 
   return (
     <AdminPage
       title={draftPublicId ? `Edit ${draftPublicId}` : "Create purchase order"}
-      subtitle="Add powers from the reorder queue or Excel, review quantities and supplier, then save. Approval happens on the PO page."
+      subtitle="Add powers from the reorder queue or Excel, review quantities and supplier, then save. Approval happens on the PO page after submit."
     >
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" asChild>
-          <Link href={draftId ? `/procurement/purchase-orders/${draftId}` : "/procurement/purchase-orders"}>
+        {backAction.kind === "previous_step" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setError("");
+              setStep(backAction.targetStep);
+            }}
+          >
             <ArrowLeft className="size-4" />
-            Back
-          </Link>
-        </Button>
+            {backAction.label}
+          </Button>
+        ) : (
+          <Button variant="ghost" size="sm" asChild>
+            <Link href={backAction.href}>
+              <ArrowLeft className="size-4" />
+              {backAction.label}
+            </Link>
+          </Button>
+        )}
         <ol className="flex flex-wrap gap-2 text-xs" aria-label="Steps">
-          {steps.map((s) => (
-            <li
-              key={s.key}
-              aria-current={step === s.key ? "step" : undefined}
-              className={cn(
-                "rounded-full border px-3 py-1",
-                step === s.key
-                  ? "border-(--brand-primary) font-medium text-(--brand-text)"
-                  : "border-(--brand-card-border) text-(--brand-text-muted)"
-              )}
-            >
-              {s.label}
-            </li>
-          ))}
+          {PO_WIZARD_STEPS.map((s) => {
+            const isCurrent = s.kind === "step" && step === s.key;
+            return (
+              <li
+                key={s.key}
+                aria-current={isCurrent ? "step" : undefined}
+                className={cn(
+                  "rounded-full border px-3 py-1",
+                  isCurrent
+                    ? "border-(--brand-primary) font-medium text-(--brand-text)"
+                    : "border-(--brand-card-border) text-(--brand-text-muted)"
+                )}
+              >
+                {s.label}
+              </li>
+            );
+          })}
         </ol>
       </div>
 
@@ -451,15 +513,24 @@ function NewPurchaseOrderInner() {
                 <TableBody>
                   {filteredQueue.map((item) => {
                     const blocked = Boolean(item.openPurchaseOrder);
+                    const alreadyAdded = addedRequestIds.has(item.id);
+                    const disabled = blocked || alreadyAdded;
                     return (
-                      <TableRow key={item.id} className={blocked ? "opacity-60" : undefined}>
+                      <TableRow
+                        key={item.id}
+                        className={disabled ? "opacity-60" : undefined}
+                      >
                         <TableCell>
                           <input
                             type="checkbox"
-                            checked={selectedIds.has(item.id)}
-                            disabled={blocked}
+                            checked={alreadyAdded || selectedIds.has(item.id)}
+                            disabled={disabled}
                             onChange={() => toggleQueueItem(item)}
-                            aria-label={`Select ${item.publicId}`}
+                            aria-label={
+                              alreadyAdded
+                                ? `${item.publicId} already added`
+                                : `Select ${item.publicId}`
+                            }
                             className="size-4"
                           />
                         </TableCell>
@@ -467,6 +538,9 @@ function NewPurchaseOrderInner() {
                         <TableCell>
                           <div>{item.productLabel || LENS_TYPE_LABELS[item.lensType] || item.lensType}</div>
                           <div className="text-xs text-(--brand-text-muted)">{item.powerLabel || "—"}</div>
+                          {alreadyAdded ? (
+                            <div className="text-xs text-(--brand-text-muted)">Already added</div>
+                          ) : null}
                           {item.openPurchaseOrder ? (
                             <Link
                               href={`/procurement/purchase-orders/${item.openPurchaseOrder.id}`}
@@ -492,8 +566,15 @@ function NewPurchaseOrderInner() {
 
           <div className="flex flex-wrap justify-end gap-2">
             {lines.length ? (
-              <Button variant="outline" onClick={() => setStep("review")}>
-                Back to review ({lines.length})
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setError("");
+                  setStep("review");
+                }}
+              >
+                Continue to review ({formatCountLabel(lines.length, "line")})
               </Button>
             ) : null}
             <Button onClick={continueFromQueue} disabled={!selectedIds.size && !lines.length}>
@@ -575,8 +656,7 @@ function NewPurchaseOrderInner() {
                 <TableBody>
                   {lines.map((line) => {
                     const err = lineErrors[line.key];
-                    const amount =
-                      line.rate.trim() === "" ? null : (Number(line.poQuantity) || 0) * (Number(line.rate) || 0);
+                    const amountDisplay = poWizardLineAmountDisplay(line);
                     return (
                       <TableRow key={line.key}>
                         <TableCell>
@@ -611,11 +691,19 @@ function NewPurchaseOrderInner() {
                             value={line.rate}
                             onChange={(e) => updateLine(line.key, { rate: e.target.value })}
                             className="ml-auto w-28 text-right"
-                            placeholder="—"
+                            placeholder="Optional"
                             aria-label={`Rate for ${line.productLabel || line.lensId}`}
                           />
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{formatPoMoney(amount)}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {amountDisplay.kind === "amount" ? (
+                            formatPoMoney(amountDisplay.value)
+                          ) : amountDisplay.kind === "pending_rate" ? (
+                            <span className="text-(--brand-text-muted)">Rate pending</span>
+                          ) : (
+                            <span className="text-(--brand-text-muted)">—</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Button
                             type="button"
@@ -636,17 +724,39 @@ function NewPurchaseOrderInner() {
           )}
 
           <div className="flex flex-col gap-3 rounded-xl border border-(--brand-card-border) bg-(--brand-card) p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-(--brand-text-muted)">
-              {lines.length} line(s) · <span className="text-(--brand-text)">{totals.qty} unit(s)</span> ·{" "}
-              <span className="text-(--brand-text)">{formatPoMoney(totals.amount)}</span>
-              {totals.unpriced ? ` · ${totals.unpriced} line(s) without rate` : ""}
+            <div className="space-y-1 text-sm text-(--brand-text-muted)">
+              {validationMessage ? (
+                <p className="text-red-700 dark:text-red-300" role="status">
+                  {validationMessage}
+                </p>
+              ) : null}
+              <p>
+                {formatCountLabel(lines.length, "line")}
+                {" · "}
+                <span className="text-(--brand-text)">
+                  {formatCountLabel(totals.qty, "unit")}
+                </span>
+                {" · "}
+                <span className="text-(--brand-text)">
+                  {amountLabelKind === "pending"
+                    ? "Rate pending"
+                    : amountLabelKind === "partial"
+                      ? `${formatPoMoney(totals.amount)} (partial)`
+                      : amountLabelKind === "none"
+                        ? "—"
+                        : formatPoMoney(totals.amount)}
+                </span>
+                {totals.unpriced
+                  ? ` · ${formatCountLabel(totals.unpriced, "line")} pending rate`
+                  : ""}
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => void save("draft")}
-                disabled={Boolean(saving) || !lines.length || !supplierId}
+                disabled={saveDisabled}
               >
                 {saving === "draft" ? <Loader2 className="size-4 animate-spin" /> : null}
                 Save draft
@@ -654,7 +764,7 @@ function NewPurchaseOrderInner() {
               <Button
                 type="button"
                 onClick={() => void save("submit")}
-                disabled={Boolean(saving) || !lines.length || !supplierId}
+                disabled={saveDisabled}
               >
                 {saving === "submit" ? <Loader2 className="size-4 animate-spin" /> : null}
                 Save &amp; submit for approval

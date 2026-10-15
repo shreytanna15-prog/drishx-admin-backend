@@ -39,6 +39,18 @@ import {
   OrderStatus,
 } from "@prisma/client";
 import { employeeOrdersWhere } from "../../lib/prescription-order-hold";
+import {
+  buildOnBehalfActivityMessage,
+  orderPlacedByInclude,
+  resolveOrderAttribution,
+  stripClientOrderAttribution,
+} from "../../lib/order-attribution";
+import {
+  AuditAction,
+  AuditModule,
+  recordAuditEvent,
+} from "../../lib/audit";
+import { logOrderActivity } from "../../lib/order-activity";
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/orders
@@ -101,6 +113,7 @@ export async function GET(req: NextRequest) {
             role: true,
           },
         },
+        ...orderPlacedByInclude,
         singleVisionLens: true,
         kryptokLens: true,
         progressiveLens: true,
@@ -218,9 +231,21 @@ export async function POST(req: NextRequest) {
 
     await releaseExpiredReservations();
 
-    const body = await req.json();
+    const rawBody = (await req.json()) as Record<string, unknown>;
+    const body = stripClientOrderAttribution(rawBody);
     const { userId, user, lensType, quantity, lensId, cartLineKey, notes: rawNotes, checkoutBatchId, redeemPoints, deliveryServiceId: rawDeliveryServiceId } =
-      body;
+      body as {
+        userId?: string;
+        user?: { name?: string; email?: string; password?: string };
+        lensType?: string;
+        quantity?: number;
+        lensId?: string;
+        cartLineKey?: string;
+        notes?: unknown;
+        checkoutBatchId?: string;
+        redeemPoints?: number | null;
+        deliveryServiceId?: string;
+      };
 
     const notesResult = validateOrderNotes(rawNotes);
     if (!notesResult.ok) {
@@ -242,7 +267,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!Object.values(LensType).includes(lensType)) {
+    if (!Object.values(LensType).includes(lensType as LensType)) {
       return NextResponse.json({ error: "Invalid lensType." }, { status: 400 });
     }
 
@@ -325,15 +350,47 @@ export async function POST(req: NextRequest) {
         ? checkoutBatchId.trim().slice(0, 64)
         : null;
 
-    // Resolve User (Customer)
+    // Resolve User (Customer) — never assign the staff actor as Order.userId.
     let resolvedUserId = orderUserId;
     
     if (session.role === "CUSTOMER") {
       resolvedUserId = session.userId;
+    } else if (typeof resolvedUserId === "string" && resolvedUserId.trim()) {
+      const onBehalf = await prisma.user.findUnique({
+        where: { id: resolvedUserId.trim() },
+      });
+      if (!onBehalf || onBehalf.role !== "CUSTOMER") {
+        return NextResponse.json({ error: "Customer not found." }, { status: 404 });
+      }
+      if (!isCustomerApproved(onBehalf)) {
+        return NextResponse.json(
+          {
+            error:
+              "This customer cannot place orders (pending approval, rejected, or suspended).",
+          },
+          { status: 403 }
+        );
+      }
+      resolvedUserId = onBehalf.id;
     } else if (!resolvedUserId) {
       // Check if user already exists by email first
+      if (!user?.email || !user?.name) {
+        return NextResponse.json(
+          { error: "Customer userId or user details are required." },
+          { status: 400 }
+        );
+      }
       const existingUser = await prisma.user.findUnique({ where: { email: user.email } });
       if (existingUser) {
+        if (existingUser.role !== "CUSTOMER" || !isCustomerApproved(existingUser)) {
+          return NextResponse.json(
+            {
+              error:
+                "This customer cannot place orders (pending approval, rejected, or suspended).",
+            },
+            { status: 403 }
+          );
+        }
         resolvedUserId = existingUser.id;
       } else {
         const newUser = await prisma.user.create({
@@ -347,6 +404,11 @@ export async function POST(req: NextRequest) {
         resolvedUserId = newUser.id;
       }
     }
+
+    const attribution = resolveOrderAttribution({
+      session: { role: session.role, userId: session.userId },
+      customerUserId: String(resolvedUserId),
+    });
 
     // Perform sequential operations to avoid Supabase connection pooler limits (P2028)
     
@@ -382,8 +444,9 @@ export async function POST(req: NextRequest) {
       data: {
         orderNumber,
         checkoutBatchId: normalizedBatchId,
-        userId: resolvedUserId,
+        userId: resolvedUserId as string,
         ...assignmentCreateFields(assignedToId),
+        ...attribution,
         lineType: CartLineType.RETAIL,
         lensType: lensType as LensType,
         singleVisionLensId: lensType === LensType.SINGLE_VISION ? resolvedLensId : null,
@@ -410,7 +473,7 @@ export async function POST(req: NextRequest) {
     await createOriginalPowerVersion(prisma, newOrder, session.userId);
 
     const redemptionCustomerId =
-      session.role === "CUSTOMER" ? session.userId : resolvedUserId;
+      session.role === "CUSTOMER" ? session.userId : (resolvedUserId as string);
     const redemption = await resolveCheckoutRedemption({
       customerId: redemptionCustomerId,
       redeemPoints: session.role === "CUSTOMER" ? redeemPoints : null,
@@ -440,13 +503,68 @@ export async function POST(req: NextRequest) {
       await consumeCartReservation(targetCustomerId, cartLineKey.trim());
     }
 
+    const customer = await prisma.user.findUnique({
+      where: { id: resolvedUserId as string },
+      select: { name: true, email: true, businessName: true },
+    });
+    const customerLabel =
+      customer?.businessName?.trim() ||
+      customer?.name?.trim() ||
+      customer?.email ||
+      "A customer";
+
     if (targetCustomerId) {
-      const customer = await prisma.user.findUnique({
-        where: { id: resolvedUserId },
-        select: { name: true, email: true },
-      });
-      const customerLabel = customer?.name?.trim() || customer?.email || "A customer";
       await notifyStaffOfNewOrder(newOrder.id, customerLabel, assignedToId);
+    }
+
+    const actor = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { name: true, email: true },
+    });
+    const actorLabel = actor?.name?.trim() || actor?.email || null;
+    const activityMessage = buildOnBehalfActivityMessage({
+      orderNumber: newOrder.orderNumber,
+      orderId: newOrder.id,
+      customerLabel,
+      sessionRole: session.role,
+      actorLabel,
+    });
+
+    await recordAuditEvent(prisma, {
+      action: AuditAction.ORDER_CREATED,
+      module: AuditModule.ORDER,
+      entityType: "Order",
+      entityId: newOrder.id,
+      actor: {
+        actorType: "HUMAN",
+        actorUserId: session.userId,
+        actorName: actorLabel,
+      },
+      context: {
+        orderNumber: newOrder.orderNumber,
+        orderSource: attribution.orderSource,
+        customerUserId: resolvedUserId,
+        placedByUserId: attribution.placedByUserId,
+        lensType,
+        quantity: orderQty,
+        status: newOrder.status,
+      },
+      activityMessage,
+      message: `Order created (${newOrder.status})`,
+    });
+
+    // Avoid duplicate activity when audit already covers create; only log OrderActivity for on-behalf.
+    if (attribution.placedByUserId) {
+      await logOrderActivity(prisma, {
+        orderId: newOrder.id,
+        actorUserId: session.userId,
+        action: "ORDER_CREATED_ON_BEHALF",
+        message: activityMessage,
+        metadata: {
+          orderSource: attribution.orderSource,
+          customerUserId: resolvedUserId,
+        },
+      });
     }
 
     return NextResponse.json({ order: newOrder, transaction: newTransaction, invoice: newInvoice }, { status: 201 });

@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Download, FileSpreadsheet } from "lucide-react";
@@ -8,15 +15,36 @@ import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
 import { getFinancialYear } from "@/app/lib/finance/financial-year";
+import {
+  DEAD_POWERS_LOOKBACK_DAYS,
+  DEFAULT_MOVEMENT_WINDOW_DAYS,
+  rollingDateKeys,
+} from "@/app/lib/reports/power-movement-format";
+import { reportsInNavCategory } from "@/app/lib/reports/registry";
 import type {
   ReportDefinition,
   ReportPayload,
   ReportSuccessResponse,
 } from "@/app/lib/reports/types";
 import { cn } from "@/lib/utils";
+
+type DeferredReportInfo = {
+  key: string;
+  title: string;
+  category: string;
+  phase: number;
+  blockedOn: string;
+};
 
 type CatalogResponse = {
   categories: {
@@ -25,6 +53,7 @@ type CatalogResponse = {
     reports: ReportDefinition[];
   }[];
   reports: ReportDefinition[];
+  deferred?: DeferredReportInfo[];
 };
 
 type KpiKind = "money" | "count" | "text";
@@ -182,8 +211,26 @@ function presentReport(
       case "completed-orders":
       case "cancelled-orders":
       case "rx-orders":
+      case "ready-stock-orders":
         pushIf(primaryKpis, kpiFromSummary(summary, "matchingCount", "Orders", "count"), 4);
         pushIf(primaryKpis, kpiFromSummary(summary, "amountInReturnedRows", "Amount (shown)", "money"), 4);
+        pushIf(primaryKpis, kpiFromSummary(summary, "dispatchEligibleCount", "Dispatch-eligible", "count"), 4);
+        pushIf(primaryKpis, kpiFromSummary(summary, "allocatedNotPackedCount", "Allocated (not packed)", "count"), 4);
+        break;
+      case "fast-moving-powers":
+      case "slow-moving-powers":
+      case "dead-powers":
+      case "unsold-powers":
+        pushIf(primaryKpis, kpiFromSummary(summary, "skuCount", "SKUs", "count"), 4);
+        pushIf(primaryKpis, kpiFromSummary(summary, "soldQty", "Sold qty", "count"), 4);
+        pushIf(primaryKpis, kpiFromSummary(summary, "onHand", "On hand", "count"), 4);
+        pushIf(primaryKpis, kpiFromSummary(summary, "deadSkuCount", "Dead", "count"), 4);
+        break;
+      case "stock-aging":
+        pushIf(primaryKpis, kpiFromSummary(summary, "skuCount", "SKUs", "count"), 4);
+        pushIf(primaryKpis, kpiFromSummary(summary, "knownHistorySkus", "Known recency", "count"), 4);
+        pushIf(primaryKpis, kpiFromSummary(summary, "unknownHistorySkus", "Unknown age", "count"), 4);
+        pushIf(primaryKpis, kpiFromSummary(summary, "unknownOnHand", "Unknown on hand", "count"), 4);
         break;
       case "daily-sales":
       case "monthly-sales":
@@ -235,7 +282,8 @@ function presentReport(
       reportKey === "pending-orders" ||
       reportKey === "completed-orders" ||
       reportKey === "cancelled-orders" ||
-      reportKey === "rx-orders"
+      reportKey === "rx-orders" ||
+      reportKey === "ready-stock-orders"
     ) {
       const matching = asNumber(summaryGet(summary, "matchingCount"));
       const returned = asNumber(summaryGet(summary, "returnedCount"));
@@ -439,6 +487,13 @@ function defaultDateRange() {
   return { from: key(start), to: key(end) };
 }
 
+const POWER_MOVEMENT_REPORT_KEYS = new Set([
+  "fast-moving-powers",
+  "slow-moving-powers",
+  "unsold-powers",
+  "dead-powers",
+]);
+
 export function AdminReportsHub() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -452,6 +507,8 @@ export function AdminReportsHub() {
   const defaults = useMemo(() => defaultDateRange(), []);
   const [from, setFrom] = useState(defaults.from);
   const [to, setTo] = useState(defaults.to);
+  const [minUnits, setMinUnits] = useState("");
+  const [maxUnits, setMaxUnits] = useState("");
 
   const [result, setResult] = useState<ReportSuccessResponse | null>(null);
   const [runLoading, setRunLoading] = useState(false);
@@ -465,6 +522,12 @@ export function AdminReportsHub() {
     () => catalog?.reports.find((r) => r.key === reportKey) ?? null,
     [catalog, reportKey]
   );
+
+  // Inventory tabs include Fast/Slow/Dead/Unsold (registry category "power").
+  const categoryReports = useMemo(() => {
+    if (!catalog || !selected) return [];
+    return reportsInNavCategory(catalog.reports, selected.category);
+  }, [catalog, selected]);
 
   useEffect(() => {
     let cancelled = false;
@@ -501,17 +564,49 @@ export function AdminReportsHub() {
     [router, searchParams]
   );
 
+  // Missing or invalid ?report= → first registered report (no category URL param).
+  useEffect(() => {
+    if (!catalog || catalogLoading) return;
+    const first = catalog.categories[0]?.reports[0];
+    if (!first) return;
+    if (!reportKey || !catalog.reports.some((r) => r.key === reportKey)) {
+      selectReport(first.key);
+    }
+  }, [catalog, catalogLoading, reportKey, selectReport]);
+
+  // Power movement: Fast/Slow/Unsold default to 90 days; Dead UI shows 180 (server forces 180 lookback).
+  useEffect(() => {
+    if (!selected || !POWER_MOVEMENT_REPORT_KEYS.has(selected.key)) return;
+    const days =
+      selected.key === "dead-powers"
+        ? DEAD_POWERS_LOOKBACK_DAYS
+        : DEFAULT_MOVEMENT_WINDOW_DAYS;
+    const { fromKey, toKey } = rollingDateKeys(days);
+    setFrom(fromKey);
+    setTo(toKey);
+  }, [selected?.key]);
+
   const buildReportQuery = useCallback(() => {
     if (!selected) return null;
     const params = new URLSearchParams();
     params.set("report", selected.key);
     if (selected.filters === "fy") params.set("fy", fy);
-    else if (selected.filters === "dateRange") {
+    else if (
+      selected.filters === "dateRange" ||
+      selected.filters === "dateRangeFast" ||
+      selected.filters === "dateRangeSlow"
+    ) {
       params.set("from", from);
       params.set("to", to);
+      if (selected.filters === "dateRangeFast" && minUnits.trim()) {
+        params.set("minUnits", minUnits.trim());
+      }
+      if (selected.filters === "dateRangeSlow" && maxUnits.trim()) {
+        params.set("maxUnits", maxUnits.trim());
+      }
     }
     return params;
-  }, [selected, fy, from, to]);
+  }, [selected, fy, from, to, minUnits, maxUnits]);
 
   const runSelected = useCallback(async () => {
     if (!selected) return;
@@ -589,6 +684,16 @@ export function AdminReportsHub() {
       setExportError("");
       return;
     }
+    // Fast/slow need operator thresholds — wait for Run instead of auto-failing.
+    if (
+      selected.filters === "dateRangeFast" ||
+      selected.filters === "dateRangeSlow"
+    ) {
+      setResult(null);
+      setRunError("");
+      setExportError("");
+      return;
+    }
     void runSelected();
   }, [selected?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -616,158 +721,269 @@ export function AdminReportsHub() {
         </div>
       ) : null}
 
+      {catalog?.deferred && catalog.deferred.length > 0 ? (
+        <details className="mb-4 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4 text-sm shadow-(--brand-card-shadow)">
+          <summary className="cursor-pointer font-semibold text-(--brand-text)">
+            Reports awaiting client definitions ({catalog.deferred.length})
+          </summary>
+          <ul className="mt-3 space-y-2 text-(--brand-text-muted)">
+            {catalog.deferred.map((item) => (
+              <li key={item.key}>
+                <span className="font-medium text-(--brand-text)">
+                  {item.title}
+                </span>
+                {" — "}
+                {item.blockedOn}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
       {catalogLoading || !catalog ? (
         <TableSkeleton />
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-[14rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)]">
-          <nav
-            aria-label="Reports"
-            className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-2.5 shadow-(--brand-card-shadow) lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto"
-          >
-            <div className="flex gap-2 overflow-x-auto lg:block lg:overflow-visible">
-              {catalog.categories.map((group) => (
-                <div
-                  key={group.category}
-                  className="min-w-[10.5rem] shrink-0 lg:mb-3 lg:min-w-0 lg:last:mb-0"
-                >
-                  <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-(--brand-primary)">
-                    {group.label}
-                  </p>
-                  <ul className="space-y-0.5">
-                    {group.reports.map((report) => (
-                      <li key={report.key}>
-                        <button
-                          type="button"
-                          onClick={() => selectReport(report.key)}
-                          className={cn(
-                            "w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] font-semibold transition",
-                            reportKey === report.key
-                              ? "bg-(--brand-primary)/15 text-(--brand-primary)"
-                              : "text-(--brand-text-muted) hover:bg-[rgba(240,161,50,0.06)] hover:text-(--brand-text)"
-                          )}
-                        >
-                          {report.title}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </nav>
-
-          <section className="min-w-0 space-y-3">
-            {!selected ? (
-              <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-16 text-center text-sm text-(--brand-text-muted)">
-                Select a report to begin.
-              </div>
-            ) : (
-              <>
-                <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4 shadow-(--brand-card-shadow) sm:p-5">
-                  <h2 className="text-xl font-extrabold tracking-tight text-(--brand-text)">
-                    {selected.title}
-                  </h2>
-                  <p className="mt-1 max-w-3xl text-sm text-(--brand-text-muted)">
-                    {selected.description}
-                  </p>
-
-                  <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-(--brand-card-border) pt-4">
-                    {selected.filters === "fy" ? (
-                      <label className="grid gap-1 text-xs font-semibold text-(--brand-label)">
-                        Financial year
-                        <Input
-                          value={fy}
-                          onChange={(e) => setFy(e.target.value)}
-                          placeholder="25-26"
-                          className="h-9 w-28 border-(--brand-input-border) bg-(--brand-input-bg)"
-                        />
-                      </label>
-                    ) : null}
-                    {selected.filters === "dateRange" ? (
-                      <>
-                        <label className="grid gap-1 text-xs font-semibold text-(--brand-label)">
-                          From
-                          <Input
-                            type="date"
-                            value={from}
-                            onChange={(e) => setFrom(e.target.value)}
-                            className="h-9 min-w-[9rem] border-(--brand-input-border) bg-(--brand-input-bg)"
-                          />
-                        </label>
-                        <label className="grid gap-1 text-xs font-semibold text-(--brand-label)">
-                          To
-                          <Input
-                            type="date"
-                            value={to}
-                            onChange={(e) => setTo(e.target.value)}
-                            className="h-9 min-w-[9rem] border-(--brand-input-border) bg-(--brand-input-bg)"
-                          />
-                        </label>
-                      </>
-                    ) : null}
-                    {selected.filters !== "none" ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => void runSelected()}
-                        className="h-9 rounded-xl bg-(--brand-primary) px-4 font-bold text-black hover:bg-(--brand-primary)/90"
-                      >
-                        {runLoading ? "Running…" : "Run"}
-                      </Button>
-                    ) : null}
-                    <div className="ml-auto flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => void exportSelected("csv")}
-                        className="h-9 rounded-xl"
-                      >
-                        <Download className="mr-1.5 size-3.5 opacity-70" />
-                        {exportLoading === "csv" ? "…" : "CSV"}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => void exportSelected("xlsx")}
-                        className="h-9 rounded-xl"
-                      >
-                        <FileSpreadsheet className="mr-1.5 size-3.5 opacity-70" />
-                        {exportLoading === "xlsx" ? "…" : "Excel"}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                {runError ? (
-                  <div className="auth-alert-error" role="alert">
-                    {runError}
-                  </div>
-                ) : null}
-                {exportError ? (
-                  <div className="auth-alert-error" role="alert">
-                    {exportError}
-                  </div>
-                ) : null}
-
-                {runLoading ? (
-                  <TableSkeleton />
-                ) : result && presentation ? (
-                  <ReportBody
-                    result={result}
-                    presentation={presentation}
-                  />
-                ) : null}
-              </>
-            )}
-          </section>
+      ) : !selected ? (
+        <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-16 text-center text-sm text-(--brand-text-muted)">
+          Loading report…
         </div>
+      ) : (
+        <section className="min-w-0 space-y-4">
+          <ReportTabs
+            reports={categoryReports}
+            activeKey={selected.key}
+            onSelect={selectReport}
+          />
+
+          <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4 shadow-(--brand-card-shadow) sm:p-5">
+            <h2 className="text-xl font-extrabold tracking-tight text-(--brand-text)">
+              {selected.title}
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm text-(--brand-text-muted)">
+              {selected.description}
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-(--brand-card-border) pt-4">
+              {selected.filters === "fy" ? (
+                <label className="grid gap-1 text-xs font-semibold text-(--brand-label)">
+                  Financial year
+                  <Input
+                    value={fy}
+                    onChange={(e) => setFy(e.target.value)}
+                    placeholder="25-26"
+                    className="h-9 w-28 border-(--brand-input-border) bg-(--brand-input-bg)"
+                  />
+                </label>
+              ) : null}
+              {selected.filters === "dateRange" ||
+              selected.filters === "dateRangeFast" ||
+              selected.filters === "dateRangeSlow" ? (
+                <>
+                  <label className="grid gap-1 text-xs font-semibold text-(--brand-label)">
+                    From
+                    <Input
+                      type="date"
+                      value={from}
+                      onChange={(e) => setFrom(e.target.value)}
+                      className="h-9 min-w-[9rem] border-(--brand-input-border) bg-(--brand-input-bg)"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-(--brand-label)">
+                    To
+                    <Input
+                      type="date"
+                      value={to}
+                      onChange={(e) => setTo(e.target.value)}
+                      className="h-9 min-w-[9rem] border-(--brand-input-border) bg-(--brand-input-bg)"
+                    />
+                  </label>
+                </>
+              ) : null}
+              {selected.filters === "dateRangeFast" ? (
+                <label className="grid gap-1 text-xs font-semibold text-(--brand-label)">
+                  Min sold qty
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={minUnits}
+                    onChange={(e) => setMinUnits(e.target.value)}
+                    placeholder="Required"
+                    className="h-9 w-28 border-(--brand-input-border) bg-(--brand-input-bg)"
+                  />
+                </label>
+              ) : null}
+              {selected.filters === "dateRangeSlow" ? (
+                <label className="grid gap-1 text-xs font-semibold text-(--brand-label)">
+                  Max sold qty
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={maxUnits}
+                    onChange={(e) => setMaxUnits(e.target.value)}
+                    placeholder="Required"
+                    className="h-9 w-28 border-(--brand-input-border) bg-(--brand-input-bg)"
+                  />
+                </label>
+              ) : null}
+              {selected.filters !== "none" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void runSelected()}
+                  className="h-9 rounded-xl bg-(--brand-primary) px-4 font-bold text-black hover:bg-(--brand-primary)/90"
+                >
+                  {runLoading ? "Running…" : "Run"}
+                </Button>
+              ) : null}
+              <div className="ml-auto flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void exportSelected("csv")}
+                  className="h-9 rounded-xl"
+                >
+                  <Download className="mr-1.5 size-3.5 opacity-70" />
+                  {exportLoading === "csv" ? "…" : "CSV"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void exportSelected("xlsx")}
+                  className="h-9 rounded-xl"
+                >
+                  <FileSpreadsheet className="mr-1.5 size-3.5 opacity-70" />
+                  {exportLoading === "xlsx" ? "…" : "Excel"}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {runError ? (
+            <div className="auth-alert-error" role="alert">
+              {runError}
+            </div>
+          ) : null}
+          {exportError ? (
+            <div className="auth-alert-error" role="alert">
+              {exportError}
+            </div>
+          ) : null}
+
+          {runLoading ? (
+            <TableSkeleton />
+          ) : result && presentation ? (
+            <ReportBody result={result} presentation={presentation} />
+          ) : null}
+        </section>
       )}
     </AdminPage>
+  );
+}
+
+function ReportTabs({
+  reports,
+  activeKey,
+  onSelect,
+}: {
+  reports: ReportDefinition[];
+  activeKey: string;
+  onSelect: (key: string) => void;
+}) {
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const focusTab = useCallback((index: number) => {
+    const el = tabRefs.current[index];
+    el?.focus();
+  }, []);
+
+  const onTabKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+      if (reports.length === 0) return;
+      let next = index;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        next = (index + 1) % reports.length;
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        next = (index - 1 + reports.length) % reports.length;
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        next = 0;
+      } else if (event.key === "End") {
+        event.preventDefault();
+        next = reports.length - 1;
+      } else {
+        return;
+      }
+      onSelect(reports[next]!.key);
+      focusTab(next);
+    },
+    [focusTab, onSelect, reports]
+  );
+
+  if (reports.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-3 shadow-(--brand-card-shadow) sm:p-3.5">
+      <div className="md:hidden">
+        <label className="mb-1.5 block text-xs font-semibold text-(--brand-label)">
+          Report
+        </label>
+        <Select value={activeKey} onValueChange={onSelect}>
+          <SelectTrigger
+            className="h-10 w-full border-(--brand-input-border) bg-(--brand-input-bg)"
+            aria-label="Select report"
+          >
+            <SelectValue placeholder="Select report" />
+          </SelectTrigger>
+          <SelectContent>
+            {reports.map((report) => (
+              <SelectItem key={report.key} value={report.key}>
+                {report.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div
+        className="hidden flex-wrap gap-2 md:flex"
+        role="tablist"
+        aria-label="Reports in this category"
+      >
+        {reports.map((report, index) => {
+          const isActive = report.key === activeKey;
+          return (
+            <button
+              key={report.key}
+              ref={(el) => {
+                tabRefs.current[index] = el;
+              }}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => onSelect(report.key)}
+              onKeyDown={(event) => onTabKeyDown(event, index)}
+              className={cn(
+                "h-9 rounded-xl border px-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--brand-primary)/50",
+                isActive
+                  ? "border-(--brand-primary) bg-(--brand-primary)/15 text-(--brand-primary)"
+                  : "border-(--brand-card-border) bg-(--brand-card) text-(--brand-text-muted) hover:text-(--brand-text)"
+              )}
+            >
+              {report.title}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

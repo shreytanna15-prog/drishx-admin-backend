@@ -5,7 +5,12 @@ export type ReportCategory =
   | "inventory"
   | "power";
 
-export type ReportFilterKind = "fy" | "dateRange" | "none";
+export type ReportFilterKind =
+  | "fy"
+  | "dateRange"
+  | "dateRangeFast"
+  | "dateRangeSlow"
+  | "none";
 
 export type ReportColumn = {
   key: string;
@@ -30,6 +35,10 @@ export type ReportRunParams = {
   fy?: string;
   from?: string;
   to?: string;
+  /** Fast Moving: minimum sold units in the period (required; no system default). */
+  minUnits?: string;
+  /** Slow Moving: maximum sold units in the period (required; no system default). */
+  maxUnits?: string;
   /**
    * When true, use elevated row limits so CSV/XLSX exports can be complete.
    * Callers must refuse the export if the payload is still truncated.

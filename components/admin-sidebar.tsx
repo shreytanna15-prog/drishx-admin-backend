@@ -22,6 +22,7 @@ import {
   Layers,
   List,
   Package,
+  Plus,
   Receipt,
   RotateCcw,
   Settings,
@@ -40,8 +41,9 @@ import { BrandMark } from "@/app/components/brand-logo";
 import { resolveActiveTitle } from "@/app/lib/admin-nav-active";
 import {
   getReportDefinition,
-  groupReportsByCategory,
+  groupReportsForNav,
   listReportDefinitions,
+  reportNavCategory,
 } from "@/app/lib/reports/registry";
 import {
   Sidebar,
@@ -76,11 +78,10 @@ type NavSection = {
   reportsExpandable?: boolean;
 };
 
-const REPORT_CATEGORY_GROUPS = groupReportsByCategory(
-  listReportDefinitions({ phaseMax: 1 })
-).filter((group) => group.category !== "power");
-
-const REPORT_CATEGORY_NAV = REPORT_CATEGORY_GROUPS.map((group) => ({
+/** All shipped reports; power reports fold into Inventory for sidebar discoverability. */
+const REPORT_CATEGORY_NAV = groupReportsForNav(
+  listReportDefinitions({ phaseMax: 4 })
+).map((group) => ({
   category: group.category,
   label: group.label,
   firstKey: group.reports[0]!.key,
@@ -98,6 +99,11 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Order Management",
     items: [
       { title: "Orders", icon: ShoppingCart, href: "/orders" },
+      {
+        title: "Create Order",
+        icon: Plus,
+        href: "/orders/new",
+      },
       {
         title: "Orders overview",
         icon: LayoutGrid,
@@ -248,7 +254,8 @@ function ReportsNavSection({ onReportsPath }: { onReportsPath: boolean }) {
   const reportKey = searchParams.get("report")?.trim() || "";
   const activeCategory = useMemo(() => {
     if (!onReportsPath || !reportKey) return null;
-    return getReportDefinition(reportKey)?.category ?? null;
+    const def = getReportDefinition(reportKey);
+    return def ? reportNavCategory(def.category) : null;
   }, [onReportsPath, reportKey]);
 
   const [open, setOpen] = useState(onReportsPath);
@@ -460,7 +467,7 @@ export function AdminSidebar({
 
       <SidebarFooter className="px-4 py-3">
         <p className="text-[11px] text-sidebar-foreground/40 group-data-[collapsible=icon]:hidden">
-          © 2025 DrishX ERP
+          © {new Date().getFullYear()} DrishX ERP
         </p>
       </SidebarFooter>
     </Sidebar>

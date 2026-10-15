@@ -30,7 +30,8 @@ async function resolveSingleVision(quantity: number, lensId?: string | null): Pr
     ? await prisma.singleVisionLens.findUnique({ where: { id: lensId } })
     : null;
 
-  if (!lens) {
+  // RW-09: held/archived products flip isDisabled — block new purchases.
+  if (!lens || lens.isDisabled) {
     return null;
   }
 
@@ -48,6 +49,7 @@ async function resolveSingleVision(quantity: number, lensId?: string | null): Pr
       sph: lens.sph,
       cyl: lens.cyl,
       crossPower: lens.crossPower,
+      isDisabled: false,
       quantity: { gte: quantity },
     },
     orderBy: [{ quantity: "desc" }, { createdAt: "desc" }],
@@ -58,7 +60,7 @@ async function resolveSingleVision(quantity: number, lensId?: string | null): Pr
 
 async function resolveKryptok(quantity: number, lensId?: string | null): Promise<KryptokRow> {
   let lens = lensId ? await prisma.kryptokLens.findUnique({ where: { id: lensId } }) : null;
-  if (!lens) return null;
+  if (!lens || lens.isDisabled) return null;
   if (lens.quantity >= quantity) return lens;
 
   const sibling = await prisma.kryptokLens.findFirst({
@@ -70,6 +72,7 @@ async function resolveKryptok(quantity: number, lensId?: string | null): Promise
       cyl: lens.cyl,
       axis: lens.axis,
       add: lens.add,
+      isDisabled: false,
       quantity: { gte: quantity },
     },
     orderBy: [{ quantity: "desc" }, { createdAt: "desc" }],
@@ -80,7 +83,7 @@ async function resolveKryptok(quantity: number, lensId?: string | null): Promise
 
 async function resolveProgressive(quantity: number, lensId?: string | null): Promise<ProgressiveRow> {
   let lens = lensId ? await prisma.progressiveLens.findUnique({ where: { id: lensId } }) : null;
-  if (!lens) return null;
+  if (!lens || lens.isDisabled) return null;
   if (lens.quantity >= quantity) return lens;
 
   const sibling = await prisma.progressiveLens.findFirst({
@@ -96,6 +99,7 @@ async function resolveProgressive(quantity: number, lensId?: string | null): Pro
       axis: lens.axis,
       add: lens.add,
       eye: lens.eye,
+      isDisabled: false,
       quantity: { gte: quantity },
     },
     orderBy: [{ quantity: "desc" }, { createdAt: "desc" }],

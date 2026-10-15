@@ -56,19 +56,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // RW-04: blocks inactive staff, suspended customers, and rejected customers.
     const inactiveError = inactiveStaffLoginError(user);
-    if (inactiveError) return inactiveError;
-
-    if (user.role === "CUSTOMER" && user.approvalStatus === "REJECTED") {
-      return NextResponse.json(
-        {
-          error: "Your account was rejected by admin.",
-          code: "FORBIDDEN",
-          rejectionReason: user.rejectionReason,
-          user: toSafeUser(user),
-        },
-        { status: 403 }
-      );
+    if (inactiveError) {
+      if (user.role === "CUSTOMER" && user.approvalStatus === "REJECTED") {
+        return NextResponse.json(
+          {
+            error: "Your account was rejected by admin.",
+            code: "FORBIDDEN",
+            rejectionReason: user.rejectionReason,
+            user: toSafeUser(user),
+          },
+          { status: 403 }
+        );
+      }
+      return inactiveError;
     }
 
     await recordSecurityEvent(prisma, {

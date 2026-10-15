@@ -23,6 +23,7 @@ import { OPEN_REQUEST_STATUSES } from "./procurement-requests";
 import {
   MAIN_WAREHOUSE_CODE,
   findDuplicatePowersInDraft,
+  findDuplicateProcurementRequestIdsInDraft,
   isReceivablePoStatus,
   lineAmount,
   openPoLineOutstanding,
@@ -214,6 +215,13 @@ function validateDraftLines(lines: DraftLineInput[]) {
       "A draft cannot contain the same power twice. Merge quantities into one line.",
       400,
       "PO_DUPLICATE_POWER_IN_DRAFT"
+    );
+  }
+  if (findDuplicateProcurementRequestIdsInDraft(lines).length) {
+    throw new PurchaseOrderError(
+      "A draft cannot link the same procurement request on more than one line.",
+      400,
+      "PO_DUPLICATE_PR_IN_DRAFT"
     );
   }
   for (const line of lines) {

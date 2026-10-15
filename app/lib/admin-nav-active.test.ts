@@ -25,6 +25,7 @@ describe("pathMatchesRoute", () => {
 describe("resolveActiveTitle", () => {
   it("highlights Orders overview instead of Orders", () => {
     assert.equal(resolveActiveTitle("/orders/overview"), "Orders overview");
+    assert.equal(resolveActiveTitle("/orders/new"), "Create Order");
     assert.equal(
       resolveActiveTitle("/orders/overview/", FALLBACK),
       "Orders overview"

@@ -33,6 +33,11 @@ import {
   isRxOrder,
   statusBadgeClass,
 } from "@/app/lib/admin-orders";
+import {
+  formatPlacedByAdminBadge,
+  isAdminPanelOrder,
+  placedByDisplayName,
+} from "@/app/lib/order-attribution";
 import { cn } from "@/lib/utils";
 import { EntityTimeline } from "@/components/audit/entity-timeline";
 
@@ -179,12 +184,48 @@ export default function OrderDetailPage() {
                     Color Lens
                   </Badge>
                 ) : null}
+                {isAdminPanelOrder(order) ? (
+                  <Badge
+                    variant="outline"
+                    className="rounded-lg border-(--brand-primary)/40 font-bold text-(--brand-primary)"
+                  >
+                    {formatPlacedByAdminBadge(order) ?? "Placed by admin"}
+                  </Badge>
+                ) : null}
               </div>
             </div>
           </section>
 
           <AdminOrderControlPanel order={order} onUpdated={setOrder} />
           <AdminAlternatePowerPanel order={order} onUpdated={setOrder} />
+
+          {isAdminPanelOrder(order) ? (
+            <section className="rounded-2xl border border-(--brand-primary)/30 bg-(--brand-primary)/8 p-5 shadow-(--brand-card-shadow) sm:p-6">
+              <h2 className="mb-2 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+                Placement attribution
+              </h2>
+              <dl>
+                <DetailRow label="Source" value="Admin panel" />
+                <DetailRow
+                  label="Placed by"
+                  value={placedByDisplayName(order) || "Administrator"}
+                />
+                <DetailRow
+                  label="Placed at"
+                  value={formatDate(order.createdAt)}
+                />
+                <DetailRow
+                  label="Customer account"
+                  value={
+                    order.user?.businessName?.trim() ||
+                    order.user?.name?.trim() ||
+                    order.user?.email ||
+                    "—"
+                  }
+                />
+              </dl>
+            </section>
+          ) : null}
 
           <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5 shadow-(--brand-card-shadow) sm:p-6">
             <h2 className="mb-2 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">

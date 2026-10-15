@@ -5,6 +5,15 @@ import {
   setSession,
 } from "./client-auth";
 
+type AuthErrorCode =
+  | "TOKEN_EXPIRED"
+  | "TOKEN_INVALID"
+  | "TOKEN_MISSING"
+  | "ACCOUNT_PENDING"
+  | "ACCOUNT_INACTIVE"
+  | "MISSING_PERMISSION"
+  | "FORBIDDEN";
+
 type RefreshResponse = {
   accessToken?: string;
   token?: string;
@@ -18,6 +27,23 @@ type RefreshResponse = {
     approvalStatus: string;
   };
 };
+
+/** Account / permission failures must not trigger silent refresh (RW-01). */
+const NON_REFRESHABLE_401_CODES: AuthErrorCode[] = [
+  "ACCOUNT_PENDING",
+  "ACCOUNT_INACTIVE",
+  "MISSING_PERMISSION",
+  "FORBIDDEN",
+];
+
+async function responseAuthCode(res: Response): Promise<AuthErrorCode | null> {
+  try {
+    const data = (await res.clone().json()) as { code?: AuthErrorCode };
+    return data.code ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Outcome of a refresh attempt — transient failures must not force logout. */
 export type RefreshOutcome =
@@ -112,6 +138,11 @@ export async function adminAuthFetch(
   let res = await fetch(path, { ...init, headers, credentials: "include" });
 
   if (res.status !== 401 || !allowRetry) {
+    return res;
+  }
+
+  const authCode = await responseAuthCode(res);
+  if (authCode && NON_REFRESHABLE_401_CODES.includes(authCode)) {
     return res;
   }
 

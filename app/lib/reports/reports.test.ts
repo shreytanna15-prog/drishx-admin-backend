@@ -23,7 +23,10 @@ import { sumPurchaseBills } from "./purchase-aggregate-format";
 import {
   getReportDefinition,
   groupReportsByCategory,
+  groupReportsForNav,
   listReportDefinitions,
+  reportNavCategory,
+  reportsInNavCategory,
 } from "./registry";
 import {
   formatQuarterKey,
@@ -74,6 +77,7 @@ const PHASE1_KEYS = [
   "product-wise-stock",
   "purchase-summary",
   "quarterly-sales",
+  "ready-stock-orders",
   "reserved-stock",
   "rx-orders",
   "sales-summary",
@@ -144,8 +148,83 @@ describe("reports registry", () => {
     assert.deepEqual(keys.sort(), PHASE1_KEYS);
   });
 
-  it("does not register ready-stock-orders until defined", () => {
-    assert.equal(getReportDefinition("ready-stock-orders"), null);
+  it("registers ready-stock-orders and keeps profit-margin deferred", () => {
+    assert.ok(getReportDefinition("ready-stock-orders"));
+    assert.equal(getReportDefinition("profit-margin"), null);
+  });
+
+  it("registers phase-4 movement and aging reports", () => {
+    const keys = listReportDefinitions({ phaseMax: 4 }).map((r) => r.key);
+    for (const key of [
+      "fast-moving-powers",
+      "slow-moving-powers",
+      "dead-powers",
+      "unsold-powers",
+      "stock-aging",
+      "ready-stock-orders",
+    ]) {
+      assert.ok(keys.includes(key), key);
+    }
+  });
+
+  it("documents distinct dead vs unsold and aging honesty", () => {
+    const dead = getReportDefinition("dead-powers");
+    const unsold = getReportDefinition("unsold-powers");
+    const aging = getReportDefinition("stock-aging");
+    assert.match(String(dead?.notes), /180/);
+    assert.match(String(dead?.notes), /Insufficient History/i);
+    assert.match(String(unsold?.notes), /selected window/i);
+    assert.match(String(aging?.notes), /last-receipt recency/i);
+    assert.ok(aging?.columns.some((c) => c.key === "recencyBucket"));
+  });
+
+  it("folds power reports into Inventory for Reports navigation", () => {
+    assert.equal(reportNavCategory("power"), "inventory");
+    assert.equal(reportNavCategory("inventory"), "inventory");
+    assert.equal(reportNavCategory("orders"), "orders");
+
+    const defs = listReportDefinitions({ phaseMax: 4 });
+    const nav = groupReportsForNav(defs);
+    const labels = nav.map((g) => g.category);
+    assert.deepEqual(labels, ["financial", "orders", "sales", "inventory"]);
+    assert.equal(
+      nav.some((g) => (g.category as string) === "power"),
+      false
+    );
+
+    const inventory = nav.find((g) => g.category === "inventory");
+    assert.ok(inventory);
+    for (const key of [
+      "stock-aging",
+      "fast-moving-powers",
+      "slow-moving-powers",
+      "dead-powers",
+      "unsold-powers",
+    ]) {
+      assert.ok(
+        inventory!.reports.some((r) => r.key === key),
+        `Inventory nav should include ${key}`
+      );
+    }
+
+    const orders = nav.find((g) => g.category === "orders");
+    assert.ok(orders?.reports.some((r) => r.key === "ready-stock-orders"));
+
+    const inventoryKeys = reportsInNavCategory(defs, "inventory").map(
+      (r) => r.key
+    );
+    const powerDefKeys = defs
+      .filter((r) => r.category === "power")
+      .map((r) => r.key);
+    assert.ok(powerDefKeys.length > 0);
+    for (const key of powerDefKeys) {
+      assert.ok(
+        inventoryKeys.includes(key),
+        `power report ${key} should appear under Inventory nav`
+      );
+    }
+    assert.ok(inventoryKeys.includes("fast-moving-powers"));
+    assert.ok(inventoryKeys.includes("current-stock"));
   });
 
   it("returns null for unknown keys", () => {

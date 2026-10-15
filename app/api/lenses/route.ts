@@ -520,7 +520,9 @@ function buildFetchContext(
   search: string,
   itemName?: string,
   coating?: string,
-  powerShape?: PowerShapeFilter | null
+  powerShape?: PowerShapeFilter | null,
+  /** RW-09: hide held/archived leaves from customer-facing catalog. */
+  excludeDisabled = false
 ) {
   const wholesale = resolveWholesaleShopSearch(search, type);
   const isCrossSearch = isCrossProductSearchTerm(wholesale.remainingText);
@@ -559,10 +561,16 @@ function buildFetchContext(
     return null;
   };
 
+  const disabledWhere = excludeDisabled ? { isDisabled: false } : null;
+
   const withListFilters = (
     base: Record<string, unknown>,
     powerShapeWhere: Record<string, unknown> | null
-  ) => mergeWhere(mergeWhere(base, coatingWhere), powerShapeWhere);
+  ) =>
+    mergeWhere(
+      mergeWhere(mergeWhere(base, coatingWhere), powerShapeWhere),
+      disabledWhere
+    );
 
   return {
     isCrossSearch,
@@ -604,9 +612,17 @@ async function countUnifiedLenses(
   search: string,
   itemName?: string,
   coating?: string,
-  powerShape?: PowerShapeFilter | null
+  powerShape?: PowerShapeFilter | null,
+  excludeDisabled = false
 ): Promise<number> {
-  const ctx = buildFetchContext(type, search, itemName, coating, powerShape);
+  const ctx = buildFetchContext(
+    type,
+    search,
+    itemName,
+    coating,
+    powerShape,
+    excludeDisabled
+  );
   const tasks: Promise<number>[] = [];
 
   if (ctx.typesToFetch.has("KRYPTOK")) {
@@ -649,10 +665,18 @@ async function fetchNearestPowerLenses(
   itemName?: string,
   options: FetchUnifiedOptions = {},
   coating?: string,
-  powerShape?: PowerShapeFilter | null
+  powerShape?: PowerShapeFilter | null,
+  excludeDisabled = false
 ): Promise<{ items: UnifiedLens[]; total: number; powerMatch: PowerMatchMeta | null }> {
   // Empty search avoids exact sph/cyl equality filters; near/range OR is merged in.
-  const ctx = buildFetchContext(type, "", itemName, coating, powerShape);
+  const ctx = buildFetchContext(
+    type,
+    "",
+    itemName,
+    coating,
+    powerShape,
+    excludeDisabled
+  );
   const nearWhere = buildNearOrRangePowerWhere(target, CATALOG_POWER_MAX_DISTANCE);
   const offset = Math.max(0, options.offset ?? 0);
   const limit = options.limit;
@@ -755,9 +779,17 @@ async function fetchUnifiedLenses(
   itemName?: string,
   options: FetchUnifiedOptions = {},
   coating?: string,
-  powerShape?: PowerShapeFilter | null
+  powerShape?: PowerShapeFilter | null,
+  excludeDisabled = false
 ): Promise<UnifiedLens[]> {
-  const ctx = buildFetchContext(type, search, itemName, coating, powerShape);
+  const ctx = buildFetchContext(
+    type,
+    search,
+    itemName,
+    coating,
+    powerShape,
+    excludeDisabled
+  );
   const offset = Math.max(0, options.offset ?? 0);
   const limit = options.limit;
   const sort = options.sort ?? null;
@@ -826,6 +858,12 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
+    // RW-09: customers (and anonymous shop) never see held/archived leaves.
+    // Admin/employee retain full visibility for ops/stock screens.
+    const excludeDisabled =
+      !session ||
+      session.role === "CUSTOMER" ||
+      searchParams.get("includeDisabled") === "0";
     const hasPaginationParams =
       searchParams.has("page") ||
       searchParams.has("limit") ||
@@ -837,10 +875,11 @@ export async function GET(req: NextRequest) {
       searchParams.has("powerShape");
 
     if (!hasPaginationParams) {
+      const disabledFilter = excludeDisabled ? { isDisabled: false } : undefined;
       const [kryptokLenses, progressiveLenses, singleVisionLenses] = await Promise.all([
-        prisma.kryptokLens.findMany(),
-        prisma.progressiveLens.findMany(),
-        prisma.singleVisionLens.findMany(),
+        prisma.kryptokLens.findMany({ where: disabledFilter }),
+        prisma.progressiveLens.findMany({ where: disabledFilter }),
+        prisma.singleVisionLens.findMany({ where: disabledFilter }),
       ]);
 
       return NextResponse.json({
@@ -872,7 +911,8 @@ export async function GET(req: NextRequest) {
         search,
         item || undefined,
         coating,
-        powerShape
+        powerShape,
+        excludeDisabled
       );
 
       if (exactTotal > 0) {
@@ -883,7 +923,8 @@ export async function GET(req: NextRequest) {
           item || undefined,
           { offset, limit, sort: sort ?? undefined },
           coating,
-          powerShape
+          powerShape,
+          excludeDisabled
         );
         powerMatch = {
           mode: "exact",
@@ -897,7 +938,8 @@ export async function GET(req: NextRequest) {
           item || undefined,
           { offset, limit, sort: sort ?? undefined },
           coating,
-          powerShape
+          powerShape,
+          excludeDisabled
         );
         total = nearest.total;
         pageItems = nearest.items;
@@ -905,14 +947,22 @@ export async function GET(req: NextRequest) {
       }
     } else {
       const [counted, fetched] = await Promise.all([
-        countUnifiedLenses(type, search, item || undefined, coating, powerShape),
+        countUnifiedLenses(
+          type,
+          search,
+          item || undefined,
+          coating,
+          powerShape,
+          excludeDisabled
+        ),
         fetchUnifiedLenses(
           type,
           search,
           item || undefined,
           { offset, limit, sort: sort ?? undefined },
           coating,
-          powerShape
+          powerShape,
+          excludeDisabled
         ),
       ]);
       total = counted;

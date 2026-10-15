@@ -188,6 +188,24 @@ export function findDuplicatePowersInDraft(
   return [...dupes];
 }
 
+/**
+ * Detect the same procurement request linked on more than one draft line.
+ * A PR may contribute to only one PO line in a draft payload.
+ */
+export function findDuplicateProcurementRequestIdsInDraft(
+  lines: Array<{ procurementRequestId?: string | null }>
+): string[] {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const line of lines) {
+    const id = line.procurementRequestId?.trim();
+    if (!id) continue;
+    if (seen.has(id)) dupes.add(id);
+    else seen.add(id);
+  }
+  return [...dupes];
+}
+
 /** Reason Run Reorder skips a power covered by an open PO (null = not blocked). Pure. */
 export function openPurchaseOrderSuppression(
   po: { publicId: string; status: string } | null

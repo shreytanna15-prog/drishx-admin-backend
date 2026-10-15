@@ -3,8 +3,12 @@ export {
   REPORT_DEFINITIONS,
   getReportDefinition,
   groupReportsByCategory,
+  groupReportsForNav,
   listReportDefinitions,
+  reportNavCategory,
+  reportsInNavCategory,
 } from "./registry";
+export type { ReportNavCategory } from "./registry";
 export { runReport } from "./run-report";
 export { computeGstSummary } from "./gst-summary";
 export { agingBucket } from "./aging";

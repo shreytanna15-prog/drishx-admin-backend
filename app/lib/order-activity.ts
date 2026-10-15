@@ -36,12 +36,18 @@ export function sanitizeOrderForRole<T extends Record<string, unknown>>(
     cancelReason: _cancelReason,
     dispatchOverrideStamp: _dispatchOverrideStamp,
     activityLogs: _activityLogs,
+    placedBy: _placedBy,
+    placedByUserId: _placedByUserId,
+    orderSource: _orderSource,
     ...rest
   } = order as T & {
     internalNotes?: unknown;
     cancelReason?: unknown;
     dispatchOverrideStamp?: unknown;
     activityLogs?: unknown;
+    placedBy?: unknown;
+    placedByUserId?: unknown;
+    orderSource?: unknown;
   };
 
   return rest as T;

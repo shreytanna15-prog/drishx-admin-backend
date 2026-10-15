@@ -10,7 +10,7 @@ export const REPORT_CATEGORY_LABELS: Record<ReportCategory, string> = {
 
 /**
  * Reports available in the admin Reports Hub.
- * Ready Stock Orders omitted until the business definition is confirmed.
+ * Profit & Margin remains deferred (see deferred-reports.ts / profit-cogs.ts).
  */
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
@@ -178,6 +178,29 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: "createdAt", label: "Placed" },
     ],
     notes: "Photo-only orders are not treated as RX.",
+  },
+  {
+    key: "ready-stock-orders",
+    title: "Ready Stock Orders",
+    description:
+      "Non-RX/photo catalog orders that are fully reserved and in PENDING, PICKING, or PACKED — with packed rows marked dispatch-eligible.",
+    category: "orders",
+    phase: 1,
+    filters: "dateRange",
+    columns: [
+      { key: "orderNumber", label: "Order" },
+      { key: "customer", label: "Customer" },
+      { key: "status", label: "Status" },
+      { key: "lineType", label: "Line" },
+      { key: "quantity", label: "Qty", align: "right" },
+      { key: "reservedQuantity", label: "Reserved", align: "right" },
+      { key: "allocationStatus", label: "Allocation" },
+      { key: "dispatchState", label: "Dispatch readiness" },
+      { key: "totalAmount", label: "Amount", align: "right" },
+      { key: "createdAt", label: "Placed" },
+    ],
+    notes:
+      "Excludes RX, photo-prescription, cancelled/completed/dispatched, awaiting procurement, active warehouse hold, and partial allocation. Wholesale requires every line fully reserved with needsProcurement=false. Aggregate warehouse stock alone never qualifies. Only PACKED is dispatch-eligible; PENDING/PICKING are fully allocated but not packed.",
   },
   {
     key: "daily-sales",
@@ -431,6 +454,103 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     notes:
       "Cost price is available for Single Vision, Kryptok, and Progressive only. Missing prices are never treated as zero. Disabled products are excluded.",
   },
+  {
+    key: "fast-moving-powers",
+    title: "Fast Moving Powers",
+    description:
+      "Powers with net sold quantity at or above an admin-entered minimum (default window 90 days).",
+    category: "power",
+    phase: 4,
+    filters: "dateRangeFast",
+    columns: [
+      { key: "lensType", label: "Lens type" },
+      { key: "label", label: "Product" },
+      { key: "power", label: "Power" },
+      { key: "onHand", label: "On hand", align: "right" },
+      { key: "soldQty", label: "Sold (period)", align: "right" },
+    ],
+    notes:
+      "Net sold = issued invoice qty − RETURNED stock movements in the period (floored at 0). Enter minUnits each run — no company-wide default. Prefer a minimum that sits above your Slow maxUnits to avoid overlapping bands.",
+  },
+  {
+    key: "slow-moving-powers",
+    title: "Slow Moving Powers",
+    description:
+      "In-stock powers with positive net sold quantity at or below an admin-entered maximum (default window 90 days).",
+    category: "power",
+    phase: 4,
+    filters: "dateRangeSlow",
+    columns: [
+      { key: "lensType", label: "Lens type" },
+      { key: "label", label: "Product" },
+      { key: "power", label: "Power" },
+      { key: "onHand", label: "On hand", align: "right" },
+      { key: "soldQty", label: "Sold (period)", align: "right" },
+    ],
+    notes:
+      "Requires onHand > 0 and 0 < soldQty ≤ maxUnits. Zero-sales stock is Unsold/Dead, not Slow. Enter maxUnits each run — no company-wide default. Keep maxUnits below Fast minUnits when comparing both reports.",
+  },
+  {
+    key: "dead-powers",
+    title: "Dead Powers",
+    description:
+      "In-stock powers with zero net sales over the preceding 180 days, only when catalog history is long enough.",
+    category: "power",
+    phase: 4,
+    filters: "dateRange",
+    columns: [
+      { key: "lensType", label: "Lens type" },
+      { key: "label", label: "Product" },
+      { key: "power", label: "Power" },
+      { key: "onHand", label: "On hand", align: "right" },
+      { key: "soldQty", label: "Sold (period)", align: "right" },
+      { key: "eligibility", label: "Eligibility" },
+    ],
+    notes:
+      "Sales window is forced to 180 days ending on the selected To date (From is ignored for lookback length). Newly introduced SKUs (catalog createdAt within 180 days) are Insufficient History — never labeled Dead. Distinct from Unsold (selected period only).",
+  },
+  {
+    key: "unsold-powers",
+    title: "Unsold Powers",
+    description:
+      "Powers with on-hand stock and zero net sales in the selected period (default 90 days).",
+    category: "power",
+    phase: 4,
+    filters: "dateRange",
+    columns: [
+      { key: "lensType", label: "Lens type" },
+      { key: "label", label: "Product" },
+      { key: "power", label: "Power" },
+      { key: "onHand", label: "On hand", align: "right" },
+      { key: "soldQty", label: "Sold (period)", align: "right" },
+    ],
+    notes:
+      "onHand > 0 and soldQty === 0 in the selected window. Does not apply the 180-day Dead history rule.",
+  },
+  {
+    key: "stock-aging",
+    title: "Stock Aging",
+    description:
+      "On-hand stock by last-receipt recency buckets; exact lot age is not claimed when unverifiable.",
+    category: "inventory",
+    phase: 4,
+    filters: "none",
+    columns: [
+      { key: "recencyBucket", label: "Recency bucket" },
+      { key: "ageMeasure", label: "Age measure" },
+      { key: "historyStatus", label: "History" },
+      { key: "lensType", label: "Lens type" },
+      { key: "label", label: "Product" },
+      { key: "power", label: "Power" },
+      { key: "onHand", label: "On hand", align: "right" },
+      { key: "lastReceiptAt", label: "Last receipt" },
+      { key: "daysSinceLastReceipt", label: "Days since receipt", align: "right" },
+      { key: "unitCost", label: "Unit cost", align: "right" },
+      { key: "costValuation", label: "Cost valuation", align: "right" },
+    ],
+    notes:
+      "Buckets 0–30 / 31–60 / 61–90 / 90+ / Unknown from last StockMovement RECEIVED or confirmed Goods Receipt only. This is last-receipt recency, not exact remaining-stock age (older lots may still be on hand). No receipt history → Unknown; dates are never invented. Single Vision / Kryptok / Progressive with on-hand stock.",
+  },
 ];
 
 const BY_KEY = new Map(REPORT_DEFINITIONS.map((r) => [r.key, r]));
@@ -466,4 +586,51 @@ export function groupReportsByCategory(defs: ReportDefinition[]) {
       reports: grouped.get(category) ?? [],
     }))
     .filter((g) => g.reports.length > 0);
+}
+
+/**
+ * Sidebar / hub navigation category.
+ * Power-movement reports stay `category: "power"` in the registry for labeling,
+ * but are discovered under Reports → Inventory (no separate Power sidebar item).
+ */
+export type ReportNavCategory = Exclude<ReportCategory, "power">;
+
+export function reportNavCategory(category: ReportCategory): ReportNavCategory {
+  return category === "power" ? "inventory" : category;
+}
+
+const NAV_CATEGORY_ORDER: ReportNavCategory[] = [
+  "financial",
+  "orders",
+  "sales",
+  "inventory",
+];
+
+/** Reports shown together when a nav category (or a report in it) is selected. */
+export function reportsInNavCategory(
+  defs: ReportDefinition[],
+  category: ReportCategory
+): ReportDefinition[] {
+  const nav = reportNavCategory(category);
+  return defs.filter((d) => reportNavCategory(d.category) === nav);
+}
+
+/**
+ * Catalog grouping for Reports navigation: Financial / Orders / Sales / Inventory.
+ * Inventory includes stock reports plus Fast/Slow/Dead/Unsold power reports.
+ */
+export function groupReportsForNav(defs: ReportDefinition[]) {
+  const grouped = new Map<ReportNavCategory, ReportDefinition[]>();
+  for (const cat of NAV_CATEGORY_ORDER) grouped.set(cat, []);
+  for (const def of defs) {
+    const nav = reportNavCategory(def.category);
+    const list = grouped.get(nav) ?? [];
+    list.push(def);
+    grouped.set(nav, list);
+  }
+  return NAV_CATEGORY_ORDER.map((category) => ({
+    category,
+    label: REPORT_CATEGORY_LABELS[category],
+    reports: grouped.get(category) ?? [],
+  })).filter((g) => g.reports.length > 0);
 }

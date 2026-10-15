@@ -27,6 +27,14 @@ export const orderDetailInclude = {
       role: true,
     },
   },
+  placedBy: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+    },
+  },
   invoice: {
     select: {
       id: true,

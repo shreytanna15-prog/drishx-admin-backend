@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import {
-  groupReportsByCategory,
+  groupReportsForNav,
   listReportDefinitions,
   runReport,
 } from "@/app/lib/reports";
+import { DEFERRED_REPORTS } from "@/app/lib/reports/deferred-reports";
 import {
   CSV_CONTENT_TYPE,
   XLSX_CONTENT_TYPE,
@@ -54,10 +55,12 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       );
     }
-    const definitions = listReportDefinitions({ phaseMax: 1 });
+    // Implemented reports are registered at phase ≤ 4; nav folds power → Inventory.
+    const definitions = listReportDefinitions({ phaseMax: 4 });
     return NextResponse.json({
-      categories: groupReportsByCategory(definitions),
+      categories: groupReportsForNav(definitions),
       reports: definitions,
+      deferred: DEFERRED_REPORTS,
     });
   }
 
@@ -65,6 +68,8 @@ export async function GET(req: NextRequest) {
     fy: searchParams.get("fy") ?? undefined,
     from: searchParams.get("from") ?? undefined,
     to: searchParams.get("to") ?? undefined,
+    minUnits: searchParams.get("minUnits") ?? undefined,
+    maxUnits: searchParams.get("maxUnits") ?? undefined,
     forExport: exportFormat != null,
   });
 
