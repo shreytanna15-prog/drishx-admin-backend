@@ -8,15 +8,22 @@ import {
   formatSupplierAddress,
   gstinCheckChar,
   gstinError,
+  gstinFieldError,
   INDIAN_STATES,
   isValidGstin,
+  normalizeGstin,
   normalizeIndianPhone,
+  normalizePan,
+  panFieldError,
+  panFromGstin,
   supplierDisplayName,
   validateSupplierInput,
 } from "./supplier-profile";
 
 /** Published sample GSTIN (Maharashtra) with a correct check character. */
 const KNOWN_GSTIN = "27AAPFU0939F1ZV";
+/** Gujarat sample from Test 68F repro (valid checksum). */
+const GUJARAT_GSTIN = "24ABCDE1234F1Z6";
 
 function withCheck(first14: string) {
   return first14 + gstinCheckChar(first14);
@@ -57,6 +64,73 @@ describe("GSTIN checksum", () => {
     assert.match(gstinError("27AAPFU0939F1Z") ?? "", /15 characters/);
     assert.match(gstinError("27AAPFU0939F1XV") ?? "", /format/i);
     assert.match(gstinError(withCheck("28AAPFU0939F1Z")) ?? "", /unknown state/i);
+  });
+});
+
+describe("gstinFieldError (optional field UX)", () => {
+  it("allows blank optional GSTIN", () => {
+    assert.equal(gstinFieldError(""), null);
+    assert.equal(gstinFieldError("   "), null);
+    assert.equal(gstinFieldError(null), null);
+    assert.equal(gstinFieldError(undefined), null);
+  });
+
+  it("rejects invalid GSTIN ABC123", () => {
+    assert.match(gstinFieldError("ABC123") ?? "", /15 characters|format/i);
+    assert.equal(isValidGstin("ABC123"), false);
+  });
+
+  it("accepts valid-format GSTIN and normalises lowercase", () => {
+    assert.equal(gstinFieldError(KNOWN_GSTIN.toLowerCase()), null);
+    assert.equal(normalizeGstin(" 27aapfu0939f1zv "), KNOWN_GSTIN);
+    assert.equal(isValidGstin(KNOWN_GSTIN.toLowerCase()), true);
+  });
+});
+
+describe("panFieldError (PAN–GSTIN match)", () => {
+  const expectedPan = panFromGstin(GUJARAT_GSTIN);
+
+  it("accepts valid GSTIN with matching PAN", () => {
+    assert.equal(isValidGstin(GUJARAT_GSTIN), true);
+    assert.equal(expectedPan, "ABCDE1234F");
+    assert.equal(panFieldError(expectedPan, GUJARAT_GSTIN), null);
+    assert.equal(
+      panFieldError(expectedPan.toLowerCase(), GUJARAT_GSTIN.toLowerCase()),
+      null
+    );
+  });
+
+  it("rejects valid GSTIN with mismatching PAN (blur case)", () => {
+    const err = panFieldError("ABCDE1234G", GUJARAT_GSTIN);
+    assert.match(err ?? "", /ABCDE1234F/);
+  });
+
+  it("clears mismatch after correcting PAN", () => {
+    assert.ok(panFieldError("ABCDE1234G", GUJARAT_GSTIN));
+    assert.equal(panFieldError("ABCDE1234F", GUJARAT_GSTIN), null);
+  });
+
+  it("revalidates existing PAN when GSTIN changes", () => {
+    const mhPan = panFromGstin(KNOWN_GSTIN);
+    assert.equal(panFieldError(mhPan, KNOWN_GSTIN), null);
+    assert.match(panFieldError(mhPan, GUJARAT_GSTIN) ?? "", /ABCDE1234F/);
+  });
+
+  it("allows blank optional PAN/GSTIN combinations", () => {
+    assert.equal(panFieldError("", GUJARAT_GSTIN), null);
+    assert.equal(panFieldError("   ", GUJARAT_GSTIN), null);
+    assert.equal(panFieldError(null, GUJARAT_GSTIN), null);
+    assert.equal(panFieldError(expectedPan, ""), null);
+    assert.equal(panFieldError("", ""), null);
+  });
+
+  it("rejects invalid PAN format independently of GSTIN", () => {
+    assert.match(panFieldError("ABCDE1234", GUJARAT_GSTIN) ?? "", /format/i);
+    assert.match(panFieldError("ABCD1234F") ?? "", /format/i);
+  });
+
+  it("normalises PAN spacing/case", () => {
+    assert.equal(normalizePan(" abcde1234f "), "ABCDE1234F");
   });
 });
 
@@ -209,6 +283,29 @@ describe("validateSupplierInput (create)", () => {
     assert.match(errors.pan, /AAPFU0939F/);
   });
 
+  it("create rejects Gujarat GSTIN with mismatching PAN ABCDE1234G", () => {
+    const errors = expectErrors(
+      validateSupplierInput(
+        { name: "Supplier", gstin: GUJARAT_GSTIN, pan: "ABCDE1234G" },
+        "create"
+      )
+    );
+    assert.match(errors.pan, /ABCDE1234F/);
+  });
+
+  it("create accepts Gujarat GSTIN with matching PAN", () => {
+    const data = expectOk(
+      validateSupplierInput(
+        { name: "Supplier", gstin: GUJARAT_GSTIN, pan: "ABCDE1234F" },
+        "create"
+      )
+    );
+    assert.equal(data.gstin, GUJARAT_GSTIN);
+    assert.equal(data.pan, "ABCDE1234F");
+    assert.equal(data.state, "Gujarat");
+    assert.equal(data.stateCode, "24");
+  });
+
   it("rejects invalid GSTIN checksum, PAN format, email, phone, pincode", () => {
     const errors = expectErrors(
       validateSupplierInput(
@@ -231,6 +328,23 @@ describe("validateSupplierInput (create)", () => {
     assert.ok(
       expectErrors(validateSupplierInput({ name: "S1", pan: "ABCD1234F" }, "create")).pan
     );
+  });
+
+  it("blocks create when GSTIN is ABC123 (backend path)", () => {
+    const errors = expectErrors(
+      validateSupplierInput({ name: "Supplier", gstin: "ABC123" }, "create")
+    );
+    assert.ok(errors.gstin);
+    assert.match(errors.gstin, /15 characters|format/i);
+  });
+
+  it("accepts blank GSTIN on create", () => {
+    const omitted = expectOk(validateSupplierInput({ name: "Supplier" }, "create"));
+    assert.equal(omitted.gstin, undefined);
+    const cleared = expectOk(
+      validateSupplierInput({ name: "Supplier", gstin: "" }, "create")
+    );
+    assert.equal(cleared.gstin, null);
   });
 
   it("enforces text length limits", () => {
@@ -280,6 +394,50 @@ describe("validateSupplierInput (update)", () => {
 
   it("empty update is ok and empty", () => {
     assert.deepEqual(expectOk(validateSupplierInput({}, "update")), {});
+  });
+
+  it("blocks update when GSTIN is ABC123 even if frontend is bypassed", () => {
+    const errors = expectErrors(
+      validateSupplierInput({ gstin: "ABC123" }, "update")
+    );
+    assert.ok(errors.gstin);
+  });
+
+  it("update rejects PAN mismatch against provided GSTIN", () => {
+    const errors = expectErrors(
+      validateSupplierInput(
+        { gstin: GUJARAT_GSTIN, pan: "ABCDE1234G" },
+        "update"
+      )
+    );
+    assert.match(errors.pan, /ABCDE1234F/);
+  });
+
+  it("update accepts matching PAN with GSTIN", () => {
+    const data = expectOk(
+      validateSupplierInput(
+        { gstin: GUJARAT_GSTIN, pan: "abcde1234f" },
+        "update"
+      )
+    );
+    assert.equal(data.pan, "ABCDE1234F");
+    assert.equal(data.gstin, GUJARAT_GSTIN);
+  });
+
+  it("accepts clearing GSTIN on update", () => {
+    assert.deepEqual(
+      expectOk(validateSupplierInput({ gstin: "" }, "update")),
+      { gstin: null }
+    );
+  });
+
+  it("accepts a valid GSTIN update and derives state", () => {
+    const data = expectOk(
+      validateSupplierInput({ gstin: KNOWN_GSTIN.toLowerCase() }, "update")
+    );
+    assert.equal(data.gstin, KNOWN_GSTIN);
+    assert.equal(data.state, "Maharashtra");
+    assert.equal(data.stateCode, "27");
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Loader2, Search, X } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
@@ -28,6 +28,10 @@ import {
   type ProcurementRequestRow,
   type ProcurementRequestsResponse,
 } from "@/app/lib/admin-procurement";
+import {
+  procurementRequestsEmptyMessage,
+  shouldCommitListResult,
+} from "@/app/lib/procurement-request-filters";
 import { cn } from "@/lib/utils";
 
 const LENS_TYPE_FILTERS = [
@@ -49,8 +53,14 @@ export default function ProcurementRequestsPage() {
   const [priority, setPriority] = useState("");
   const [lensType, setLensType] = useState("");
   const [openOnly, setOpenOnly] = useState(true);
+  const loadSeqRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const seq = ++loadSeqRef.current;
     try {
       const params = new URLSearchParams();
       if (source) params.set("source", source);
@@ -61,22 +71,31 @@ export default function ProcurementRequestsPage() {
       params.set("limit", "300");
 
       const res = await adminFetch<ProcurementRequestsResponse>(
-        `/api/procurement/requests?${params.toString()}`
+        `/api/procurement/requests?${params.toString()}`,
+        { signal: controller.signal }
       );
+      if (!shouldCommitListResult(seq, loadSeqRef.current)) return;
       setData(res);
     } catch (err) {
+      if (!shouldCommitListResult(seq, loadSeqRef.current)) return;
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setError(
         err instanceof AdminApiError
           ? err.message
           : "Failed to load procurement requests."
       );
     } finally {
-      setLoading(false);
+      if (shouldCommitListResult(seq, loadSeqRef.current)) {
+        setLoading(false);
+      }
     }
   }, [source, status, priority, lensType, openOnly]);
 
   useEffect(() => {
     void load();
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [load]);
 
   // Filter changes are user events, so the loading flag is set from the
@@ -204,19 +223,35 @@ export default function ProcurementRequestsPage() {
       {loading ? (
         <TableSkeleton compact columns={8} rows={8} />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
-          <Table>
+        <div className="overflow-x-auto rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+          <Table className="min-w-[64rem]">
             <TableHeader>
               <TableRow className="border-(--brand-card-border) hover:bg-transparent">
-                <TableHead className="text-(--brand-label)">Request</TableHead>
-                <TableHead className="text-(--brand-label)">Lens</TableHead>
-                <TableHead className="text-(--brand-label)">Power</TableHead>
-                <TableHead className="text-(--brand-label)">Source</TableHead>
-                <TableHead className="text-right text-(--brand-label)">Required</TableHead>
-                <TableHead className="text-right text-(--brand-label)">Received</TableHead>
-                <TableHead className="text-(--brand-label)">Status</TableHead>
-                <TableHead className="text-(--brand-label)">Priority</TableHead>
-                <TableHead className="text-(--brand-label)"></TableHead>
+                <TableHead className="whitespace-nowrap text-(--brand-label)">
+                  Request
+                </TableHead>
+                <TableHead className="min-w-[10rem] text-(--brand-label)">
+                  Lens
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-(--brand-label)">
+                  Power
+                </TableHead>
+                <TableHead className="w-[14rem] min-w-[12rem] max-w-[16rem] text-(--brand-label)">
+                  Source
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-right text-(--brand-label)">
+                  Required
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-right text-(--brand-label)">
+                  Received
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-(--brand-label)">
+                  Status
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-(--brand-label)">
+                  Priority
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-(--brand-label)" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -226,9 +261,11 @@ export default function ProcurementRequestsPage() {
                     colSpan={9}
                     className="h-28 text-center text-(--brand-text-muted)"
                   >
-                    {query.trim() || source || status || priority || lensType
-                      ? "No requests match the current filters."
-                      : "No procurement requests. Nothing needs buying right now."}
+                    {procurementRequestsEmptyMessage(
+                      Boolean(
+                        query.trim() || source || status || priority || lensType
+                      )
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -281,8 +318,10 @@ function RequestRow({
           </p>
         ) : null}
       </TableCell>
-      <TableCell className="text-(--brand-text)">
-        <p className="font-medium">{row.lensLabel ?? "—"}</p>
+      <TableCell className="max-w-[14rem] whitespace-normal text-(--brand-text)">
+        <p className="truncate font-medium" title={row.lensLabel ?? undefined}>
+          {row.lensLabel ?? "—"}
+        </p>
         <p className="text-xs text-(--brand-text-muted)">
           {LENS_TYPE_LABELS[row.lensType] ?? row.lensType}
         </p>
@@ -290,19 +329,24 @@ function RequestRow({
       <TableCell className="whitespace-nowrap text-(--brand-text-muted)">
         {formatPowerValue(row.power)}
       </TableCell>
-      <TableCell className="whitespace-nowrap text-(--brand-text-muted)">
-        {sourceLabel(row.source)}
+      <TableCell className="max-w-[16rem] min-w-[12rem] whitespace-normal align-top text-(--brand-text-muted)">
+        <p className="font-medium text-(--brand-text)">{sourceLabel(row.source)}</p>
         {row.source === "MINIMUM_STOCK_THRESHOLD" && row.availableAtTrigger !== null ? (
-          <p className="text-xs">
+          <p className="text-xs whitespace-nowrap">
             avail {row.availableAtTrigger} / min {row.minStockAtTrigger} / target{" "}
             {row.targetStockAtTrigger}
           </p>
         ) : null}
         {row.triggerReason ? (
-          <p className="max-w-xs text-xs opacity-80">{row.triggerReason}</p>
+          <p
+            className="mt-0.5 line-clamp-2 break-words text-xs opacity-80"
+            title={row.triggerReason}
+          >
+            {row.triggerReason}
+          </p>
         ) : null}
       </TableCell>
-      <TableCell className="text-right tabular-nums text-(--brand-text)">
+      <TableCell className="whitespace-nowrap text-right tabular-nums text-(--brand-text)">
         {row.requestedQuantity}
         {row.requestedQuantity !== row.requiredQuantity ? (
           <p className="text-xs text-(--brand-text-muted)">
@@ -312,7 +356,7 @@ function RequestRow({
       </TableCell>
       <TableCell
         className={cn(
-          "text-right tabular-nums",
+          "whitespace-nowrap text-right tabular-nums",
           fullyReceived ? "text-emerald-700" : "text-(--brand-text-muted)"
         )}
       >
@@ -323,12 +367,12 @@ function RequestRow({
           </p>
         ) : null}
       </TableCell>
-      <TableCell>
+      <TableCell className="whitespace-nowrap">
         <Badge className={STATUS_BADGE_CLASS[row.status] ?? STATUS_BADGE_CLASS.CANCELLED}>
           {row.status.replace(/_/g, " ").toLowerCase()}
         </Badge>
       </TableCell>
-      <TableCell>
+      <TableCell className="whitespace-nowrap">
         <Badge className={PRIORITY_BADGE_CLASS[row.priority] ?? PRIORITY_BADGE_CLASS.NORMAL}>
           {row.priority.toLowerCase()}
         </Badge>

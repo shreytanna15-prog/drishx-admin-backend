@@ -47,9 +47,12 @@ import {
   findStateByName,
   formatIndianPhone,
   formatSupplierAddress,
+  gstinFieldError,
   INDIAN_STATES,
   isValidGstin,
   normalizeGstin,
+  normalizePan,
+  panFieldError,
   SUPPLIER_ENTITY_TYPES,
   supplierEntityTypeLabel,
   validateSupplierInput,
@@ -573,6 +576,8 @@ function SupplierSheet({
   );
   const [form, setForm] = useState<FormState>(initial);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [gstinTouched, setGstinTouched] = useState(false);
+  const [panTouched, setPanTouched] = useState(false);
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -582,6 +587,7 @@ function SupplierSheet({
     [form, initial]
   );
   const isDirty = dirtyKeys.length > 0;
+  const hasFieldErrors = Object.keys(fieldErrors).length > 0;
 
   function requestClose(next: boolean) {
     if (next) {
@@ -596,8 +602,40 @@ function SupplierSheet({
     onOpenChange(false);
   }
 
+  function applyGstinFieldError(raw: string) {
+    const err = gstinFieldError(raw);
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      if (err) next.gstin = err;
+      else delete next.gstin;
+      return next;
+    });
+    return err;
+  }
+
+  function applyPanFieldError(panRaw: string, gstinRaw: string) {
+    const err = panFieldError(panRaw, gstinRaw);
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      if (err) next.pan = err;
+      else delete next.pan;
+      return next;
+    });
+    return err;
+  }
+
   function setField(field: FormField, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
+    if (field === "gstin") {
+      if (gstinTouched) applyGstinFieldError(value);
+      // Re-check PAN only after it has been touched (blur/submit).
+      if (panTouched) applyPanFieldError(form.pan, value);
+      return;
+    }
+    if (field === "pan") {
+      if (panTouched) applyPanFieldError(value, form.gstin);
+      return;
+    }
     if (fieldErrors[field] || (field === "state" && fieldErrors.stateCode)) {
       setFieldErrors((prev) => {
         const next = { ...prev };
@@ -609,18 +647,45 @@ function SupplierSheet({
   }
 
   function onGstinBlur() {
+    setGstinTouched(true);
     const gstin = normalizeGstin(form.gstin);
-    if (!gstin) return;
-    if (gstin !== form.gstin) setForm((prev) => ({ ...prev, gstin }));
-    if (isValidGstin(gstin)) {
-      const gstState = findStateByCode(gstin.slice(0, 2));
-      setForm((prev) => ({
-        ...prev,
-        gstin,
-        state: prev.state ? prev.state : gstState?.name ?? "",
-        pan: prev.pan ? prev.pan : gstin.slice(2, 12),
-      }));
+    if (!gstin) {
+      if (form.gstin !== "") setForm((prev) => ({ ...prev, gstin: "" }));
+      applyGstinFieldError("");
+      if (panTouched || form.pan.trim()) applyPanFieldError(form.pan, "");
+      return;
     }
+    if (gstin !== form.gstin) setForm((prev) => ({ ...prev, gstin }));
+    const err = applyGstinFieldError(gstin);
+    if (err) {
+      if (panTouched || form.pan.trim()) applyPanFieldError(form.pan, gstin);
+      return;
+    }
+    const gstState = findStateByCode(gstin.slice(0, 2));
+    // Never overwrite a manually entered PAN — only fill when blank.
+    setForm((prev) => ({
+      ...prev,
+      gstin,
+      state: prev.state ? prev.state : gstState?.name ?? "",
+      pan: prev.pan ? prev.pan : gstin.slice(2, 12),
+    }));
+    // Re-check PAN against this GSTIN (mismatching manual edits stay visible).
+    if (form.pan.trim()) {
+      setPanTouched(true);
+      applyPanFieldError(form.pan, gstin);
+    }
+  }
+
+  function onPanBlur() {
+    setPanTouched(true);
+    const pan = normalizePan(form.pan);
+    if (!pan) {
+      if (form.pan !== "") setForm((prev) => ({ ...prev, pan: "" }));
+      applyPanFieldError("", form.gstin);
+      return;
+    }
+    if (pan !== form.pan) setForm((prev) => ({ ...prev, pan }));
+    applyPanFieldError(pan, form.gstin);
   }
 
   const derivedState =
@@ -666,6 +731,8 @@ function SupplierSheet({
     }
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
+      if (errors.gstin) setGstinTouched(true);
+      if (errors.pan) setPanTouched(true);
       setFormError(errors._form ?? "Please fix the highlighted fields.");
       return;
     }
@@ -826,6 +893,7 @@ function SupplierSheet({
                       {...fieldProps("pan")}
                       value={form.pan}
                       onChange={(e) => setField("pan", e.target.value.toUpperCase())}
+                      onBlur={onPanBlur}
                       className={cn(inputClass, "font-mono uppercase")}
                       maxLength={10}
                       placeholder="ABCDE1234F"
@@ -1055,7 +1123,11 @@ function SupplierSheet({
                   </Button>
                   <Button
                     type="submit"
-                    disabled={submitting || (isEdit && !isDirty)}
+                    disabled={
+                      submitting ||
+                      hasFieldErrors ||
+                      (isEdit && !isDirty)
+                    }
                     className="h-10 flex-1 rounded-xl bg-(--brand-primary) font-extrabold text-(--brand-primary-text) hover:opacity-95"
                   >
                     {submitting ? <Loader2 className="size-4 animate-spin" /> : null}

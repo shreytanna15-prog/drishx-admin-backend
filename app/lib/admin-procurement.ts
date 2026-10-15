@@ -1,5 +1,7 @@
 /** Client-side types + fetch helpers for stock-wise procurement. */
 
+import { ProcurementRequestStatus } from "@prisma/client";
+
 export type LensPowerInfo = {
   sph: number | null;
   cyl: number | null;
@@ -125,15 +127,30 @@ export const PROCUREMENT_SOURCES = [
   { value: "MANUAL", label: "Manual" },
 ] as const;
 
+/**
+ * Dropdown options must match Prisma `ProcurementRequestStatus` exactly.
+ * Receiving progress is NOT a PR status — it lives on `receivedQuantity`
+ * (and PO `PARTIALLY_RECEIVED`). Full receipt closes the PR as RESOLVED.
+ */
+export const PROCUREMENT_REQUEST_STATUS_LABELS: Record<
+  ProcurementRequestStatus,
+  string
+> = {
+  OPEN: "Open",
+  UNDER_REVIEW: "Under review",
+  APPROVED: "Approved",
+  CANCELLED: "Cancelled",
+  RESOLVED: "Resolved",
+};
+
 export const PROCUREMENT_STATUSES = [
   { value: "", label: "All statuses" },
-  { value: "OPEN", label: "Open" },
-  { value: "UNDER_REVIEW", label: "Under review" },
-  { value: "APPROVED", label: "Approved" },
-  { value: "PARTIALLY_RECEIVED", label: "Partially received" },
-  { value: "RECEIVED", label: "Received" },
-  { value: "CANCELLED", label: "Cancelled" },
-  { value: "RESOLVED", label: "Resolved" },
+  ...(
+    Object.values(ProcurementRequestStatus) as ProcurementRequestStatus[]
+  ).map((value) => ({
+    value,
+    label: PROCUREMENT_REQUEST_STATUS_LABELS[value],
+  })),
 ] as const;
 
 export const PROCUREMENT_PRIORITIES = [

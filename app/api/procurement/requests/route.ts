@@ -3,7 +3,6 @@ import {
   LensType,
   ProcurementPriority,
   ProcurementRequestSource,
-  ProcurementRequestStatus,
   type Prisma,
 } from "@prisma/client";
 import { getSessionOrUnauthorized } from "../../../lib/session-auth";
@@ -15,13 +14,16 @@ import {
   OPEN_REQUEST_STATUSES,
 } from "../../../lib/procurement-requests";
 import {
+  buildProcurementRequestListWhere,
+  parseProcurementRequestStatusQuery,
+} from "../../../lib/procurement-request-filters";
+import {
   formatLensLabel,
   isProcurementLensType,
   readLensDescriptor,
 } from "../../../lib/procurement-lens";
 
 const SOURCES = Object.values(ProcurementRequestSource);
-const STATUSES = Object.values(ProcurementRequestStatus);
 const PRIORITIES = Object.values(ProcurementPriority);
 const LENS_TYPES = Object.values(LensType);
 
@@ -52,15 +54,19 @@ export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
 
   const source = oneOf(params.get("source"), SOURCES);
-  const status = oneOf(params.get("status"), STATUSES);
+  const statusParse = parseProcurementRequestStatusQuery(params.get("status"));
+  if (!statusParse.ok) {
+    return NextResponse.json(
+      { error: statusParse.error },
+      { status: statusParse.httpStatus }
+    );
+  }
+  const status = statusParse.status;
   const priority = oneOf(params.get("priority"), PRIORITIES);
   const lensType = oneOf(params.get("lensType"), LENS_TYPES);
 
   if (params.get("source") && !source) {
     return NextResponse.json({ error: "Invalid source filter." }, { status: 400 });
-  }
-  if (params.get("status") && !status) {
-    return NextResponse.json({ error: "Invalid status filter." }, { status: 400 });
   }
   if (params.get("priority") && !priority) {
     return NextResponse.json({ error: "Invalid priority filter." }, { status: 400 });
@@ -76,22 +82,19 @@ export async function GET(req: NextRequest) {
   const dateFrom = parseDate(params.get("dateFrom"));
   const dateTo = parseDate(params.get("dateTo"));
 
-  const where: Prisma.ProcurementRequestWhereInput = {
-    ...(source ? { source } : {}),
-    ...(status ? { status } : {}),
-    ...(priority ? { priority } : {}),
-    ...(lensType ? { lensType } : {}),
-    ...(orderId ? { orderId } : {}),
-    ...(openOnly ? { status: { in: [...OPEN_REQUEST_STATUSES] } } : {}),
-    ...(dateFrom || dateTo
-      ? {
-          createdAt: {
-            ...(dateFrom ? { gte: dateFrom } : {}),
-            ...(dateTo ? { lte: dateTo } : {}),
-          },
-        }
-      : {}),
-  };
+  // Status + openOnly must AND (never overwrite). Selecting Open with
+  // "Unresolved only" must return only OPEN rows, not APPROVED.
+  const where: Prisma.ProcurementRequestWhereInput =
+    buildProcurementRequestListWhere({
+      source,
+      status,
+      priority,
+      lensType,
+      orderId,
+      openOnly,
+      dateFrom,
+      dateTo,
+    });
 
   try {
     const [requests, grouped] = await Promise.all([

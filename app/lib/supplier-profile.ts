@@ -161,9 +161,50 @@ export function isValidGstin(raw: string): boolean {
   return gstinError(normalizeGstin(raw)) === null;
 }
 
+/**
+ * Field-level GSTIN message for the Add/Edit supplier form.
+ * Blank / whitespace-only is allowed (GSTIN is optional).
+ * Non-empty values must pass format + state code + checksum.
+ */
+export function gstinFieldError(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const gstin = normalizeGstin(raw);
+  if (!gstin) return null;
+  return gstinError(gstin);
+}
+
 /** PAN embedded in a GSTIN (characters 3–12). */
 export function panFromGstin(gstin: string): string {
   return gstin.slice(2, 12);
+}
+
+export function normalizePan(raw: string): string {
+  return raw.replace(/\s+/g, "").toUpperCase();
+}
+
+/**
+ * Field-level PAN message for the Add/Edit supplier form.
+ * Blank PAN is optional. When both PAN and a valid GSTIN are present,
+ * PAN must equal GSTIN characters 3–12.
+ */
+export function panFieldError(
+  panRaw: string | null | undefined,
+  gstinRaw?: string | null | undefined
+): string | null {
+  if (panRaw == null) return null;
+  const pan = normalizePan(panRaw);
+  if (!pan) return null;
+  if (!PAN_PATTERN.test(pan)) {
+    return "PAN format is invalid (e.g. ABCDE1234F).";
+  }
+  if (gstinRaw == null || gstinRaw === "") return null;
+  const gstin = normalizeGstin(gstinRaw);
+  if (!gstin || gstinError(gstin)) return null;
+  const expected = panFromGstin(gstin);
+  if (expected !== pan) {
+    return `PAN must match the GSTIN (expected ${expected}).`;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
