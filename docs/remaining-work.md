@@ -2,7 +2,7 @@
 
 **Document type:** End-phase backlog (bugs, changes, new modules)  
 **Audience:** Developers picking up assigned work  
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-16
 
 ## How to use
 
@@ -27,6 +27,7 @@
 | RW-08 | Procurement: Purchase Order → receive → close (power-wise) | backend (admin panel) |
 | RW-09 | Products & catalog: admin product master + ranges → powers | backend (admin panel) |
 | RW-10 | Admin panel: create order on behalf of customer | backend (admin panel) |
+| RW-11 | Client API calling pattern + list/table performance | backend, website, mobile, admin panel |
 
 ---
 
@@ -918,3 +919,278 @@ Admin → Orders → Create order
 ### Suggested first PR
 
 Schema (`orderSource`, `placedByUserId`) + set on admin retail create + `/orders/new` customer + catalog place + list/detail badge. Then RX. Then color/wholesale if needed.
+
+---
+
+## RW-11 — Client API calling pattern + list/table performance
+
+### Type
+
+Cross-cutting change — **all three frontends** + shared backend list APIs (admin panel, website, mobile)
+
+### Audience note (for humans + AI)
+
+This is the **single API-calling + list performance task**. It has two layers that must stay in order:
+
+1. **Skills first (documentation / agent contract)** — extend the already-added `drishx-client-api` skills in all three repos so every new fetch/mutation and every list screen follows one pattern (no React Query).
+2. **Code second (foundation + hot list APIs)** — implement the shared client hooks, then fix the **logical** list/table problems (unbounded payloads, fat includes, client-side filter, inconsistent pagination). Without (2), (1) only makes slow calls cleaner.
+
+**Do not** introduce TanStack Query / SWR / Axios for this RW. Transport stays what each repo already uses:
+
+| Repo | Transport (keep) |
+|------|------------------|
+| Admin panel (`Drishx-admin-and-backend`) | `adminFetch` / `AdminApiError` → `app/lib/admin-api.ts` (+ `adminAuthFetch` refresh) |
+| Website (`drishx-website`) | `authFetch` / `authFetchJson` → `lib/auth-fetch.ts` (BFF `/api/...`) |
+| Mobile (`drishx-mobile-app`) | `apiFetch` → `lib/api-request.ts` (+ `authFetch`, offline queue, `BACKEND_BASE_URL`) |
+
+**Relation to other RWs:** Independent of RW-08/09/10 product features. New admin screens from those RWs **must** follow this pattern once Phase A lands. Do not block PO/catalog/create-order on finishing every list in Phase C — but **do** block merging new list UIs that still call `adminFetch` / `authFetch` / `apiFetch` from components after Phase A.
+
+### Goal
+
+After this RW:
+
+- Every client has **one** way to read and write APIs: pure api functions → `useApiQuery` / `useApiMutation` → screens (loading + error from hooks).
+- Agent skills in all three repos accurately describe that pattern **including list/pagination contracts**.
+- Hot list endpoints (especially **orders**, then customers / returns / invoices) are **paginated**, return **summary** payloads for tables, support **server-side** status/search filters, and keep fat detail on `GET …/:id` only.
+- Admin tables, website order lists, and mobile order lists feel acceptably fast as data grows — not because of a nicer hook wrapper alone, but because less data crosses the wire.
+
+### Current state (what already exists — reuse)
+
+| Exists today | Where | Keep / extend? |
+|--------------|--------|----------------|
+| `drishx-client-api` skill (no React Query) | `.agents/skills/drishx-client-api/SKILL.md` in **admin**, **website**, **mobile** | **Yes** — Phase 0 expands it (pagination, list DTO, checklist) |
+| `AGENTS.md` points at the skill | All three repos | Keep; update row text if skill scope grows |
+| Admin transport | `app/lib/admin-api.ts`, `admin-auth-fetch.ts` | Keep — hooks call api layer that uses these |
+| Website transport | `lib/auth-fetch.ts`, `lib/fetch-with-retry.ts` | Keep |
+| Mobile transport | `lib/api-request.ts`, `lib/auth-fetch.ts`, `lib/app-alert` | Keep — alerts stay in hooks/options, not api files |
+| Feature api files | Admin `app/lib/admin-*.ts`; web/mobile `lib/*-api.ts` | Keep as pure api layer; add hooks beside them |
+| Good pagination examples | `GET /api/lenses` (`page`/`limit`/`hasMore`); `GET /api/admin/catalog/products`; stock-matrix / suppliers `page`/`pageSize`; loyalty ledger `cursor` | **Reuse contract style** — do not invent a fourth shape without reason |
+| Fat unbounded lists (problem) | `GET /api/orders` — no `take`, heavy `include`, signed image URL per row in a loop | **Must change** in Phase B |
+| In-memory search | `GET /api/users/customers` — load all then `.filter` on `q` | **Must change** |
+| Client filter after full fetch | Website `my-orders-screen`; admin dispatch/procurement filters; mobile order screens | **Must move to server params** once APIs support them |
+| Hard caps without “next page” | Loyalty customers `take: 100`; many finance lists `take: 50–100` | Document + fix in Phase C or explicit “load more” |
+
+**Missing today:** Shared `useApiQuery` / `useApiMutation` implementations; `QUERY_REGISTRY` / `MUTATION_REGISTRY`; list vs detail DTOs for orders; unified `{ items, page, limit, total?, hasMore }` (or documented cursor) on hot endpoints; skills that spell out list/pagination rules.
+
+### Hard rules (do / do not)
+
+**Do**
+
+1. **Phase 0 before feature code:** Update `drishx-client-api` in all three repos so implementers and agents share one contract (see Phase 0 checklist below).
+2. Components/screens talk **only** to hooks (`useGet*` / `use*`). Never call `adminFetch` / `authFetch` / `authFetchJson` / `apiFetch` / raw `fetch` from UI files for new or migrated work.
+3. Api files are **pure** (no React, no toast/`appAlert`). Hooks own `loading` / `refreshing` / `pending` / `error` and `onSuccess` / `onError`.
+4. **401 / auth:** never toast or `appAlert` for auth failures — existing refresh / sign-out paths handle them.
+5. Mutations take **one** argument; wrap `{ id, data }` when needed. Void response → `void`; no payload → `null`.
+6. List endpoints used by tables must support **server** `page` + `limit` (or cursor) + filters (`status`, `q`, …). Default `limit` capped (e.g. 20–50); max hard-capped (e.g. 100).
+7. **List response = summary.** Detail relations (full wholesale lines, all power versions, signed images, full lens rows) belong on detail GET — not on every list row.
+8. Prefer one list envelope across new work: `{ items, page, limit, hasMore }` and `total` when cheap. If cursor is better (ledgers), document it in the skill and stick to it for that domain.
+9. Migrate **opportunistically** for non-hot screens; **must** migrate orders (+ consumers) in Phase B/C.
+10. Keep role scoping on `GET /api/orders` (CUSTOMER own / EMPLOYEE assigned / ADMIN all + existing query filters).
+
+**Do not**
+
+1. Do not add React Query, SWR, Axios, or a second HTTP client “framework.”
+2. Do not “fix” slowness only by adding skeletons while still downloading all orders.
+3. Do not silently truncate with `take: 100` and present the UI as complete — either page or show “load more” / total.
+4. Do not break offline cache on mobile without a plan — cache **pages** or summary lists, not an unbounded forever-growing blob if avoidable.
+5. Do not change order lifecycle, pricing, or attribution (RW-10) as part of this RW.
+6. Do not require finishing RW-08/09 first.
+7. Do not rewrite every admin `adminFetch` page in one PR — Phase A foundation + Phase B orders is the critical path.
+
+### Problems this RW must address (inventory)
+
+These are **logical** issues independent of hook style. Track them through phases.
+
+| # | Problem | Impact | Primary fix phase |
+|---|---------|--------|-------------------|
+| 1 | Unbounded `GET /api/orders` | Admin / web / mobile all slow as orders grow | B |
+| 2 | List payload is detail-shaped (lenses + lines + delivery + suggestions + versions) | Huge JSON + DB cost | B |
+| 3 | Per-row `getSignedOrderImageUrl` in list loop | N+1 latency | B |
+| 4 | Customers: load all + in-memory `q` | Admin clients directory does not scale | C |
+| 5 | Returns / invoices: full `findMany`, no page | Admin tables | C |
+| 6 | Client-side status/search after full download | Web my-orders, admin dispatch subsets | B–C |
+| 7 | Inconsistent pagination params (`page`/`limit` vs `pageSize` vs `cursor` vs none) | Hard to share UI helpers | A skill + B/C APIs |
+| 8 | Same fat list reused for dashboard counts / queues | Extra work for wrong shape | B (summary + filters) |
+| 9 | Mobile offline cache of entire orders array | Storage + stale giant payloads | B mobile follow-through |
+| 10 | Website BFF proxies full fat JSON | Double transfer cost | B (smaller JSON helps both hops) |
+| 11 | Hard caps without next page (loyalty/finance) | Silent missing rows | C / follow-up |
+
+### Target end-to-end pattern
+
+```
+[Skill: drishx-client-api] documents contract
+        ↓
+lib/.../api.ts          → pure transport call (adminFetch / authFetch / apiFetch)
+lib/.../query|mutation  → useApiQuery / useApiMutation
+Screen                  → loading / error / data / mutate only from hook
+        ↓
+List APIs               → ?page=&limit=&status=&q= → { items, page, limit, hasMore[, total] }
+Detail APIs             → GET /:id → full include (unchanged richness)
+```
+
+### Phases (implement in order)
+
+#### Phase 0 — Skills first (all three repos) — **do this before code PRs that invent patterns**
+
+**Goal:** Anyone (human or agent) reading `drishx-client-api` knows exactly how to call APIs **and** how lists/pagination must work. Skills today cover fetch/mutation isolation; they do **not** yet nail list contracts.
+
+**Update in each repo** (`.agents/skills/drishx-client-api/SKILL.md` — keep junctions via `link-skills.ps1`):
+
+1. **Single pattern reminder** — `useApiQuery` for reads, `useApiMutation` for writes; no transport in components; registry; options types; 401 rules; mobile `appAlert` only via options.
+2. **New section: List & pagination contract**
+   - Query hooks for lists accept `params` as first arg: `{ page, limit, status?, q?, … }`.
+   - `deps` for `useApiQuery` must include every param that changes the request.
+   - Response typing: `Paginated<T> = { items: T[]; page: number; limit: number; hasMore: boolean; total?: number }`.
+   - UI: table/list uses `loading` for first page, `refreshing` or `pending` for page changes / load-more; do not keep a second ad-hoc loading flag.
+   - **Forbidden:** fetch all then `.filter` for primary status/search tabs when the API supports (or should support) those params.
+3. **New section: List vs detail**
+   - List hooks/types use summary types (`OrderListItem`, …).
+   - Detail hooks call `GET /:id` (or existing detail routes).
+   - Do not type list rows as full detail models “for convenience.”
+4. **New section: Migration rule**
+   - New screens: must use hooks.
+   - Touched list screens: migrate in the same PR when changing that feature.
+   - Hot paths in this RW (orders, then customers/returns/invoices): mandatory.
+5. **Repo-specific notes stay** — admin `adminFetch`, website BFF, mobile `apiFetch` + offline + `appAlert`.
+6. **AGENTS.md / `.agents/README.md`** — one-line note that `drishx-client-api` covers lists/pagination too (if not already obvious).
+7. **Optional short `reference.md`** inside the skill folder for copy-paste hook templates (only if SKILL.md would become too long — prefer keeping one SKILL.md unless needed).
+
+**Done when:** All three skills agree on the same list envelope + hook rules; a reviewer can reject a PR that violates the skill without debating style.
+
+#### Phase A — Client foundation (all three repos)
+
+**Build**
+
+- Shared types: `QueryOptions`, `MutationOptions`, `Paginated<T>` under each repo’s `types/api-client` (or equivalent path from the skill).
+- `QUERY_REGISTRY` / `MUTATION_REGISTRY` constants.
+- `useApiQuery` + `useApiMutation` implementations matching the skill contract (`loading`, `refreshing`, `refetch`, `pending`, `error`, `enabled`, callbacks; skip UI `onError` for auth failures).
+- One **gold-example** migration per repo (small screen, not necessarily orders): e.g. admin loyalty customers list **or** a thin settings GET; website a small authenticated list; mobile a small authenticated list — proves the kit works end-to-end.
+- Do **not** claim performance fixed until Phase B.
+
+**Done when:** Hooks exist and are used on at least one real screen per repo; skills match the code paths.
+
+#### Phase B — Orders list API + all consumers (critical path)
+
+**Backend (`GET /api/orders`)**
+
+- Add query params: `page` (default 1), `limit` (default ~20–30, max ~100), plus filters needed by UIs: at least `status` (single or CSV), `q` (order number / business / customer name as agreed), keep existing `employeeId` / `userId` / `batchId` where already used.
+- Return paginated **summary** items: fields needed for tables/cards (id, orderNumber, status, dates, customer summary, assignee summary, amounts, lens one-liner / type, flags like warehouseHold / awaiting procurement — **document the exact field list in the PR**).
+- **Exclude** from list default: full `wholesaleLineItems` arrays, full lens row dumps, `powerVersions`, pending suggestion blobs, delivery pack internals, **signed order image URLs** (expose `hasOrderImage` boolean or omit; sign only on detail).
+- Preserve role `where` clauses; apply filters in Prisma `where`, not after fetch.
+- Keep `GET /api/orders/[id]` (or current detail) as the fat payload for detail screens.
+- Backward compatibility: prefer additive response shape `{ items, page, limit, hasMore, total? }`. If any client still expects a bare array, either dual-support briefly behind a query flag (`?view=summary`) **or** migrate all three clients in the same release train — **do not** leave mobile/web broken. Prefer one coordinated cutover for orders.
+
+**Admin panel**
+
+- Orders table(s), dispatch, procurement order subsets: call paginated summary API with server filters; wire loading/error via hooks (`useGetOrders`).
+- Detail pages keep detail GET.
+- Stop loading full `/api/orders` then `.filter` for dispatch/history where a status filter on the API suffices (may use dedicated pending-dispatch endpoint if one already exists — prefer extending filters over duplicate fat fetches).
+
+**Website**
+
+- `fetchOrders` / my-orders / employee orders / any dashboard that currently pulls all orders: switch to paginated summary (+ load more or page controls).
+- Status tabs + search → query params, not only client `filter` on a full array.
+- BFF: if website proxies `/api/orders`, ensure query params pass through unchanged.
+
+**Mobile**
+
+- `fetchOrders` + order list UI: paginated summary; pull-to-refresh = page 1; infinite scroll or “load more” for next pages.
+- Offline cache: cache latest summary page(s) or a bounded recent set; document behavior when offline (stale summary OK; do not require full history offline unless product demands it).
+- Hooks + `appAlert` on non-auth errors per skill.
+
+**Done when:** Creating more orders no longer forces every client to download the entire order history with detail includes; list UIs page; detail still complete.
+
+#### Phase C — Other hot admin lists + consistency
+
+**Build**
+
+- **Customers** (`GET /api/users/customers`): Prisma/`where` search for `q`; `page`/`limit`/`hasMore`; admin Clients UI uses hooks + server search.
+- **Returns** + **Invoices** list routes: same pagination + summary fields for tables; detail routes stay rich (aligns with RW-03 “fuller detail on detail,” not on list).
+- Align param names with Phase B (`page`/`limit`) unless an existing endpoint already standardized on `pageSize` — then document exception in skill.
+- Finance/loyalty hard caps: either add real paging/load-more or show explicit “showing latest N” — no silent incompleteness.
+- Migrate corresponding admin screens to hooks.
+
+**Done when:** Main admin directory/tables that hurt in production are paginated and hooked; skills’ list rules have concrete examples in-repo.
+
+#### Phase D — Polish (optional but recommended)
+
+- Shared tiny UI helpers: `ErrorState` + retry, table pagination controls (admin), load-more button patterns (web/mobile).
+- Dashboard endpoints that only need counts: prefer count/aggregate APIs instead of downloading order lists.
+- Audit that no new PR reintroduced component-level `adminFetch` for lists.
+- Performance smoke: rough before/after payload size on `/api/orders` for a seeded large dataset (note numbers in PR description).
+
+### Skill update checklist (Phase 0 — copy into PR description)
+
+For **each** of admin / website / mobile `drishx-client-api`:
+
+- [ ] Transport section still accurate
+- [ ] Query + mutation gold examples still accurate
+- [ ] **List & pagination** section added (`Paginated`, params, deps, no client-only primary filter)
+- [ ] **List vs detail** section added
+- [ ] Migration / hot-path rules mention orders (+ Phase C entities)
+- [ ] Error/loading contract unchanged (401 silent; non-401 via `error` / `onError`)
+- [ ] `AGENTS.md` still points at skill
+- [ ] `.cursor/skills` junction still linked (`link-skills.ps1`)
+
+### Scope (in)
+
+- Phase 0 skill updates in all three repos
+- Phase A shared hooks + registry + types + one gold example per repo
+- Phase B orders list API summary + pagination + filter; admin + website + mobile consumers
+- Phase C customers / returns / invoices (and hard-cap honesty)
+- Opportunistic migration of touched screens to hooks
+- Docs: this RW + skills as source of truth for agents
+
+### Out of scope
+
+- Adopting TanStack Query / SWR / Axios
+- RW-08 PO / RW-09 catalog product master / RW-10 create-order UX (they consume this pattern; they are not this RW)
+- Rewriting every historical screen in one go
+- Changing order business rules, payments, or auth token TTLs (RW-01)
+- Full reports module (RW-06) — but new report tables should follow this list contract when built
+- Pixel redesign of tables (behavior/performance first; mild UI for page controls OK)
+
+### Key code pointers
+
+| Area | Path |
+|------|------|
+| Admin skill | `Drishx-admin-and-backend/.agents/skills/drishx-client-api/SKILL.md` |
+| Website skill | `drishx-website/.agents/skills/drishx-client-api/SKILL.md` |
+| Mobile skill | `drishx-mobile-app/.agents/skills/drishx-client-api/SKILL.md` |
+| Orders list (problem) | `app/api/orders/route.ts` `GET` |
+| Order detail | `app/api/orders/[id]/…` (keep fat) |
+| Customers list | `app/api/users/customers/route.ts` |
+| Returns list | `app/api/returns/route.ts` |
+| Invoices list | `app/api/invoices/route.ts` |
+| Good pagination refs | `app/api/lenses/route.ts`, `app/api/admin/catalog/products/route.ts` |
+| Admin transport | `app/lib/admin-api.ts` |
+| Website orders client | `drishx-website/lib/orders-api.ts` → `fetchOrders` |
+| Website my-orders UI | `drishx-website/components/orders/my-orders-screen.tsx` |
+| Mobile orders client | `drishx-mobile-app/lib/orders-api.ts` → `fetchOrders` |
+| Admin orders / dispatch UI | `app/(admin)/orders/`, `app/(admin)/orders/dispatch/page.tsx` |
+
+### Open questions (do not block Phase 0 / A)
+
+1. Orders list cutover: additive `{ items, … }` only, or short dual-mode (`?view=summary`) for one release?
+2. Default `limit` for admin tables vs customer apps (30 vs 20)?
+3. Should `total` count always be returned (extra SQL `count`) or only `hasMore`?
+4. Mobile offline: how many recent summary pages to cache?
+5. Dispatch “pending” — extend `GET /api/orders` filters vs keep/expand a dedicated pending endpoint?
+
+### Acceptance
+
+- [ ] Phase 0: all three `drishx-client-api` skills include list/pagination + list-vs-detail rules; AGENTS still reference the skill
+- [ ] Phase A: `useApiQuery` / `useApiMutation` (+ registry/types) exist in all three repos; one gold screen each uses them
+- [ ] Phase B: `GET /api/orders` is paginated summary; no per-row signed image on list; detail still complete
+- [ ] Phase B: admin + website + mobile order list UIs use pagination + hooks; primary filters are server-side
+- [ ] Phase C: customers / returns / invoices lists paginated (or explicitly bounded with UI honesty) + hooked admin UI
+- [ ] No new list screen merged that calls transport directly from a component
+- [ ] 401s still not user-toasted; non-401 errors surface via hook `error` / `onError` (mobile: `appAlert` when appropriate)
+- [ ] Measurable win: smaller `/api/orders` list payload and faster first paint on order tables/lists vs pre-RW baseline (note in PR)
+
+### Suggested first PR
+
+1. **Skills-only PR (Phase 0)** across all three repos — list/pagination sections.  
+2. **Foundation PR (Phase A)** — hooks + registry + one gold example per repo.  
+3. **Orders PR (Phase B)** — backend summary pagination + admin/web/mobile cutover.  
+4. **Follow-ups (Phase C)** — customers, returns, invoices, hard-cap honesty.

@@ -24,6 +24,7 @@ Cursor discovery: **`.cursor/skills/`** junctions into each skill.
 | `drishx-nextjs` | Admin App Router, chrome, skeletons |
 | `drishx-prisma` | This repo’s Prisma 7 + pooler patterns |
 | `drishx-api-auth-audit` | API routes, JWT, audit/security |
+| `drishx-client-api` | Admin UI fetch/mutation hooks, loading & error (no React Query) |
 
 ## Update community skills
 
