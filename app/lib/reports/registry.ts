@@ -47,7 +47,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: "total", label: "Grand total", align: "right" },
     ],
     notes:
-      "Cancelled and void invoices are excluded. Paid vs outstanding is shown separately from sales totals.",
+      "Cancelled and void invoices are excluded from eligible sales totals. Paid and outstanding amounts help distinguish collections from unpaid balances. Settlement figures are displayed separately from sales totals.",
   },
   {
     key: "purchase-summary",
