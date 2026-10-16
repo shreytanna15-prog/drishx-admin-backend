@@ -3,7 +3,8 @@ import { prisma } from "@/app/lib/prisma";
 import { getCompanyFinanceSettings, resolveProductTax } from "./company-settings";
 import { nextInvoiceNumber } from "./invoice-number";
 import { resolvePlaceOfSupply } from "./place-of-supply";
-import { calculateInvoiceTotals, roundMoney } from "./tax-calc";
+import { roundMoney } from "./tax-calc";
+import { computeInvoicePricingFromOrder } from "./invoice-order-pricing";
 import { postCustomerLedgerInvoice } from "./customer-ledger";
 import { postSalesInvoiceJournal } from "./journal";
 import { checkCreditLimitWarning } from "./credit-limit";
@@ -22,12 +23,16 @@ function powerLabel(order: {
   cyl?: unknown;
   axis?: number | null;
   add?: unknown;
+  eye?: string | null;
 }): string | null {
   const parts: string[] = [];
   if (order.sph != null) parts.push(`SPH ${order.sph}`);
   if (order.cyl != null) parts.push(`CYL ${order.cyl}`);
   if (order.axis != null) parts.push(`AXIS ${order.axis}`);
   if (order.add != null) parts.push(`ADD ${order.add}`);
+  if (order.eye != null && String(order.eye).trim()) {
+    parts.push(`Eye ${String(order.eye).trim()}`);
+  }
   return parts.length ? parts.join(" / ") : null;
 }
 
@@ -152,21 +157,18 @@ export async function createInvoiceFromOrder(
     productName: label.productName,
   });
 
-  const qty = Number(order.quantity) || 1;
-  const unitPrice = Number(order.unitPrice) || 0;
+  // Catalog Order.unitPrice is per pair; Order.quantity is pieces.
+  // Use the same pair→piece conversion as checkout (orderTotalFromPairPrice).
+  // Idempotent early-return above ensures this never rewrites issued invoices.
   const loyaltyDiscount = roundMoney(Number(input.loyaltyDiscount) || 0);
-  const totals = calculateInvoiceTotals(
-    [
-      {
-        quantity: qty,
-        unitPrice,
-        discountAmount: loyaltyDiscount,
-        gstRatePercent: tax.gstRatePercent,
-      },
-    ],
-    pos.isInterState
-  );
-
+  const pricing = computeInvoicePricingFromOrder({
+    pairUnitPrice: Number(order.unitPrice) || 0,
+    pieceQuantity: Number(order.quantity) || 1,
+    discountAmount: loyaltyDiscount,
+    gstRatePercent: tax.gstRatePercent,
+    isInterState: pos.isInterState,
+  });
+  const { quantity: qty, unitPrice, totals } = pricing;
   const line = totals.lines[0]!;
   const issuedAt = new Date();
   const dueDays = settings.paymentTermsDays ?? 30;
