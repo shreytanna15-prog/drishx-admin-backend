@@ -10,11 +10,16 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Download, FileSpreadsheet } from "lucide-react";
+import { Download, FileSpreadsheet, Info } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -67,8 +72,33 @@ type Kpi = {
 type Presentation = {
   primaryKpis: Kpi[];
   secondary: { label: string; value: string }[];
-  important: string[];
+  /** Explanatory methodology shown in the compact ⓘ popover. */
+  methodology: string[];
+  /** Operational notices (truncation, incomplete valuation) — muted, not warning chrome. */
+  notices: string[];
 };
+
+/** Verified against `computeSalesSummaryReport` (excludes CANCELLED/VOID; settlement separate). */
+const SALES_SUMMARY_METHODOLOGY = [
+  "Cancelled and void invoices are excluded from eligible sales totals.",
+  "Paid and outstanding amounts help distinguish collections from unpaid balances.",
+  "Settlement figures are displayed separately from sales totals.",
+] as const;
+
+function methodologyLines(
+  reportKey: string,
+  registryNotes?: string
+): string[] {
+  if (reportKey === "sales-summary") {
+    return [...SALES_SUMMARY_METHODOLOGY];
+  }
+  const trimmed = registryNotes?.trim();
+  if (!trimmed) return [];
+  return trimmed
+    .split(/(?<=\.)\s+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
 
 function money(n: number) {
   return `₹${n.toLocaleString("en-IN", {
@@ -162,7 +192,8 @@ function presentReport(
   const summary = data.summary;
   const primaryKpis: Kpi[] = [];
   const secondary: { label: string; value: string }[] = [];
-  const important: string[] = [];
+  const methodology = methodologyLines(reportKey, registryNotes);
+  const notices: string[] = [];
 
   const addSecondary = (label: string, key: string, kind: KpiKind) => {
     const item = kpiFromSummary(summary, key, label, kind);
@@ -364,13 +395,8 @@ function presentReport(
     return true;
   });
 
-  // Important information — plain language only.
-  if (registryNotes?.trim()) {
-    important.push(registryNotes.trim());
-  }
-
   if (data.meta?.truncated === true) {
-    important.push(
+    notices.push(
       "This view shows a limited number of rows. Summary figures still include the full matching set. Narrow the filters if you need every row on screen. Exports are blocked if the full export would still be incomplete."
     );
   }
@@ -380,14 +406,14 @@ function presentReport(
       const missingStocked = asNumber(
         summaryGet(summary, "skusMissingCostOnStocked")
       );
-      important.push(
+      notices.push(
         missingStocked != null && missingStocked > 0
           ? `Cost valuation is incomplete. ${count(missingStocked)} in-stock product(s) have no usable cost price, and some lens families do not store cost price. Missing costs are never counted as ₹0.`
           : "Cost valuation is incomplete for some products or lens families. Missing costs are never counted as ₹0."
       );
     }
     if (summaryGet(summary, "sellingValuationComplete") === "no") {
-      important.push(
+      notices.push(
         "Selling valuation is incomplete because some products have no usable selling price. Missing prices are never counted as ₹0."
       );
     }
@@ -395,9 +421,9 @@ function presentReport(
 
   if (
     (reportKey === "reserved-stock" || reportKey === "available-stock") &&
-    !registryNotes
+    methodology.length === 0
   ) {
-    important.push(
+    methodology.push(
       "Reserved quantity is taken from open orders (held minus already picked)."
     );
   }
@@ -412,7 +438,7 @@ function presentReport(
   ) {
     // Avoid duplicating registry notes that already mention disabled products.
     if (!registryNotes?.toLowerCase().includes("disabled")) {
-      important.push(
+      methodology.push(
         `${count(disabled)} disabled product(s) are excluded from the table and shown only as a count.`
       );
     }
@@ -421,7 +447,8 @@ function presentReport(
   return {
     primaryKpis: primaryKpis.slice(0, 4),
     secondary: secondaryUnique.slice(0, 8),
-    important: important.slice(0, 4),
+    methodology: methodology.slice(0, 6),
+    notices: notices.slice(0, 4),
   };
 }
 
@@ -987,6 +1014,42 @@ function ReportTabs({
   );
 }
 
+function ReportMethodologyHint({ lines }: { lines: string[] }) {
+  if (lines.length === 0) return null;
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        type="button"
+        className={cn(
+          "inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-(--brand-text-muted)",
+          "transition-colors hover:bg-muted hover:text-(--brand-text)",
+          "outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+          "aria-expanded:bg-muted aria-expanded:text-(--brand-text)"
+        )}
+        aria-label="How report totals are calculated"
+      >
+        <Info className="size-3.5" aria-hidden />
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="end"
+        className="w-[min(20rem,calc(100vw-2rem))] p-3"
+        role="note"
+      >
+        <p className="text-xs font-semibold text-(--brand-text)">
+          How report totals are calculated
+        </p>
+        <ul className="mt-2 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-(--brand-text-muted)">
+          {lines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function ReportBody({
   result,
   presentation,
@@ -997,9 +1060,20 @@ function ReportBody({
   const data = result.data;
   const columns = data.kind === "cards" ? (data.columns ?? []) : data.columns;
   const rows = data.kind === "cards" ? (data.rows ?? []) : data.rows;
+  const showSummaryHeader =
+    presentation.methodology.length > 0 || presentation.primaryKpis.length > 0;
 
   return (
     <div className="space-y-3">
+      {showSummaryHeader ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-(--brand-label)">
+            Summary
+          </p>
+          <ReportMethodologyHint lines={presentation.methodology} />
+        </div>
+      ) : null}
+
       {presentation.primaryKpis.length > 0 ? (
         <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
           {presentation.primaryKpis.map((kpi) => (
@@ -1018,25 +1092,12 @@ function ReportBody({
         </div>
       ) : null}
 
-      {presentation.important.length > 0 ? (
-        <details className="group rounded-xl border border-(--brand-card-border) bg-(--brand-card) open:shadow-(--brand-card-shadow)">
-          <summary className="cursor-pointer list-none px-3 py-2.5 text-xs font-semibold text-(--brand-label) marker:content-none [&::-webkit-details-marker]:hidden">
-            <span className="inline-flex items-center gap-2">
-              Important information
-              <span className="text-(--brand-text-muted) group-open:hidden">
-                (show)
-              </span>
-              <span className="hidden text-(--brand-text-muted) group-open:inline">
-                (hide)
-              </span>
-            </span>
-          </summary>
-          <ul className="space-y-1.5 border-t border-(--brand-card-border) px-3 py-2.5 text-xs leading-relaxed text-(--brand-text-muted)">
-            {presentation.important.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </details>
+      {presentation.notices.length > 0 ? (
+        <ul className="space-y-1 text-xs leading-relaxed text-(--brand-text-muted)">
+          {presentation.notices.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
       ) : null}
 
       {presentation.secondary.length > 0 ? (
