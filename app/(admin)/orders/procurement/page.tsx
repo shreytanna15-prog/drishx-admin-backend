@@ -1,18 +1,10 @@
 "use client";
 
-import { useCallback } from "react";
 import Link from "next/link";
 import { AdminPage } from "@/components/admin-shell";
 import { AdminOrdersTable } from "@/components/admin-orders-table";
-import type { AdminOrder } from "@/app/lib/admin-orders";
 
 export default function ProcurementOrdersPage() {
-  const filterOrders = useCallback(
-    (orders: AdminOrder[]) =>
-      orders.filter((order) => order.status === "AWAITING_PROCUREMENT"),
-    []
-  );
-
   return (
     <AdminPage
       title="Procurement"
@@ -23,7 +15,6 @@ export default function ProcurementOrdersPage() {
         description="Awaiting procurement"
         emptyMessage="No orders are waiting for procurement."
         emptySearchMessage="No procurement orders match your search."
-        filterOrders={filterOrders}
         showFilters
         defaultStatus="AWAITING_PROCUREMENT"
       />

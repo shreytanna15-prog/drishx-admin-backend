@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { InvoiceStatus, Prisma } from "@prisma/client";
 import { getSessionOrUnauthorized } from "@/app/lib/session-auth";
 import { prisma } from "@/app/lib/prisma";
 import { getCustomerOutstanding } from "@/app/lib/finance/credit-limit";
 import { agingBucket } from "@/app/lib/reports/aging";
 
+const DEFAULT_LIMIT = 30;
+const MAX_LIMIT = 100;
+
+const OUTSTANDING_INVOICE_STATUSES: InvoiceStatus[] = [
+  "ISSUED",
+  "PARTIALLY_PAID",
+  "OVERDUE",
+];
+
+/**
+ * GET /api/finance/receivables
+ * Admin: summary aggregates + paginated outstanding invoices (RW-11 Phase C).
+ * Customer: own outstanding + invoices + bounded ledger.
+ */
 export async function GET(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);
   if (!auth.session) {
@@ -19,7 +34,7 @@ export async function GET(req: NextRequest) {
     const invoices = await prisma.invoice.findMany({
       where: {
         userId: session.userId,
-        status: { in: ["ISSUED", "PARTIALLY_PAID", "OVERDUE"] },
+        status: { in: OUTSTANDING_INVOICE_STATUSES },
         amountOutstanding: { gt: 0 },
       },
       orderBy: { issuedAt: "asc" },
@@ -39,7 +54,13 @@ export async function GET(req: NextRequest) {
       orderBy: { occurredAt: "desc" },
       take: 50,
     });
-    return NextResponse.json({ outstanding, invoices, ledger });
+    return NextResponse.json({
+      outstanding,
+      invoices,
+      ledger,
+      ledgerBounded: true,
+      ledgerLimit: 50,
+    });
   }
 
   if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
@@ -60,24 +81,55 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ledger, outstanding });
   }
 
-  const invoices = await prisma.invoice.findMany({
-    where: {
-      status: { in: ["ISSUED", "PARTIALLY_PAID", "OVERDUE"] },
-      amountOutstanding: { gt: 0 },
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          businessName: true,
-          creditLimit: true,
+  const outstandingWhere: Prisma.InvoiceWhereInput = {
+    status: { in: OUTSTANDING_INVOICE_STATUSES },
+    amountOutstanding: { gt: 0 },
+  };
+
+  const pageRaw = Number(searchParams.get("page") ?? "1");
+  const limitRaw = Number(searchParams.get("limit") ?? String(DEFAULT_LIMIT));
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const limit = Math.min(
+    MAX_LIMIT,
+    Math.max(
+      1,
+      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : DEFAULT_LIMIT
+    )
+  );
+  const skip = (page - 1) * limit;
+
+  // Light rows for aging/totals (no user include); separate page for table.
+  const [agingRows, totalCount, invoices, pendingClaims] = await Promise.all([
+    prisma.invoice.findMany({
+      where: outstandingWhere,
+      select: {
+        amountOutstanding: true,
+        issuedAt: true,
+        dueDate: true,
+      },
+    }),
+    prisma.invoice.count({ where: outstandingWhere }),
+    prisma.invoice.findMany({
+      where: outstandingWhere,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            businessName: true,
+            creditLimit: true,
+          },
         },
       },
-    },
-    orderBy: { issuedAt: "asc" },
-  });
+      orderBy: { issuedAt: "asc" },
+      skip,
+      take: limit,
+    }),
+    prisma.paymentClaim.count({
+      where: { status: "PENDING" },
+    }),
+  ]);
 
   const now = new Date();
   const aging = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
@@ -85,10 +137,10 @@ export async function GET(req: NextRequest) {
   let overdue = 0;
   let dueToday = 0;
 
-  for (const inv of invoices) {
+  for (const inv of agingRows) {
     const amt = Number(inv.amountOutstanding);
     total += amt;
-    const bucket = agingBucket(inv.issuedAt, now) as keyof typeof aging;
+    const bucket = agingBucket(inv.issuedAt ?? now, now) as keyof typeof aging;
     aging[bucket] += amt;
     if (inv.dueDate && inv.dueDate < now) overdue += amt;
     if (
@@ -99,10 +151,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const pendingClaims = await prisma.paymentClaim.count({
-    where: { status: "PENDING" },
-  });
-
   return NextResponse.json({
     totalReceivable: total,
     dueToday,
@@ -110,5 +158,10 @@ export async function GET(req: NextRequest) {
     aging,
     pendingClaims,
     invoices,
+    items: invoices,
+    page,
+    limit,
+    hasMore: skip + invoices.length < totalCount,
+    total: totalCount,
   });
 }

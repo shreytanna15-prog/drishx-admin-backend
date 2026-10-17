@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -14,10 +14,15 @@ import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import {
   formatCustomerPickerLabel,
   isEligibleCreateOrderCustomer,
-  matchesCustomerSearch,
   type CreateOrderCustomerCandidate,
 } from "@/app/lib/admin-create-order-eligibility";
 import { formatMoney } from "@/app/lib/admin-orders";
+import { useGetCustomers } from "@/app/lib/modules/customers/query/use-get-customers";
+import {
+  QueryEmptyState,
+  QueryErrorState,
+  QueryLoadMoreButton,
+} from "@/components/query-list-states";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -117,9 +122,9 @@ export function AdminCreateOrderPanel() {
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
   const [customerQuery, setCustomerQuery] = useState("");
+  const [debouncedCustomerQ, setDebouncedCustomerQ] = useState("");
+  const [customerPage, setCustomerPage] = useState(1);
   const [customers, setCustomers] = useState<CreateOrderCustomerCandidate[]>([]);
-  const [customersLoading, setCustomersLoading] = useState(true);
-  const [customersError, setCustomersError] = useState<string | null>(null);
   const [selectedCustomer, setSelectedCustomer] =
     useState<CreateOrderCustomerCandidate | null>(null);
   const [channel, setChannel] = useState<OrderChannel | null>(null);
@@ -145,33 +150,49 @@ export function AdminCreateOrderPanel() {
   const [, startTransition] = useTransition();
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setCustomersLoading(true);
-      setCustomersError(null);
-      try {
-        const data = await adminFetch<{
-          customers: CreateOrderCustomerCandidate[];
-        }>("/api/users/customers?status=approved&activeOnly=1");
-        if (cancelled) return;
-        setCustomers(
-          (data.customers ?? []).filter(isEligibleCreateOrderCustomer)
-        );
-      } catch (err) {
-        if (cancelled) return;
-        setCustomersError(
-          err instanceof AdminApiError
-            ? err.message
-            : "Failed to load customers."
-        );
-      } finally {
-        if (!cancelled) setCustomersLoading(false);
+    const t = window.setTimeout(
+      () => setDebouncedCustomerQ(customerQuery.trim()),
+      300
+    );
+    return () => window.clearTimeout(t);
+  }, [customerQuery]);
+
+  useEffect(() => {
+    setCustomerPage(1);
+  }, [debouncedCustomerQ]);
+
+  const {
+    data: customersPage,
+    loading: customersLoading,
+    refreshing: customersRefreshing,
+    error: customersQueryError,
+    refetch: refetchCustomers,
+  } = useGetCustomers({
+    status: "approved",
+    activeOnly: true,
+    page: customerPage,
+    limit: 30,
+    q: debouncedCustomerQ || undefined,
+  });
+
+  useEffect(() => {
+    if (!customersPage) return;
+    const mapped = customersPage.items
+      .filter(isEligibleCreateOrderCustomer)
+      .map((c) => c as CreateOrderCustomerCandidate);
+    setCustomers((prev) => {
+      if (customersPage.page <= 1) return mapped;
+      const seen = new Set(prev.map((c) => c.id));
+      const merged = [...prev];
+      for (const row of mapped) {
+        if (!seen.has(row.id)) merged.push(row);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      return merged;
+    });
+  }, [customersPage]);
+
+  const customersError = customersQueryError?.message ?? null;
+  const customersHasMore = Boolean(customersPage?.hasMore);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,11 +212,6 @@ export function AdminCreateOrderPanel() {
       cancelled = true;
     };
   }, []);
-
-  const filteredCustomers = useMemo(
-    () => customers.filter((c) => matchesCustomerSearch(c, customerQuery)),
-    [customers, customerQuery]
-  );
 
   useEffect(() => {
     if (step !== 3 || channel !== "CATALOG") return;
@@ -428,47 +444,56 @@ export function AdminCreateOrderPanel() {
                 className="h-11 rounded-xl pl-10"
               />
             </div>
-            {customersLoading ? (
+            {customersLoading && customerPage === 1 && customers.length === 0 ? (
               <p className="flex items-center gap-2 text-sm text-(--brand-text-muted)">
                 <Loader2 className="size-4 animate-spin" /> Loading customers…
               </p>
             ) : customersError ? (
-              <p className="text-sm text-(--brand-danger, #b91c1c)">
-                {customersError}
-              </p>
-            ) : filteredCustomers.length === 0 ? (
-              <p className="text-sm text-(--brand-text-muted)">
-                No matching eligible customers.
-              </p>
+              <QueryErrorState
+                message={customersError}
+                onRetry={() => {
+                  setCustomerPage(1);
+                  void refetchCustomers();
+                }}
+              />
+            ) : customers.length === 0 ? (
+              <QueryEmptyState message="No matching eligible customers." />
             ) : (
-              <ul className="max-h-80 space-y-2 overflow-y-auto">
-                {filteredCustomers.map((c) => {
-                  const selected = selectedCustomer?.id === c.id;
-                  return (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCustomer(c)}
-                        className={cn(
-                          "w-full rounded-xl border px-4 py-3 text-left transition",
-                          selected
-                            ? "border-(--brand-primary) bg-(--brand-primary)/10"
-                            : "border-(--brand-card-border) hover:bg-(--brand-primary)/5"
-                        )}
-                      >
-                        <div className="font-semibold text-(--brand-text)">
-                          {formatCustomerPickerLabel(c)}
-                        </div>
-                        <div className="mt-0.5 text-xs text-(--brand-text-muted)">
-                          {[c.name, c.email, c.mobileNumber]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="space-y-2">
+                <ul className="max-h-80 space-y-2 overflow-y-auto">
+                  {customers.map((c) => {
+                    const selected = selectedCustomer?.id === c.id;
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCustomer(c)}
+                          className={cn(
+                            "w-full rounded-xl border px-4 py-3 text-left transition",
+                            selected
+                              ? "border-(--brand-primary) bg-(--brand-primary)/10"
+                              : "border-(--brand-card-border) hover:bg-(--brand-primary)/5"
+                          )}
+                        >
+                          <div className="font-semibold text-(--brand-text)">
+                            {formatCustomerPickerLabel(c)}
+                          </div>
+                          <div className="mt-0.5 text-xs text-(--brand-text-muted)">
+                            {[c.name, c.email, c.mobileNumber]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <QueryLoadMoreButton
+                  hasMore={customersHasMore}
+                  loading={customersLoading || customersRefreshing}
+                  onLoadMore={() => setCustomerPage((p) => p + 1)}
+                />
+              </div>
             )}
           </div>
         ) : null}

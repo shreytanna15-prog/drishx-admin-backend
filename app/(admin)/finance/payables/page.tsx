@@ -7,6 +7,7 @@ import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 
 type Payables = {
   totalPayable: number;
+  hasMore?: boolean;
   bills: Array<{
     id: string;
     billNumber: string;
@@ -21,7 +22,9 @@ export default function PayablesPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void adminFetch<Payables>("/api/finance/purchases?resource=payables")
+    void adminFetch<Payables>(
+      "/api/finance/purchases?resource=payables&page=1&limit=100"
+    )
       .then(setData)
       .catch((err) =>
         setError(err instanceof AdminApiError ? err.message : "Failed to load.")
@@ -29,8 +32,12 @@ export default function PayablesPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const payablesSubtitle = data?.hasMore
+    ? "Supplier outstanding (showing up to 100 bills by oldest bill date; more exist)"
+    : "Supplier outstanding (bill table: up to 100, oldest bill date first)";
+
   return (
-    <AdminPage title="Payables" subtitle="Supplier outstanding">
+    <AdminPage title="Payables" subtitle={payablesSubtitle}>
       {error ? <p className="mb-4 text-sm text-red-400">{error}</p> : null}
       {loading || !data ? (
         <TableSkeleton compact columns={3} rows={5} />

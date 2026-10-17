@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import { ListSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-import { readListCache, writeListCache } from "@/app/lib/admin-cache";
+import { adminFetch } from "@/app/lib/admin-api";
+import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
 import {
   type AdminOrder,
   type OrderGroupSort,
@@ -20,7 +20,6 @@ import {
   ORDER_STATUS_FILTERS,
   applyOrdersListFiltersToSearchParams,
   buildOrdersListHref,
-  filterNonRxOrders,
   formatCatalogSummary,
   formatDate,
   formatMoney,
@@ -28,15 +27,17 @@ import {
   formatStatus,
   groupOrdersByCustomer,
   groupOrdersByDate,
-  matchesOrderFilters,
-  matchesOrderSearch,
   parseOrdersListFilters,
   sortOrderGroups,
   sortOrdersInGroup,
   statusBadgeClass,
 } from "@/app/lib/admin-orders";
 import type { AdminEmployee } from "@/app/lib/admin-employees";
-import { useProgressiveList } from "@/hooks/use-progressive-list";
+import { useGetOrders } from "@/app/lib/modules/orders/query/use-get-orders";
+import {
+  useInfiniteScrollSentinel,
+  useProgressiveList,
+} from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
 
 const selectClass =
@@ -64,13 +65,8 @@ export function AdminOrdersGroupedOverview() {
   const searchParams = useSearchParams();
   const initialFilters = parseOrdersListFilters(searchParams);
 
-  const [orders, setOrders] = useState<AdminOrder[]>(() => {
-    const cached = readListCache<AdminOrder[]>("orders");
-    return cached ? filterNonRxOrders(cached) : [];
-  });
-  const [loading, setLoading] = useState(orders.length === 0);
-  const [error, setError] = useState("");
   const [query, setQuery] = useState(initialFilters.q);
+  const [debouncedQ, setDebouncedQ] = useState(initialFilters.q);
   const [status, setStatus] = useState(initialFilters.status);
   const [lineType, setLineType] = useState(initialFilters.lineType);
   const [orderKind, setOrderKind] = useState(initialFilters.orderKind);
@@ -89,52 +85,60 @@ export function AdminOrdersGroupedOverview() {
   );
 
   useEffect(() => {
-    let cancelled = false;
+    const t = window.setTimeout(() => setDebouncedQ(query.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [query]);
 
-    async function loadOrders() {
-      const cached = readListCache<AdminOrder[]>("orders");
-      if (cached) {
-        setOrders(filterNonRxOrders(cached));
-        setLoading(false);
-      } else {
-        setLoading(true);
-      }
-      setError("");
-      try {
-        const data = await adminFetch<AdminOrder[]>("/api/orders");
-        if (!cancelled) {
-          const list = Array.isArray(data) ? data : [];
-          writeListCache("orders", list);
-          setOrders(filterNonRxOrders(list));
-        }
-      } catch (err) {
-        if (!cancelled && !cached) {
-          setError(
-            err instanceof AdminApiError
-              ? err.message
-              : "Failed to load orders."
-          );
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
+  const listResetKey = [
+    debouncedQ,
+    status,
+    lineType,
+    orderKind,
+    assigneeId,
+    dateFrom,
+    dateTo,
+  ].join("|");
+  const { page, setPage, items: orders, onPageSuccess } =
+    usePaginatedListState<AdminOrder>(listResetKey);
 
-    void loadOrders();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const {
+    data,
+    loading,
+    refreshing,
+    error,
+    refetch,
+  } = useGetOrders(
+    {
+      page,
+      limit: 40,
+      q: debouncedQ || undefined,
+      status: status || undefined,
+      lineType: lineType || undefined,
+      orderKind: orderKind || undefined,
+      assigneeId: assigneeId || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      scope: "catalog",
+    },
+    { onSuccess: onPageSuccess }
+  );
+
+  const serverHasMore = Boolean(data?.hasMore);
+  const { setSentinelNode: setPageSentinel } = useInfiniteScrollSentinel({
+    enabled: serverHasMore && !loading && !refreshing,
+    onLoadMore: () => setPage((p) => p + 1),
+    deps: [orders.length, page, serverHasMore],
+  });
 
   useEffect(() => {
     let cancelled = false;
     async function loadEmployees() {
       try {
-        const data = await adminFetch<{ employees: AdminEmployee[] }>(
+        const empData = await adminFetch<{ employees: AdminEmployee[] }>(
           "/api/users/employees"
         );
         if (!cancelled) {
-          setEmployees(Array.isArray(data.employees) ? data.employees : []);
+          setEmployees(Array.isArray(empData.employees) ? empData.employees : []);
         }
       } catch {
         if (!cancelled) setEmployees([]);
@@ -200,19 +204,7 @@ export function AdminOrdersGroupedOverview() {
     [query, status, lineType, orderKind, assigneeId, dateFrom, dateTo]
   );
 
-  const filtered = useMemo(() => {
-    return orders.filter((order) => {
-      if (!matchesOrderSearch(order, query)) return false;
-      return matchesOrderFilters(order, {
-        status: status || undefined,
-        lineType: lineType || undefined,
-        orderKind: orderKind || undefined,
-        assigneeId: assigneeId || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-      });
-    });
-  }, [orders, query, status, lineType, orderKind, assigneeId, dateFrom, dateTo]);
+  const filtered = orders;
 
   const groups = useMemo(() => {
     const raw =
@@ -387,11 +379,14 @@ export function AdminOrdersGroupedOverview() {
 
       {error ? (
         <div className="auth-alert-error mb-4" role="alert">
-          {error}
+          {error.message}{" "}
+          <button type="button" className="underline" onClick={() => void refetch()}>
+            Retry
+          </button>
         </div>
       ) : null}
 
-      {loading ? (
+      {loading && page === 1 && orders.length === 0 ? (
         <ListSkeleton rows={6} />
       ) : groups.length === 0 ? (
         <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-12 text-center text-sm text-(--brand-text-muted)">
@@ -534,6 +529,13 @@ export function AdminOrdersGroupedOverview() {
               ) : null}
             </section>
           ))}
+          {serverHasMore ? (
+            <InfiniteScrollSentinel
+              active
+              loadingMore={(loading || refreshing) && page > 1}
+              setSentinelNode={setPageSentinel}
+            />
+          ) : null}
         </div>
       )}
     </>

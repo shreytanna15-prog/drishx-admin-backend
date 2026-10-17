@@ -45,6 +45,7 @@ export default function ExpensesPage() {
   const [pendingRequests, setPendingRequests] = useState<ExpenseRequestRow[]>(
     []
   );
+  const [pendingHasMore, setPendingHasMore] = useState(false);
   const [loading, setLoading] = useState(expenses.length === 0);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -64,15 +65,26 @@ export default function ExpensesPage() {
       try {
         const [data, pending] = await Promise.all([
           adminFetch<ProcurementExpense[]>("/api/expenses/procurement"),
-          adminFetch<ExpenseRequestRow[]>(
-            "/api/finance/expenses?status=PENDING"
+          adminFetch<
+            | { items?: ExpenseRequestRow[]; hasMore?: boolean }
+            | ExpenseRequestRow[]
+          >(
+            "/api/finance/expenses?status=PENDING&page=1&limit=100"
           ).catch(() => [] as ExpenseRequestRow[]),
         ]);
         if (!cancelled) {
           const list = Array.isArray(data) ? data : [];
           writeListCache("expenses", list);
           setExpenses(list);
-          setPendingRequests(Array.isArray(pending) ? pending : []);
+          const pendingItems = Array.isArray(pending)
+            ? pending
+            : Array.isArray((pending as { items?: ExpenseRequestRow[] }).items)
+              ? (pending as { items: ExpenseRequestRow[] }).items
+              : [];
+          setPendingRequests(pendingItems);
+          setPendingHasMore(
+            !Array.isArray(pending) && Boolean(pending.hasMore)
+          );
         }
       } catch (err) {
         if (!cancelled && !cached) {
@@ -121,7 +133,7 @@ export default function ExpensesPage() {
   return (
     <AdminPage
       title="Expenses"
-      subtitle="Employee procurement & stock intake"
+      subtitle="Employee procurement & stock intake (pending approvals: up to 100 newest)"
     >
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -152,6 +164,10 @@ export default function ExpensesPage() {
         <div className="mb-5 space-y-2 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4">
           <p className="text-sm font-semibold text-(--brand-text)">
             Pending expense approvals
+          </p>
+          <p className="text-xs text-(--brand-text-muted)">
+            Showing up to 100 pending requests (newest first)
+            {pendingHasMore ? "; more exist beyond this page." : "."}
           </p>
           {pendingRequests.map((r) => (
             <div

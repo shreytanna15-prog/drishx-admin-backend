@@ -72,6 +72,25 @@ function lineLabel(order: AdminOrder) {
   return `${formatOrderDisplayId(order)} · ${formatCatalogSummary(order)}`;
 }
 
+/** Fetch every line in a checkout batch (no silent truncation). */
+async function listAllOrdersForBatch(batchId: string): Promise<AdminOrder[]> {
+  const { listAdminOrders } = await import("@/app/lib/admin-orders");
+  const all: AdminOrder[] = [];
+  let page = 1;
+  let hasMore = true;
+  while (hasMore && page <= 50) {
+    const result = await listAdminOrders({
+      batchId,
+      page,
+      limit: 100,
+    });
+    all.push(...result.items);
+    hasMore = result.hasMore;
+    page += 1;
+  }
+  return all;
+}
+
 type AdminCreateReturnPanelProps = {
   /** When set, form is scoped to this order (and batch siblings if any). */
   seedOrder?: AdminOrder | null;
@@ -99,7 +118,10 @@ export function AdminCreateReturnPanel({
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<AdminOrder[]>([]);
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchHasMore, setSearchHasMore] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [loadingMoreSearch, setLoadingMoreSearch] = useState(false);
   const [loadingLines, setLoadingLines] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -122,11 +144,9 @@ export function AdminCreateReturnPanel({
         let lines: AdminOrder[] = [seed];
         const batchId = seed.checkoutBatchId?.trim();
         if (batchId) {
-          const batch = await adminFetch<AdminOrder[]>(
-            `/api/orders?batchId=${encodeURIComponent(batchId)}`
-          );
-          if (Array.isArray(batch) && batch.length > 0) {
-            lines = batch;
+          const batchLines = await listAllOrdersForBatch(batchId);
+          if (batchLines.length > 0) {
+            lines = batchLines;
           }
         }
         if (cancelled) return;
@@ -163,43 +183,39 @@ export function AdminCreateReturnPanel({
     };
   }, [seedOrder?.id]);
 
-  async function runSearch() {
-    const q = searchQuery.trim().toLowerCase();
+  async function runSearch(page = 1, append = false) {
+    const q = searchQuery.trim();
     if (q.length < 2) {
       setError("Enter at least 2 characters to search orders.");
       return;
     }
-    setSearching(true);
+    if (append) setLoadingMoreSearch(true);
+    else setSearching(true);
     setError("");
     setMessage("");
     try {
-      const all = await adminFetch<AdminOrder[]>("/api/orders");
-      const list = Array.isArray(all) ? all : [];
-      const matches = list
-        .filter((order) => {
-          const hay = [
-            order.id,
-            order.orderNumber != null ? String(order.orderNumber) : "",
-            order.user?.name ?? "",
-            order.user?.email ?? "",
-            order.user?.businessName ?? "",
-            order.lensType,
-            formatCatalogSummary(order),
-          ]
-            .join(" ")
-            .toLowerCase();
-          return hay.includes(q);
-        })
-        .slice(0, 25);
-      setSearchResults(matches);
-      if (matches.length === 0) {
+      const { listAdminOrders } = await import("@/app/lib/admin-orders");
+      const result = await listAdminOrders({ q, limit: 25, page });
+      setSearchPage(result.page);
+      setSearchHasMore(result.hasMore);
+      setSearchResults((prev) => {
+        if (!append || result.page <= 1) return result.items;
+        const seen = new Set(prev.map((o) => o.id));
+        const merged = [...prev];
+        for (const row of result.items) {
+          if (!seen.has(row.id)) merged.push(row);
+        }
+        return merged;
+      });
+      if (result.items.length === 0 && !append) {
         setMessage("No matching orders found.");
       }
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Search failed.");
-      setSearchResults([]);
+      if (!append) setSearchResults([]);
     } finally {
       setSearching(false);
+      setLoadingMoreSearch(false);
     }
   }
 
@@ -211,10 +227,8 @@ export function AdminCreateReturnPanel({
       let lines: AdminOrder[] = [order];
       const batchId = order.checkoutBatchId?.trim();
       if (batchId) {
-        const batch = await adminFetch<AdminOrder[]>(
-          `/api/orders?batchId=${encodeURIComponent(batchId)}`
-        );
-        if (Array.isArray(batch) && batch.length > 0) lines = batch;
+        const batchLines = await listAllOrdersForBatch(batchId);
+        if (batchLines.length > 0) lines = batchLines;
       }
       setLineOrders(lines);
       setItemState(
@@ -429,27 +443,41 @@ export function AdminCreateReturnPanel({
             </div>
           </label>
           {searchResults.length > 0 ? (
-            <ul className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-(--brand-card-border) p-2">
-              {searchResults.map((order) => (
-                <li key={order.id}>
-                  <button
-                    type="button"
-                    onClick={() => void selectOrderFromSearch(order)}
-                    className="w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-(--brand-primary)/10"
-                  >
-                    <span className="font-semibold text-(--brand-text)">
-                      {formatOrderDisplayId(order)}
-                    </span>
-                    <span className="mt-0.5 block text-xs text-(--brand-text-muted)">
-                      {order.user?.businessName ||
-                        order.user?.name ||
-                        order.user?.email}{" "}
-                      · {formatCatalogSummary(order)} · {formatStatus(order.status)}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="space-y-2">
+              <ul className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-(--brand-card-border) p-2">
+                {searchResults.map((order) => (
+                  <li key={order.id}>
+                    <button
+                      type="button"
+                      onClick={() => void selectOrderFromSearch(order)}
+                      className="w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-(--brand-primary)/10"
+                    >
+                      <span className="font-semibold text-(--brand-text)">
+                        {formatOrderDisplayId(order)}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-(--brand-text-muted)">
+                        {order.user?.businessName ||
+                          order.user?.name ||
+                          order.user?.email}{" "}
+                        · {formatCatalogSummary(order)} ·{" "}
+                        {formatStatus(order.status)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {searchHasMore ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingMoreSearch}
+                  onClick={() => void runSearch(searchPage + 1, true)}
+                >
+                  {loadingMoreSearch ? "Loading…" : "Load more results"}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}

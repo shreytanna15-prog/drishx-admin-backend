@@ -30,25 +30,61 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(suppliers);
   }
 
+  const pageRaw = Number(searchParams.get("page") ?? "1");
+  const limitRaw = Number(searchParams.get("limit") ?? "30");
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const limit = Math.min(
+    100,
+    Math.max(1, Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 30)
+  );
+  const skip = (page - 1) * limit;
+
   if (resource === "payables") {
-    const bills = await prisma.purchaseBill.findMany({
-      where: {
-        status: { in: ["POSTED", "PARTIALLY_PAID"] },
-        amountOutstanding: { gt: 0 },
-      },
-      include: { supplier: true },
-      orderBy: { billDate: "asc" },
+    const payableWhere = {
+      status: { in: ["POSTED", "PARTIALLY_PAID"] as PurchaseBillStatus[] },
+      amountOutstanding: { gt: 0 },
+    };
+    const [agg, totalCount, bills] = await Promise.all([
+      prisma.purchaseBill.aggregate({
+        where: payableWhere,
+        _sum: { amountOutstanding: true },
+      }),
+      prisma.purchaseBill.count({ where: payableWhere }),
+      prisma.purchaseBill.findMany({
+        where: payableWhere,
+        include: { supplier: true },
+        orderBy: { billDate: "asc" },
+        skip,
+        take: limit,
+      }),
+    ]);
+    return NextResponse.json({
+      totalPayable: Number(agg._sum.amountOutstanding ?? 0),
+      bills,
+      items: bills,
+      page,
+      limit,
+      hasMore: skip + bills.length < totalCount,
+      total: totalCount,
     });
-    const total = bills.reduce((s, b) => s + Number(b.amountOutstanding), 0);
-    return NextResponse.json({ totalPayable: total, bills });
   }
 
-  const bills = await prisma.purchaseBill.findMany({
-    include: { supplier: true, lines: true },
-    orderBy: { billDate: "desc" },
-    take: 100,
+  const [total, bills] = await Promise.all([
+    prisma.purchaseBill.count(),
+    prisma.purchaseBill.findMany({
+      include: { supplier: true },
+      orderBy: { billDate: "desc" },
+      skip,
+      take: limit,
+    }),
+  ]);
+  return NextResponse.json({
+    items: bills,
+    page,
+    limit,
+    hasMore: skip + bills.length < total,
+    total,
   });
-  return NextResponse.json(bills);
 }
 
 export async function POST(req: NextRequest) {

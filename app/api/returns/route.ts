@@ -15,6 +15,12 @@ import {
   serializeReturnItemPowers,
   serializeReturnOrderContext,
 } from "../../lib/returns";
+import {
+  buildReturnsListWhere,
+  parseReturnsListParams,
+  returnsListInclude,
+  serializeReturnListItem,
+} from "../../lib/returns-list";
 import { notifyAdminsOfReturnSubmitted, notifyCustomerOfReturnSubmittedOnBehalf } from "../../lib/staff-notifications";
 import { requireStaffPermission } from "../../lib/staff-access";
 import { getSignedOrderImageUrl } from "../../lib/supabase-storage";
@@ -64,6 +70,8 @@ async function serializeReturnRequest(
   };
 }
 
+// GET /api/returns — paginated summary (RW-11 Phase C)
+// Fat detail + signed images remain on GET /api/returns/:id
 export async function GET(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);
   if (!auth.session) {
@@ -77,35 +85,37 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const status = searchParams.get("status");
-    const orderId = searchParams.get("orderId");
-    const where =
+    const params = parseReturnsListParams(searchParams);
+    const roleScope =
       session.role === "CUSTOMER"
         ? { customerId: session.userId }
         : session.role === "EMPLOYEE"
           ? { assignedEmployeeId: session.userId }
           : {};
+    const where = buildReturnsListWhere(roleScope, params);
+    const skip = (params.page - 1) * params.limit;
 
-    const requests = await prisma.returnRequest.findMany({
-      where: {
-        ...where,
-        ...(status &&
-        (Object.values(ReturnRequestStatus) as string[]).includes(status)
-          ? { status: status as (typeof ReturnRequestStatus)[keyof typeof ReturnRequestStatus] }
-          : {}),
-        ...(orderId ? { items: { some: { originalOrderId: orderId } } } : {}),
-      },
-      select: { id: true },
-      orderBy: { createdAt: "desc" },
+    const [total, rows] = await Promise.all([
+      prisma.returnRequest.count({ where }),
+      prisma.returnRequest.findMany({
+        where,
+        include: returnsListInclude,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: params.limit,
+      }),
+    ]);
+
+    const items = rows.map(serializeReturnListItem);
+    const hasMore = skip + items.length < total;
+
+    return NextResponse.json({
+      items,
+      page: params.page,
+      limit: params.limit,
+      hasMore,
+      total,
     });
-
-    const serialized = await Promise.all(
-      requests.map(async (request) =>
-        serializeReturnRequest(await getReturnRequestWithRelations(request.id))
-      )
-    );
-
-    return NextResponse.json(serialized.filter(Boolean));
   } catch (error) {
     console.error("GET /api/returns error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

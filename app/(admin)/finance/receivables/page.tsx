@@ -38,7 +38,9 @@ export default function ReceivablesPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void adminFetch<ReceivablesData>("/api/finance/receivables")
+    void adminFetch<ReceivablesData & { hasMore?: boolean; total?: number }>(
+      "/api/finance/receivables?page=1&limit=100"
+    )
       .then((d) => {
         if (!cancelled) setData(d);
       })
@@ -56,7 +58,10 @@ export default function ReceivablesPage() {
   }, []);
 
   return (
-    <AdminPage title="Receivables" subtitle="Customer outstanding and aging">
+    <AdminPage
+      title="Receivables"
+      subtitle="Customer outstanding and aging (invoice table: latest 100 by due)"
+    >
       {error ? <p className="mb-4 text-sm text-red-400">{error}</p> : null}
       {loading || !data ? (
         <TableSkeleton compact columns={4} rows={6} />

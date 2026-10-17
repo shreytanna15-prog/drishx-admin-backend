@@ -3,23 +3,11 @@
 import { useEffect, useState } from "react";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import type { LoyaltySettings } from "@/app/lib/admin-loyalty";
+import { useGetLoyaltySettings } from "@/app/lib/modules/loyalty/query/use-get-loyalty-settings";
+import { useUpdateLoyaltySettings } from "@/app/lib/modules/loyalty/mutation/use-update-loyalty-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
-type Settings = {
-  enabled: boolean;
-  pointValue: number | string;
-  baseRatePct: number | string;
-  advanceBonusPct: number | string;
-  fullPaymentRatePct: number | string;
-  minMarginPct: number | string;
-  maxRedemptionPct: number | string;
-  expiryDays: number;
-  minInvoiceValue: number | string;
-  maxPointsPerInvoice: number | string;
-  freightEligible: boolean;
-};
 
 const inputClass =
   "h-10 border-(--brand-input-border) bg-(--brand-input-bg)";
@@ -49,67 +37,52 @@ function Field({
 }
 
 export default function LoyaltySettingsPage() {
-  const [form, setForm] = useState<Settings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<LoyaltySettings | null>(null);
   const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError("");
-      try {
-        const data = await adminFetch<Settings>("/api/loyalty/settings");
-        if (!cancelled) setForm(data);
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof AdminApiError ? err.message : "Failed to load settings."
-          );
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const {
+    data,
+    loading,
+    error: loadError,
+    refetch,
+  } = useGetLoyaltySettings();
 
-  async function save() {
-    if (!form) return;
-    setSaving(true);
-    setError("");
-    setMessage("");
-    try {
-      const updated = await adminFetch<Settings>("/api/loyalty/settings", {
-        method: "PUT",
-        body: JSON.stringify({
-          ...form,
-          pointValue: Number(form.pointValue),
-          baseRatePct: Number(form.baseRatePct),
-          advanceBonusPct: Number(form.advanceBonusPct),
-          fullPaymentRatePct: Number(form.fullPaymentRatePct),
-          minMarginPct: Number(form.minMarginPct),
-          maxRedemptionPct: Number(form.maxRedemptionPct),
-          expiryDays: Number(form.expiryDays),
-          minInvoiceValue: Number(form.minInvoiceValue),
-          maxPointsPerInvoice: Number(form.maxPointsPerInvoice),
-        }),
-      });
+  const {
+    mutate: saveSettings,
+    pending: saving,
+    error: saveError,
+  } = useUpdateLoyaltySettings({
+    onSuccess: (updated) => {
       setForm(updated);
       setMessage("Loyalty settings saved.");
-    } catch (err) {
-      setError(err instanceof AdminApiError ? err.message : "Failed to save settings.");
-    } finally {
-      setSaving(false);
-    }
+    },
+  });
+
+  useEffect(() => {
+    if (data) setForm(data);
+  }, [data]);
+
+  const error = saveError?.message || loadError?.message || "";
+
+  function save() {
+    if (!form) return;
+    setMessage("");
+    void saveSettings({
+      enabled: form.enabled,
+      pointValue: Number(form.pointValue),
+      baseRatePct: Number(form.baseRatePct),
+      advanceBonusPct: Number(form.advanceBonusPct),
+      fullPaymentRatePct: Number(form.fullPaymentRatePct),
+      minMarginPct: Number(form.minMarginPct),
+      maxRedemptionPct: Number(form.maxRedemptionPct),
+      expiryDays: Number(form.expiryDays),
+      minInvoiceValue: Number(form.minInvoiceValue),
+      maxPointsPerInvoice: Number(form.maxPointsPerInvoice),
+      freightEligible: form.freightEligible,
+    });
   }
 
-  function set<K extends keyof Settings>(key: K, value: Settings[K]) {
+  function set<K extends keyof LoyaltySettings>(key: K, value: LoyaltySettings[K]) {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
@@ -131,6 +104,15 @@ export default function LoyaltySettingsPage() {
         {error ? (
           <div className="auth-alert-error" role="alert">
             {error}
+            {loadError ? (
+              <button
+                type="button"
+                className="ml-2 underline"
+                onClick={() => void refetch()}
+              >
+                Retry
+              </button>
+            ) : null}
           </div>
         ) : null}
         {message ? (
@@ -139,9 +121,9 @@ export default function LoyaltySettingsPage() {
           </div>
         ) : null}
 
-        {loading || !form ? (
+        {loading && !form ? (
           <DetailSkeleton cards={3} />
-        ) : (
+        ) : !form ? null : (
           <>
             <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5 shadow-(--brand-card-shadow)">
               <h2 className="mb-4 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
@@ -242,7 +224,7 @@ export default function LoyaltySettingsPage() {
               </div>
             </section>
 
-            <Button onClick={() => void save()} disabled={saving} className="w-full sm:w-auto">
+            <Button onClick={() => save()} disabled={saving} className="w-full sm:w-auto">
               {saving ? "Saving…" : "Save settings"}
             </Button>
           </>

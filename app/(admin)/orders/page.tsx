@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useMemo } from "react";
+import { Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { FlaskConical, LayoutGrid, Plus } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
@@ -10,9 +10,7 @@ import { AdminOrdersTable } from "@/components/admin-orders-table";
 import { Button } from "@/components/ui/button";
 import {
   buildOrdersListHref,
-  filterNonRxOrders,
   parseOrdersListFilters,
-  type AdminOrder,
 } from "@/app/lib/admin-orders";
 
 function OrdersPageContent() {
@@ -22,11 +20,6 @@ function OrdersPageContent() {
     const filters = parseOrdersListFilters(searchParams);
     return buildOrdersListHref("/orders/overview", filters);
   }, [searchParams]);
-
-  const filterOrders = useCallback(
-    (orders: AdminOrder[]) => filterNonRxOrders(orders),
-    []
-  );
 
   return (
     <AdminPage title="Orders" subtitle="Catalog, color, and wholesale orders">
@@ -56,7 +49,7 @@ function OrdersPageContent() {
         showFilters
         hideRxOrderKind
         persistFiltersInUrl
-        filterOrders={filterOrders}
+        scope="catalog"
         orderDetailHash={
           createReturnMode ? "create-return-on-behalf" : undefined
         }

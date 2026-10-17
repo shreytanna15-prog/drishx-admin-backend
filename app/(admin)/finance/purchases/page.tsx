@@ -25,6 +25,7 @@ type Bill = {
 
 export default function PurchasesPage() {
   const [bills, setBills] = useState<Bill[]>([]);
+  const [billsHasMore, setBillsHasMore] = useState(false);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -82,10 +83,18 @@ export default function PurchasesPage() {
     setLoading(true);
     try {
       const [b, s] = await Promise.all([
-        adminFetch<Bill[]>("/api/finance/purchases"),
+        adminFetch<{ items?: Bill[]; hasMore?: boolean } | Bill[]>(
+          "/api/finance/purchases?page=1&limit=100"
+        ),
         adminFetch<Supplier[]>("/api/finance/purchases?resource=suppliers"),
       ]);
-      setBills(b);
+      const billsList = Array.isArray(b)
+        ? b
+        : Array.isArray(b.items)
+          ? b.items
+          : [];
+      setBills(billsList);
+      setBillsHasMore(!Array.isArray(b) && Boolean(b.hasMore));
       setSuppliers(s);
       if (s[0] && !supplierId) setSupplierId(s[0].id);
       setError("");
@@ -153,7 +162,14 @@ export default function PurchasesPage() {
   }
 
   return (
-    <AdminPage title="Purchases" subtitle="Supplier purchase bills with input GST">
+    <AdminPage
+      title="Purchases"
+      subtitle={
+        billsHasMore
+          ? "Supplier purchase bills with input GST (showing up to 100 by newest bill date; more exist)"
+          : "Supplier purchase bills with input GST (list: up to 100, newest bill date first)"
+      }
+    >
       {error ? (
         <p className="mb-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
           {error}

@@ -39,19 +39,38 @@ export async function GET(req: NextRequest) {
         : { employeeId: "__none__" };
 
   const status = searchParams.get("status");
-  const expenses = await prisma.expenseRequest.findMany({
-    where: {
-      ...where,
-      ...(status ? { status: status as ExpenseApprovalStatus } : {}),
-    },
-    include: {
-      employee: { select: { id: true, name: true, email: true } },
-      cashAccount: true,
-    },
-    orderBy: { createdAt: "desc" },
-    take: 100,
+  const pageRaw = Number(searchParams.get("page") ?? "1");
+  const limitRaw = Number(searchParams.get("limit") ?? "30");
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const limit = Math.min(
+    100,
+    Math.max(1, Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 30)
+  );
+  const skip = (page - 1) * limit;
+  const expenseWhere = {
+    ...where,
+    ...(status ? { status: status as ExpenseApprovalStatus } : {}),
+  };
+  const [total, expenses] = await Promise.all([
+    prisma.expenseRequest.count({ where: expenseWhere }),
+    prisma.expenseRequest.findMany({
+      where: expenseWhere,
+      include: {
+        employee: { select: { id: true, name: true, email: true } },
+        cashAccount: true,
+      },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
+    }),
+  ]);
+  return NextResponse.json({
+    items: expenses,
+    page,
+    limit,
+    hasMore: skip + expenses.length < total,
+    total,
   });
-  return NextResponse.json(expenses);
 }
 
 export async function POST(req: NextRequest) {

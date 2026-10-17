@@ -16,7 +16,7 @@ Read the matching skill **before** substantial work:
 | Admin pages, layouts, loading UX | `drishx-nextjs` |
 | Schema, migrations, Prisma queries | `drishx-prisma` (+ official `prisma-*`) |
 | `app/api`, auth, audit logs | `drishx-api-auth-audit` |
-| Admin UI fetch / mutate / loading / errors | `drishx-client-api` |
+| Admin UI fetch / mutate / lists / pagination / loading / errors | `drishx-client-api` |
 | React/Next performance | `vercel-react-best-practices` |
 | Component composition | `vercel-composition-patterns` |
 

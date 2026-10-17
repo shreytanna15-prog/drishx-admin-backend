@@ -15,15 +15,11 @@ import {
   assignmentCreateFields,
   resolveOrderAssigneeId,
 } from "../../lib/assign-order-to-employee";
-import { getSignedOrderImageUrl } from "../../lib/supabase-storage";
 import { isCustomerApproved } from "../../lib/user-public";
 import {
   serializeOrderPrescription,
   serializeWholesaleLineItem,
 } from "../../lib/serialize-order";
-import { sanitizeOrderForRole } from "../../lib/order-activity";
-import { serializeDeliveryForRole } from "../../lib/delivery-pack";
-import { serializeDeliveryService } from "../../lib/delivery-service";
 import { createOriginalPowerVersion } from "../../lib/alternate-power-workflow";
 import { createInvoiceFromOrder } from "../../lib/finance/create-invoice-from-order";
 import {
@@ -38,10 +34,8 @@ import {
   LedgerEntryType,
   OrderStatus,
 } from "@prisma/client";
-import { employeeOrdersWhere } from "../../lib/prescription-order-hold";
 import {
   buildOnBehalfActivityMessage,
-  orderPlacedByInclude,
   resolveOrderAttribution,
   stripClientOrderAttribution,
 } from "../../lib/order-attribution";
@@ -51,12 +45,22 @@ import {
   recordAuditEvent,
 } from "../../lib/audit";
 import { logOrderActivity } from "../../lib/order-activity";
+import {
+  buildOrdersListWhere,
+  ordersListInclude,
+  parseOrdersListParams,
+  serializeOrderListItem,
+} from "../../lib/orders-list";
 
 // ─────────────────────────────────────────────────────────────
-// GET /api/orders
+// GET /api/orders — paginated summary (RW-11 Phase B)
 // CUSTOMER: own orders
-// EMPLOYEE: only orders assigned to them
-// ADMIN: all orders (optional ?employeeId=)
+// EMPLOYEE: only orders assigned to them (hold rules applied)
+// ADMIN: all orders (optional filters)
+// Query: page, limit, status, q, employeeId, userId, batchId,
+//        lineType, orderKind, scope, assigneeId, dateFrom, dateTo
+// Response: { items, page, limit, hasMore, total }
+// Fat detail remains on GET /api/orders/:id
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);
@@ -78,122 +82,33 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const employeeId = searchParams.get("employeeId")?.trim() || null;
-    const batchId = searchParams.get("batchId")?.trim() || null;
-    const customerId = searchParams.get("userId")?.trim() || null;
+    const params = parseOrdersListParams(searchParams);
+    const where = buildOrdersListWhere(session, params);
+    const skip = (params.page - 1) * params.limit;
 
-    const where =
-      session.role === "CUSTOMER"
-        ? { userId: session.userId }
-        : session.role === "EMPLOYEE"
-          ? employeeOrdersWhere(session.userId)
-          : {
-              ...(employeeId ? { assignedToId: employeeId } : {}),
-              ...(customerId ? { userId: customerId } : {}),
-              ...(batchId ? { checkoutBatchId: batchId } : {}),
-            };
+    const [total, orders] = await Promise.all([
+      prisma.order.count({ where }),
+      prisma.order.findMany({
+        where,
+        include: ordersListInclude,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: params.limit,
+      }),
+    ]);
 
-    const orders = await prisma.order.findMany({
-      where,
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            businessName: true,
-          },
-        },
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-          },
-        },
-        ...orderPlacedByInclude,
-        singleVisionLens: true,
-        kryptokLens: true,
-        progressiveLens: true,
-        wholesaleLineItems: {
-          orderBy: { createdAt: "asc" },
-        },
-        deliveryService: true,
-        delivery: true,
-        alternateSuggestions: {
-          where: { status: "PENDING" },
-          select: {
-            id: true,
-            status: true,
-            availability: true,
-            sph: true,
-            cyl: true,
-          },
-        },
-        powerVersions: {
-          orderBy: { versionNumber: "asc" },
-          select: {
-            id: true,
-            versionNumber: true,
-            status: true,
-            source: true,
-            sph: true,
-            cyl: true,
-            isFinalFulfilled: true,
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
+    const items = orders.map((order) =>
+      serializeOrderListItem(order, session.role)
+    );
+    const hasMore = skip + items.length < total;
+
+    return NextResponse.json({
+      items,
+      page: params.page,
+      limit: params.limit,
+      hasMore,
+      total,
     });
-
-    const serialized = [];
-    for (const order of orders) {
-      const o = order as unknown as Record<string, unknown> & {
-        deliveryService?: Parameters<typeof serializeDeliveryService>[0] | null;
-        delivery?: Record<string, unknown> | null;
-      };
-      serialized.push(
-        sanitizeOrderForRole(
-          {
-            ...order,
-            ...serializeOrderPrescription(order),
-            deliveryService: o.deliveryService
-              ? serializeDeliveryService(o.deliveryService)
-              : null,
-            delivery: serializeDeliveryForRole(o.delivery ?? null, session.role),
-            wholesaleLineItems: order.wholesaleLineItems.map(serializeWholesaleLineItem),
-            alternateSuggestions: (order.alternateSuggestions ?? []).map((s) => ({
-              ...s,
-              sph: Number(s.sph),
-              cyl: s.cyl !== null && s.cyl !== undefined ? Number(s.cyl) : null,
-            })),
-            powerVersions: (order.powerVersions ?? []).map((v) => ({
-              ...v,
-              sph: v.sph !== null && v.sph !== undefined ? Number(v.sph) : null,
-              cyl: v.cyl !== null && v.cyl !== undefined ? Number(v.cyl) : null,
-            })),
-            orderImageUrl: order.orderImageUrl
-              ? await getSignedOrderImageUrl(order.orderImageUrl)
-              : null,
-            createdAt: order.createdAt.toISOString(),
-            updatedAt: order.updatedAt.toISOString(),
-            assignedAt: order.assignedAt?.toISOString() ?? null,
-            warehouseHold: order.warehouseHold ?? false,
-            warehouseReleasedAt:
-              order.warehouseReleasedAt?.toISOString() ?? null,
-            warehouseReleasedById: order.warehouseReleasedById ?? null,
-            dispatchDate: order.dispatchDate?.toISOString() ?? null,
-            cutoffDeferred: order.cutoffDeferred ?? false,
-            dispatchOverridden: Boolean(order.dispatchOverrideStamp),
-          },
-          session.role
-        )
-      );
-    }
-
-    return NextResponse.json(serialized);
   } catch (error) {
     console.error("GET /api/orders error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

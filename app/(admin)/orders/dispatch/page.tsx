@@ -23,7 +23,6 @@ import {
   formatOrderDisplayId,
   formatStatus,
   isDeferredOrder,
-  isDispatchedOrder,
   statusBadgeClass,
 } from "@/app/lib/admin-orders";
 import { cn } from "@/lib/utils";
@@ -121,16 +120,13 @@ export default function DispatchPage() {
 
   const loadDispatched = useCallback(async () => {
     try {
-      const data = await adminFetch<AdminOrder[]>("/api/orders");
-      const list = (Array.isArray(data) ? data : [])
-        .filter(isDispatchedOrder)
-        .sort(
-          (a, b) =>
-            new Date(b.updatedAt ?? b.createdAt).getTime() -
-            new Date(a.updatedAt ?? a.createdAt).getTime()
-        )
-        .slice(0, 20);
-      setDispatched(list);
+      const { listAdminOrders } = await import("@/app/lib/admin-orders");
+      const page = await listAdminOrders({
+        status: "DISPATCHED",
+        limit: 20,
+        page: 1,
+      });
+      setDispatched(page.items);
     } catch {
       setDispatched([]);
     } finally {

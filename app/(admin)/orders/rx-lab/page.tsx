@@ -1,19 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback } from "react";
 import { ArrowLeft } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { AdminOrdersTable } from "@/components/admin-orders-table";
 import { Button } from "@/components/ui/button";
-import { filterRxOrders, type AdminOrder } from "@/app/lib/admin-orders";
 
 export default function RxLabPage() {
-  const filterOrders = useCallback(
-    (orders: AdminOrder[]) => filterRxOrders(orders),
-    []
-  );
-
   return (
     <AdminPage
       title="Rx & photo orders"
@@ -25,7 +18,7 @@ export default function RxLabPage() {
         searchPlaceholder="Search RX / photo orders by customer, order #…"
         emptyMessage="No RX or photo prescription orders found yet."
         emptySearchMessage="No RX or photo orders match your search."
-        filterOrders={filterOrders}
+        scope="rx_lab"
         showNotes
         showFilters
         hideOrderKindFilter

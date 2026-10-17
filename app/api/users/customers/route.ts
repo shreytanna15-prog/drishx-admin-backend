@@ -3,12 +3,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
 import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { toSafeUser } from "../../../lib/user-public";
+import {
+  buildCustomersListWhere,
+  parseCustomersListParams,
+} from "../../../lib/customers-list";
 
 /**
- * Customer directory for staff.
+ * Customer directory for staff (RW-11 Phase C — paginated).
  * - status=approved (default): approved customers
  * - status=rejected: rejected applications
  * - status=suspended: approved but inactive (suspended)
+ * Query: page, limit, q, status, activeOnly
+ * Response: { items, customers (compat), page, limit, hasMore, total, status, activeOnly }
  */
 export async function GET(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);
@@ -22,62 +28,33 @@ export async function GET(req: NextRequest) {
 
   try {
     const searchParams = new URL(req.url).searchParams;
-    const status = searchParams.get("status")?.trim().toLowerCase() || "approved";
-    const activeOnly = searchParams.get("activeOnly") === "1" || searchParams.get("activeOnly") === "true";
-    const q = searchParams.get("q")?.trim().toLowerCase() || "";
+    const params = parseCustomersListParams(searchParams);
+    const where = buildCustomersListWhere(params);
+    const skip = (params.page - 1) * params.limit;
 
-    let where: {
-      role: "CUSTOMER";
-      isApproved?: boolean;
-      approvalStatus?: "APPROVED" | "REJECTED";
-      isActive?: boolean;
-    } = { role: "CUSTOMER", isApproved: true };
+    const [total, customers] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy: [{ businessName: "asc" }, { email: "asc" }],
+        skip,
+        take: params.limit,
+      }),
+    ]);
 
-    if (status === "rejected") {
-      where = { role: "CUSTOMER", approvalStatus: "REJECTED" };
-    } else if (status === "suspended") {
-      where = {
-        role: "CUSTOMER",
-        approvalStatus: "APPROVED",
-        isApproved: true,
-        isActive: false,
-      };
-    } else {
-      // approved (active + suspended both have isApproved; default list = all approved)
-      where = { role: "CUSTOMER", isApproved: true, approvalStatus: "APPROVED" };
-      if (activeOnly) {
-        where.isActive = true;
-      }
-    }
-
-    const customers = await prisma.user.findMany({
-      where,
-      orderBy: [
-        { businessName: "asc" },
-        { email: "asc" },
-      ],
-    });
-
-    const filtered = q
-      ? customers.filter((c) => {
-          const hay = [
-            c.name,
-            c.businessName,
-            c.shopName,
-            c.email,
-            c.mobileNumber,
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
-          return hay.includes(q);
-        })
-      : customers;
+    const items = customers.map(toSafeUser);
+    const hasMore = skip + items.length < total;
 
     return NextResponse.json({
-      customers: filtered.map(toSafeUser),
-      status,
-      activeOnly,
+      items,
+      /** Backward-compatible alias for Phase B/C cutover clients. */
+      customers: items,
+      page: params.page,
+      limit: params.limit,
+      hasMore,
+      total,
+      status: params.status,
+      activeOnly: params.activeOnly,
     });
   } catch (error) {
     console.error("GET /api/users/customers error:", error);

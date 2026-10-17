@@ -11,16 +11,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-import { readListCache, writeListCache } from "@/app/lib/admin-cache";
 import {
   type AdminCustomer,
   customerDisplayName,
   customerPersonName,
   formatCustomerDate,
   isSuspendedCustomer,
+  listAdminCustomers,
   matchesCustomerSearch,
 } from "@/app/lib/admin-customers";
-import { useProgressiveList } from "@/hooks/use-progressive-list";
+import { useInfiniteScrollSentinel } from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
 
 type ClientsTab = "pending" | "incomplete" | "approved" | "rejected";
@@ -37,20 +37,30 @@ function ClientsPageContent() {
   const searchParams = useSearchParams();
   const tab = parseTab(searchParams.get("tab"));
 
-  const [customers, setCustomers] = useState<AdminCustomer[]>(
-    () => readListCache<AdminCustomer[]>("customers") ?? []
-  );
+  const [customers, setCustomers] = useState<AdminCustomer[]>([]);
   const [pending, setPending] = useState<AdminCustomer[]>([]);
   const [incomplete, setIncomplete] = useState<AdminCustomer[]>([]);
   const [rejected, setRejected] = useState<AdminCustomer[]>([]);
-  const [loadingApproved, setLoadingApproved] = useState(customers.length === 0);
+  const [loadingApproved, setLoadingApproved] = useState(true);
   const [loadingPending, setLoadingPending] = useState(true);
   const [loadingIncomplete, setLoadingIncomplete] = useState(true);
   const [loadingRejected, setLoadingRejected] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
   const [query, setQuery] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [approvedPage, setApprovedPage] = useState(1);
+  const [approvedHasMore, setApprovedHasMore] = useState(false);
+  const [approvedTotal, setApprovedTotal] = useState<number | undefined>();
+  const [rejectedPage, setRejectedPage] = useState(1);
+  const [rejectedHasMore, setRejectedHasMore] = useState(false);
+  const [rejectedTotal, setRejectedTotal] = useState<number | undefined>();
   const [actingId, setActingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedQ(query.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [query]);
 
   const setTab = useCallback(
     (next: ClientsTab) => {
@@ -61,34 +71,40 @@ function ClientsPageContent() {
     [router, searchParams]
   );
 
-  const loadApproved = useCallback(async () => {
-    const cached = readListCache<AdminCustomer[]>("customers");
-    if (cached) {
-      setCustomers(cached);
-      setLoadingApproved(false);
-    } else {
-      setLoadingApproved(true);
-    }
-
-    try {
-      const data = await adminFetch<{ customers: AdminCustomer[] }>(
-        "/api/users/customers?status=approved"
-      );
-      const list = Array.isArray(data.customers) ? data.customers : [];
-      writeListCache("customers", list);
-      setCustomers(list);
-    } catch (err) {
-      if (!cached) {
+  const loadApproved = useCallback(
+    async (page = 1, q = debouncedQ) => {
+      if (page === 1) setLoadingApproved(true);
+      try {
+        const data = await listAdminCustomers({
+          status: "approved",
+          page,
+          limit: 30,
+          q: q || undefined,
+        });
+        setApprovedHasMore(data.hasMore);
+        setApprovedTotal(data.total);
+        setApprovedPage(data.page);
+        setCustomers((prev) => {
+          if (data.page <= 1) return data.items;
+          const seen = new Set(prev.map((c) => c.id));
+          const merged = [...prev];
+          for (const row of data.items) {
+            if (!seen.has(row.id)) merged.push(row);
+          }
+          return merged;
+        });
+      } catch (err) {
         setError(
           err instanceof AdminApiError
             ? err.message
             : "Failed to load customers."
         );
+      } finally {
+        setLoadingApproved(false);
       }
-    } finally {
-      setLoadingApproved(false);
-    }
-  }, []);
+    },
+    [debouncedQ]
+  );
 
   const loadPending = useCallback(async () => {
     setLoadingPending(true);
@@ -126,48 +142,75 @@ function ClientsPageContent() {
     }
   }, []);
 
-  const loadRejected = useCallback(async () => {
-    setLoadingRejected(true);
-    try {
-      const data = await adminFetch<{ customers: AdminCustomer[] }>(
-        "/api/users/customers?status=rejected"
-      );
-      setRejected(Array.isArray(data.customers) ? data.customers : []);
-    } catch (err) {
-      setError(
-        err instanceof AdminApiError
-          ? err.message
-          : "Failed to load rejected customers."
-      );
-    } finally {
-      setLoadingRejected(false);
-    }
-  }, []);
+  const loadRejected = useCallback(
+    async (page = 1, q = debouncedQ) => {
+      if (page === 1) setLoadingRejected(true);
+      try {
+        const data = await listAdminCustomers({
+          status: "rejected",
+          page,
+          limit: 30,
+          q: q || undefined,
+        });
+        setRejectedHasMore(data.hasMore);
+        setRejectedTotal(data.total);
+        setRejectedPage(data.page);
+        setRejected((prev) => {
+          if (data.page <= 1) return data.items;
+          const seen = new Set(prev.map((c) => c.id));
+          const merged = [...prev];
+          for (const row of data.items) {
+            if (!seen.has(row.id)) merged.push(row);
+          }
+          return merged;
+        });
+      } catch (err) {
+        setError(
+          err instanceof AdminApiError
+            ? err.message
+            : "Failed to load rejected customers."
+        );
+      } finally {
+        setLoadingRejected(false);
+      }
+    },
+    [debouncedQ]
+  );
 
   useEffect(() => {
-    let cancelled = false;
+    const t = window.setTimeout(() => {
+      void loadPending();
+      void loadIncomplete();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [loadPending, loadIncomplete]);
 
-    async function load() {
-      setError("");
-      await Promise.all([
-        loadApproved(),
-        loadPending(),
-        loadIncomplete(),
-        loadRejected(),
-      ]);
-      if (cancelled) return;
-    }
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void loadApproved(1, debouncedQ);
+      void loadRejected(1, debouncedQ);
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [debouncedQ, loadApproved, loadRejected]);
 
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadApproved, loadPending, loadIncomplete, loadRejected]);
+  const filteredApproved = customers;
+  const filteredRejected = rejected;
 
-  const filteredApproved = useMemo(
-    () => customers.filter((customer) => matchesCustomerSearch(customer, query)),
-    [customers, query]
-  );
+  const { setSentinelNode: setApprovedSentinel } = useInfiniteScrollSentinel({
+    enabled: tab === "approved" && approvedHasMore && !loadingApproved,
+    onLoadMore: () => {
+      void loadApproved(approvedPage + 1, debouncedQ);
+    },
+    deps: [customers.length, approvedPage, approvedHasMore, tab],
+  });
+
+  const { setSentinelNode: setRejectedSentinel } = useInfiniteScrollSentinel({
+    enabled: tab === "rejected" && rejectedHasMore && !loadingRejected,
+    onLoadMore: () => {
+      void loadRejected(rejectedPage + 1, debouncedQ);
+    },
+    deps: [rejected.length, rejectedPage, rejectedHasMore, tab],
+  });
 
   const filteredPending = useMemo(
     () => pending.filter((customer) => matchesCustomerSearch(customer, query)),
@@ -178,14 +221,6 @@ function ClientsPageContent() {
     () => incomplete.filter((customer) => matchesCustomerSearch(customer, query)),
     [incomplete, query]
   );
-
-  const filteredRejected = useMemo(
-    () => rejected.filter((customer) => matchesCustomerSearch(customer, query)),
-    [rejected, query]
-  );
-
-  const { visibleItems, hasMore, sentinelIndex, setSentinelNode } =
-    useProgressiveList(filteredApproved);
 
   async function handleApprove(customer: AdminCustomer) {
     if (
@@ -263,8 +298,8 @@ function ClientsPageContent() {
       : tab === "incomplete"
         ? filteredIncomplete.length
         : tab === "rejected"
-          ? filteredRejected.length
-          : filteredApproved.length;
+          ? (rejectedTotal ?? filteredRejected.length)
+          : (approvedTotal ?? filteredApproved.length);
 
   const subtitle =
     tab === "pending"
@@ -279,7 +314,7 @@ function ClientsPageContent() {
     { id: "pending", label: "Pending approvals", count: pending.length },
     { id: "incomplete", label: "Incomplete", count: incomplete.length },
     { id: "approved", label: "Approved" },
-    { id: "rejected", label: "Rejected", count: rejected.length },
+    { id: "rejected", label: "Rejected" },
   ];
 
   function renderActionList(
@@ -449,7 +484,7 @@ function ClientsPageContent() {
       ) : null}
 
       {tab === "rejected" ? (
-        loadingRejected ? (
+        loadingRejected && rejected.length === 0 ? (
           <ListSkeleton compact rows={6} />
         ) : filteredRejected.length === 0 ? (
           <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-16 text-center text-sm text-(--brand-text-muted)">
@@ -482,6 +517,13 @@ function ClientsPageContent() {
                 </li>
               ))}
             </ul>
+            {rejectedHasMore ? (
+              <InfiniteScrollSentinel
+                active
+                loadingMore={loadingRejected && rejectedPage > 1}
+                setSentinelNode={setRejectedSentinel}
+              />
+            ) : null}
           </div>
         )
       ) : null}
@@ -498,7 +540,7 @@ function ClientsPageContent() {
         ) : (
           <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
             <ul className="divide-y divide-(--brand-card-border)">
-              {visibleItems.map((customer, index) => (
+              {filteredApproved.map((customer) => (
                 <li key={customer.id} className="relative">
                   <Link
                     href={`/clients/${customer.id}`}
@@ -540,19 +582,14 @@ function ClientsPageContent() {
                     </div>
                     <ChevronRight className="size-4 shrink-0 text-(--brand-text-muted)" />
                   </Link>
-                  {index === sentinelIndex && hasMore ? (
-                    <InfiniteScrollSentinel
-                      active
-                      setSentinelNode={setSentinelNode}
-                    />
-                  ) : null}
                 </li>
               ))}
             </ul>
-            {hasMore && visibleItems.length <= sentinelIndex ? (
+            {approvedHasMore ? (
               <InfiniteScrollSentinel
                 active
-                setSentinelNode={setSentinelNode}
+                loadingMore={loadingApproved && approvedPage > 1}
+                setSentinelNode={setApprovedSentinel}
               />
             ) : null}
           </div>

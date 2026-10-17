@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 
-import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
 import {
   formatReturnDate,
   formatReturnMoney,
@@ -15,81 +14,55 @@ import {
   returnStatusBadgeClass,
   type AdminReturnRequest,
 } from "@/app/lib/admin-returns";
+import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
+import { useGetReturns } from "@/app/lib/modules/returns/query/use-get-returns";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
+import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useInfiniteScrollSentinel } from "@/hooks/use-progressive-list";
 
 export default function ReturnsPage() {
-  const [requests, setRequests] = useState<AdminReturnRequest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError("");
-      try {
-        const data = await adminFetch<AdminReturnRequest[]>("/api/returns");
-        setRequests(Array.isArray(data) ? data : []);
-      } catch (err) {
-        setError(
-          err instanceof AdminApiError ? err.message : "Failed to load return requests."
-        );
-      } finally {
-        setLoading(false);
-      }
-    }
+    const t = window.setTimeout(() => setDebouncedQ(query.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [query]);
 
-    void load();
-  }, []);
+  const { page, setPage, items, onPageSuccess } =
+    usePaginatedListState<AdminReturnRequest>(debouncedQ);
 
-  const filtered = useMemo(() => {
-    const value = query.trim().toLowerCase();
-    if (!value) return requests;
-    return requests.filter((request) => {
-      const orderBits = request.items.flatMap((item) => {
-        const order = item.originalOrder;
-        if (!order) return [item.lensLabel, item.originalOrderId];
-        return [
-          formatReturnOrderDisplayId(order),
-          order.status,
-          formatReturnOrderStatus(order.status),
-          formatReturnOrderCatalogSummary(order),
-          order.user?.name ?? "",
-          order.user?.businessName ?? "",
-          order.user?.email ?? "",
-          String(order.totalAmount),
-        ];
-      });
-      return [
-        request.requestNumber,
-        request.customer?.name ?? "",
-        request.customer?.businessName ?? "",
-        request.customer?.email ?? "",
-        request.status,
-        formatReturnStatus(request.status),
-        request.assignedEmployee?.name ?? "",
-        request.assignedEmployee?.email ?? "",
-        ...orderBits,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(value);
-    });
-  }, [query, requests]);
+  const { data, loading, refreshing, error, refetch } = useGetReturns(
+    {
+      page,
+      limit: 30,
+      q: debouncedQ || undefined,
+    },
+    { onSuccess: onPageSuccess }
+  );
+
+  const hasMore = Boolean(data?.hasMore);
+  const showInitialLoading = loading && page === 1 && items.length === 0;
+
+  const { setSentinelNode } = useInfiniteScrollSentinel({
+    enabled: hasMore && !loading && !refreshing,
+    onLoadMore: () => setPage((p) => p + 1),
+    deps: [items.length, page, hasMore],
+  });
 
   const needsReviewCount = useMemo(
     () =>
-      requests.filter(
+      items.filter(
         (r) =>
           r.status === "SUBMITTED" ||
           r.status === "ESCALATED_TO_ADMIN" ||
           r.status === "MORE_INFO_REQUIRED"
       ).length,
-    [requests]
+    [items]
   );
 
   return (
@@ -100,11 +73,13 @@ export default function ReturnsPage() {
             Returns & Replacements
           </h1>
           <p className="mt-1 text-sm text-(--brand-text-muted)">
-            {loading
+            {showInitialLoading
               ? "…"
-              : `${filtered.length} request${filtered.length === 1 ? "" : "s"}${
+              : `${data?.total ?? items.length} request${
+                  (data?.total ?? items.length) === 1 ? "" : "s"
+                }${
                   needsReviewCount > 0
-                    ? ` · ${needsReviewCount} need${needsReviewCount === 1 ? "s" : ""} admin review`
+                    ? ` · ${needsReviewCount} need${needsReviewCount === 1 ? "s" : ""} admin review (loaded)`
                     : ""
                 }`}
           </p>
@@ -127,108 +102,120 @@ export default function ReturnsPage() {
 
       {error ? (
         <div className="rounded-2xl border border-rose-400/35 bg-rose-500/10 p-4 text-sm text-rose-100">
-          {error}
+          {error.message}
+          <Button className="mt-3 rounded-xl" variant="outline" onClick={() => void refetch()}>
+            Retry
+          </Button>
         </div>
       ) : null}
 
-      {loading ? (
+      {showInitialLoading ? (
         <TableSkeleton compact columns={6} rows={8} />
       ) : (
-      <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card)">
-        <div className="hidden grid-cols-[1fr_1fr_1.4fr_0.85fr_0.75fr_0.75fr] gap-4 border-b border-(--brand-card-border) px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted) md:grid">
-          <div>Request</div>
-          <div>Customer</div>
-          <div>Linked orders</div>
-          <div>Status</div>
-          <div>Assignee</div>
-          <div>Created</div>
-        </div>
-        {filtered.map((request) => {
-          const needsReview =
-            request.status === "SUBMITTED" ||
-            request.status === "ESCALATED_TO_ADMIN" ||
-            (request.status === "MORE_INFO_REQUIRED" && !request.assignedEmployee);
-          return (
-            <Link
-              key={request.id}
-              href={`/returns/${request.id}`}
-              className={`grid gap-3 border-b border-(--brand-card-border) px-4 py-4 transition-colors hover:bg-(--brand-card-hover,rgba(255,255,255,0.03)) md:grid-cols-[1fr_1fr_1.4fr_0.85fr_0.75fr_0.75fr] md:gap-4 ${
-                needsReview ? "bg-amber-500/5" : ""
-              }`}
-            >
-              <div>
-                <p className="font-semibold text-(--brand-link)">{request.requestNumber}</p>
-                <p className="mt-1 text-xs text-(--brand-text-muted)">
-                  {request.requestType} · {request.items.length} item
-                  {request.items.length === 1 ? "" : "s"}
-                  {needsReview ? " · Needs review" : ""}
-                </p>
-              </div>
-              <div>
-                <p className="font-semibold text-(--brand-text)">
-                  {request.customer.businessName || request.customer.name || request.customer.email}
-                </p>
-                <p className="mt-1 text-xs text-(--brand-text-muted)">
-                  {request.customer.email}
-                </p>
-              </div>
-              <div className="space-y-2">
-                {request.items.length === 0 ? (
-                  <p className="text-sm text-(--brand-text-muted)">No linked orders</p>
-                ) : (
-                  request.items.slice(0, 3).map((item) => {
-                    const order = item.originalOrder;
-                    return (
-                      <div key={item.id} className="text-sm">
-                        <p className="font-semibold text-(--brand-text)">
-                          {order
-                            ? formatReturnOrderDisplayId(order)
-                            : `#${item.originalOrderId.slice(0, 8).toUpperCase()}`}
-                          <span className="ml-1.5 font-normal text-(--brand-text-muted)">
-                            · Qty {item.quantity}
-                          </span>
-                        </p>
-                        <p className="mt-0.5 text-xs text-(--brand-text-muted)">
-                          {order
-                            ? `${formatReturnOrderCatalogSummary(order)} · ${formatReturnOrderStatus(order.status)} · ${formatReturnMoney(order.totalAmount)}`
-                            : item.lensLabel}
-                        </p>
-                      </div>
-                    );
-                  })
-                )}
-                {request.items.length > 3 ? (
-                  <p className="text-xs text-(--brand-text-muted)">
-                    +{request.items.length - 3} more item
-                    {request.items.length - 3 === 1 ? "" : "s"}
-                  </p>
-                ) : null}
-              </div>
-              <div>
-                <Badge
-                  variant="outline"
-                  className={returnStatusBadgeClass(request.status)}
-                >
-                  {formatReturnStatus(request.status)}
-                </Badge>
-              </div>
-              <div className="text-sm text-(--brand-text-muted)">
-                {request.assignedEmployee?.name ||
-                  request.assignedEmployee?.email ||
-                  "—"}
-              </div>
-              <div className="text-sm text-(--brand-text-muted)">
-                {formatReturnDate(request.createdAt)}
-              </div>
-            </Link>
-          );
-        })}
-        {filtered.length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-(--brand-text-muted)">
-            No return requests found.
+        <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card)">
+          <div className="hidden grid-cols-[1fr_1fr_1.4fr_0.85fr_0.75fr_0.75fr] gap-4 border-b border-(--brand-card-border) px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted) md:grid">
+            <div>Request</div>
+            <div>Customer</div>
+            <div>Linked orders</div>
+            <div>Status</div>
+            <div>Assignee</div>
+            <div>Created</div>
           </div>
-        ) : null}
-      </div>
+          {items.map((request) => {
+            const needsReview =
+              request.status === "SUBMITTED" ||
+              request.status === "ESCALATED_TO_ADMIN" ||
+              (request.status === "MORE_INFO_REQUIRED" && !request.assignedEmployee);
+            return (
+              <Link
+                key={request.id}
+                href={`/returns/${request.id}`}
+                className={`grid gap-3 border-b border-(--brand-card-border) px-4 py-4 transition-colors hover:bg-(--brand-card-hover,rgba(255,255,255,0.03)) md:grid-cols-[1fr_1fr_1.4fr_0.85fr_0.75fr_0.75fr] md:gap-4 ${
+                  needsReview ? "bg-amber-500/5" : ""
+                }`}
+              >
+                <div>
+                  <p className="font-semibold text-(--brand-link)">{request.requestNumber}</p>
+                  <p className="mt-1 text-xs text-(--brand-text-muted)">
+                    {request.requestType} · {request.items.length} item
+                    {request.items.length === 1 ? "" : "s"}
+                    {needsReview ? " · Needs review" : ""}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-semibold text-(--brand-text)">
+                    {request.customer.businessName ||
+                      request.customer.name ||
+                      request.customer.email}
+                  </p>
+                  <p className="mt-1 text-xs text-(--brand-text-muted)">
+                    {request.customer.email}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  {request.items.length === 0 ? (
+                    <p className="text-sm text-(--brand-text-muted)">No linked orders</p>
+                  ) : (
+                    request.items.slice(0, 3).map((item) => {
+                      const order = item.originalOrder;
+                      return (
+                        <div key={item.id} className="text-sm">
+                          <p className="font-semibold text-(--brand-text)">
+                            {order
+                              ? formatReturnOrderDisplayId(order)
+                              : `#${item.originalOrderId.slice(0, 8).toUpperCase()}`}
+                            <span className="ml-1.5 font-normal text-(--brand-text-muted)">
+                              · Qty {item.quantity}
+                            </span>
+                          </p>
+                          <p className="mt-0.5 text-xs text-(--brand-text-muted)">
+                            {order
+                              ? `${formatReturnOrderCatalogSummary(order)} · ${formatReturnOrderStatus(order.status)} · ${formatReturnMoney(order.totalAmount)}`
+                              : item.lensLabel}
+                          </p>
+                        </div>
+                      );
+                    })
+                  )}
+                  {request.items.length > 3 ? (
+                    <p className="text-xs text-(--brand-text-muted)">
+                      +{request.items.length - 3} more item
+                      {request.items.length - 3 === 1 ? "" : "s"}
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <Badge
+                    variant="outline"
+                    className={returnStatusBadgeClass(request.status)}
+                  >
+                    {formatReturnStatus(request.status)}
+                  </Badge>
+                </div>
+                <div className="text-sm text-(--brand-text-muted)">
+                  {request.assignedEmployee?.name ||
+                    request.assignedEmployee?.email ||
+                    "—"}
+                </div>
+                <div className="text-sm text-(--brand-text-muted)">
+                  {formatReturnDate(request.createdAt)}
+                </div>
+              </Link>
+            );
+          })}
+          {items.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-(--brand-text-muted)">
+              No return requests found.
+            </div>
+          ) : null}
+          {hasMore ? (
+            <InfiniteScrollSentinel
+              active
+              loadingMore={(loading || refreshing) && page > 1}
+              setSentinelNode={setSentinelNode}
+            />
+          ) : null}
+        </div>
       )}
     </AdminPage>
   );

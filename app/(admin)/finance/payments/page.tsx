@@ -26,10 +26,15 @@ export default function PaymentsClaimsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminFetch<Claim[]>(
-        "/api/finance/payments?kind=claims&status=PENDING"
+      const data = await adminFetch<{ items?: Claim[] } | Claim[]>(
+        "/api/finance/payments?kind=claims&status=PENDING&page=1&limit=100"
       );
-      setClaims(data);
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data.items)
+          ? data.items
+          : [];
+      setClaims(items);
       setError("");
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Failed to load.");
@@ -79,7 +84,7 @@ export default function PaymentsClaimsPage() {
   return (
     <AdminPage
       title="Payments & Claims"
-      subtitle="Customer payment claims awaiting confirmation"
+      subtitle="Customer payment claims awaiting confirmation (latest 100 pending)"
     >
       {error ? <p className="mb-4 text-sm text-red-400">{error}</p> : null}
       {loading ? (

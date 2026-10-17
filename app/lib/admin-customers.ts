@@ -1,3 +1,6 @@
+import { adminFetch } from "@/app/lib/admin-api";
+import type { Paginated } from "@/app/lib/types/api-client";
+
 export type AdminCustomer = {
   id: string;
   email: string;
@@ -114,4 +117,66 @@ export function matchesCustomerSearch(customer: AdminCustomer, query: string) {
   ]
     .filter(Boolean)
     .some((value) => String(value).toLowerCase().includes(q));
+}
+
+export type ListAdminCustomersParams = {
+  page?: number;
+  limit?: number;
+  status?: string;
+  activeOnly?: boolean;
+  q?: string;
+};
+
+export type PaginatedAdminCustomers = Paginated<AdminCustomer>;
+
+export function buildCustomersQueryString(
+  params?: ListAdminCustomersParams
+): string {
+  const qs = new URLSearchParams();
+  if (!params) return "";
+  if (params.page != null) qs.set("page", String(params.page));
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.status?.trim()) qs.set("status", params.status.trim());
+  if (params.activeOnly) qs.set("activeOnly", "1");
+  if (params.q?.trim()) qs.set("q", params.q.trim());
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+export function normalizeCustomersListResponse(
+  data: unknown
+): PaginatedAdminCustomers {
+  if (Array.isArray(data)) {
+    return {
+      items: data as AdminCustomer[],
+      page: 1,
+      limit: data.length,
+      hasMore: false,
+      total: data.length,
+    };
+  }
+  const body = data as Partial<PaginatedAdminCustomers> & {
+    customers?: AdminCustomer[];
+  } | null;
+  const items = Array.isArray(body?.items)
+    ? body.items
+    : Array.isArray(body?.customers)
+      ? body.customers
+      : [];
+  return {
+    items,
+    page: typeof body?.page === "number" ? body.page : 1,
+    limit: typeof body?.limit === "number" ? body.limit : items.length,
+    hasMore: Boolean(body?.hasMore),
+    total: typeof body?.total === "number" ? body.total : undefined,
+  };
+}
+
+export async function listAdminCustomers(
+  params?: ListAdminCustomersParams
+): Promise<PaginatedAdminCustomers> {
+  const data = await adminFetch<unknown>(
+    `/api/users/customers${buildCustomersQueryString(params)}`
+  );
+  return normalizeCustomersListResponse(data);
 }

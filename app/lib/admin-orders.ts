@@ -1,3 +1,6 @@
+import { adminFetch } from "@/app/lib/admin-api";
+import type { Paginated } from "@/app/lib/types/api-client";
+
 export type OrderCustomer = {
   id: string;
   name: string | null;
@@ -68,6 +71,8 @@ export type AdminOrder = {
   dispatchDate?: string | null;
   cutoffDeferred?: boolean;
   dispatchOverridden?: boolean;
+  /** List summary: true when a prescription image exists (URL only on detail). */
+  hasOrderImage?: boolean;
   deliveryServiceId?: string | null;
   deliveryService?: {
     id: string;
@@ -376,16 +381,20 @@ export function isColorLensOrder(order: Pick<AdminOrder, "notes">) {
 
 /** Photo prescription (image present, not RX form / color). */
 export function isPhotoPrescriptionOrder(
-  order: Pick<AdminOrder, "notes" | "orderImageUrl">
+  order: Pick<AdminOrder, "notes" | "orderImageUrl" | "hasOrderImage">
 ) {
-  if (!order.orderImageUrl) return false;
+  const hasImage = Boolean(order.hasOrderImage || order.orderImageUrl);
+  if (!hasImage) return false;
   if (isRxOrder(order) || isColorLensOrder(order)) return false;
   return true;
 }
 
 /** RX form or photo prescription — subject to admin hold → warehouse release. */
 export function isPrescriptionLabOrder(
-  order: Pick<AdminOrder, "notes" | "orderImageUrl" | "warehouseHold">
+  order: Pick<
+    AdminOrder,
+    "notes" | "orderImageUrl" | "hasOrderImage" | "warehouseHold"
+  >
 ) {
   if (order.warehouseHold) return true;
   return isRxOrder(order) || isPhotoPrescriptionOrder(order);
@@ -737,4 +746,77 @@ export function sortOrdersInGroup(
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
   }
+}
+
+/** Query params for paginated admin orders list (RW-11 Phase B). */
+export type ListAdminOrdersParams = {
+  page?: number;
+  limit?: number;
+  status?: string;
+  q?: string;
+  employeeId?: string;
+  userId?: string;
+  batchId?: string;
+  lineType?: string;
+  orderKind?: string;
+  /** catalog = non-RX/photo; rx_lab = prescription lab; all = no scope filter */
+  scope?: "all" | "catalog" | "rx_lab";
+  assigneeId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export type PaginatedAdminOrders = Paginated<AdminOrder>;
+
+export function buildOrdersQueryString(params?: ListAdminOrdersParams): string {
+  const qs = new URLSearchParams();
+  if (!params) return "";
+  if (params.page != null) qs.set("page", String(params.page));
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.status?.trim()) qs.set("status", params.status.trim());
+  if (params.q?.trim()) qs.set("q", params.q.trim());
+  if (params.employeeId?.trim()) qs.set("employeeId", params.employeeId.trim());
+  if (params.userId?.trim()) qs.set("userId", params.userId.trim());
+  if (params.batchId?.trim()) qs.set("batchId", params.batchId.trim());
+  if (params.lineType?.trim()) qs.set("lineType", params.lineType.trim());
+  if (params.orderKind?.trim()) qs.set("orderKind", params.orderKind.trim());
+  if (params.scope && params.scope !== "all") qs.set("scope", params.scope);
+  if (params.assigneeId?.trim()) qs.set("assigneeId", params.assigneeId.trim());
+  if (params.dateFrom?.trim()) qs.set("dateFrom", params.dateFrom.trim());
+  if (params.dateTo?.trim()) qs.set("dateTo", params.dateTo.trim());
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+/** Normalize list API payload (paginated envelope; legacy bare array tolerated). */
+export function normalizeOrdersListResponse(
+  data: unknown
+): PaginatedAdminOrders {
+  if (Array.isArray(data)) {
+    return {
+      items: data as AdminOrder[],
+      page: 1,
+      limit: data.length,
+      hasMore: false,
+      total: data.length,
+    };
+  }
+  const body = data as Partial<PaginatedAdminOrders> | null;
+  const items = Array.isArray(body?.items) ? body.items : [];
+  return {
+    items,
+    page: typeof body?.page === "number" ? body.page : 1,
+    limit: typeof body?.limit === "number" ? body.limit : items.length,
+    hasMore: Boolean(body?.hasMore),
+    total: typeof body?.total === "number" ? body.total : undefined,
+  };
+}
+
+export async function listAdminOrders(
+  params?: ListAdminOrdersParams
+): Promise<PaginatedAdminOrders> {
+  const data = await adminFetch<unknown>(
+    `/api/orders${buildOrdersQueryString(params)}`
+  );
+  return normalizeOrdersListResponse(data);
 }
