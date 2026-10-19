@@ -219,9 +219,9 @@ export async function placeOrderLine(
     throw new Error(redemption.error);
   }
 
+  // COMPLETED does not imply cash settlement — never invent PAID without a payment.
   const { invoiceId } = await createInvoiceFromOrder({
     orderId: newOrder.id,
-    markPaid: newOrder.status === OrderStatus.COMPLETED,
     loyaltyDiscount: redemption.loyaltyDiscount,
   });
 

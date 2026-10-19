@@ -1,12 +1,103 @@
 /**
- * Courier dispatch field validation.
+ * Courier dispatch field validation + dispatch-readiness gate.
  * Shared by the dedicated dispatch API and the legacy PUT route so both
- * enforce the same rules (min length, allowed characters, no obvious junk).
+ * enforce the same rules (min length, allowed characters, no obvious junk,
+ * and delivery/weight/pick readiness before PACKED → DISPATCHED).
  */
 
 export const COURIER_NAME_MAX_LENGTH = 120;
 export const TRACKING_NUMBER_MAX_LENGTH = 200;
 export const TRACKING_NUMBER_MIN_LENGTH = 4;
+
+export type DispatchReadinessOrder = {
+  quantity: number;
+  reservedQuantity: number;
+  pickedQuantity: number;
+  deliveryServiceId: string | null;
+};
+
+export type DispatchReadinessDelivery = {
+  deliveryServiceId: string | null;
+  actualWeight: number | string | null;
+} | null;
+
+export type DispatchReadinessOverlay = {
+  /** Explicit next service id; `null` clears; omit to keep current. */
+  deliveryServiceId?: string | null;
+  /** Explicit next packed weight; omit to use OrderDelivery. */
+  actualWeight?: number | null;
+  /** Explicit next picked qty; omit to use order.pickedQuantity. */
+  pickedQuantity?: number | null;
+};
+
+type ReadyOk = { ok: true };
+type ReadyErr = { ok: false; error: string };
+
+/**
+ * Server-side gate before handing a packed order to a courier.
+ * Does **not** require picked === ordered (partial fulfillment / reserved < qty OK).
+ * Requires: delivery service, positive packed weight, and at least one picked unit.
+ */
+export function assertDispatchReadiness(input: {
+  order: DispatchReadinessOrder;
+  delivery: DispatchReadinessDelivery;
+  next?: DispatchReadinessOverlay;
+}): ReadyOk | ReadyErr {
+  const currentServiceId =
+    input.order.deliveryServiceId?.trim() ||
+    input.delivery?.deliveryServiceId?.trim() ||
+    null;
+  const serviceId =
+    input.next && "deliveryServiceId" in input.next
+      ? input.next.deliveryServiceId?.trim() || null
+      : currentServiceId;
+
+  if (!serviceId) {
+    return {
+      ok: false,
+      error: "Choose a delivery service before dispatching.",
+    };
+  }
+
+  const existingWeightRaw = input.delivery?.actualWeight;
+  const existingWeight =
+    existingWeightRaw === null || existingWeightRaw === undefined
+      ? null
+      : Number(existingWeightRaw);
+  const weight =
+    input.next && "actualWeight" in input.next
+      ? input.next.actualWeight
+      : existingWeight;
+
+  if (weight == null || !Number.isFinite(weight) || weight <= 0) {
+    return {
+      ok: false,
+      error: "Enter the packed weight (kg) before dispatching.",
+    };
+  }
+
+  const picked =
+    input.next && "pickedQuantity" in input.next && input.next.pickedQuantity != null
+      ? input.next.pickedQuantity
+      : input.order.pickedQuantity;
+
+  if (!Number.isFinite(picked) || picked < 1) {
+    return {
+      ok: false,
+      error: "Record picked quantity before dispatching.",
+    };
+  }
+
+  const orderedQty = Math.max(0, Math.floor(Number(input.order.quantity) || 0));
+  if (picked > orderedQty) {
+    return {
+      ok: false,
+      error: "Picked quantity cannot exceed ordered quantity.",
+    };
+  }
+
+  return { ok: true };
+}
 
 const TRACKING_ALLOWED = /^[A-Za-z0-9\-_/.:]+$/;
 /** Reject placeholder / placeholder-looking strings. */

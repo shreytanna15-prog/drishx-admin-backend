@@ -14,10 +14,16 @@ import {
   returnStatusBadgeClass,
   type AdminReturnRequest,
 } from "@/app/lib/admin-returns";
-import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
+import {
+  resolvePaginatedListUi,
+  usePaginatedListState,
+} from "@/app/lib/hooks/use-paginated-list-state";
 import { useGetReturns } from "@/app/lib/modules/returns/query/use-get-returns";
 import { AdminPage } from "@/components/admin-shell";
-import { TableSkeleton } from "@/components/admin-skeletons";
+import {
+  PaginatedListStatusBanner,
+  TableSkeleton,
+} from "@/components/admin-skeletons";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,8 +39,14 @@ export default function ReturnsPage() {
     return () => window.clearTimeout(t);
   }, [query]);
 
-  const { page, setPage, items, onPageSuccess } =
-    usePaginatedListState<AdminReturnRequest>(debouncedQ);
+  const {
+    page,
+    setPage,
+    items,
+    onPageSuccess,
+    acknowledgeCurrentKey,
+    awaitingCurrentKey,
+  } = usePaginatedListState<AdminReturnRequest>(debouncedQ);
 
   const { data, loading, refreshing, error, refetch } = useGetReturns(
     {
@@ -42,16 +54,27 @@ export default function ReturnsPage() {
       limit: 30,
       q: debouncedQ || undefined,
     },
-    { onSuccess: onPageSuccess }
+    {
+      onSuccess: onPageSuccess,
+      onError: () => acknowledgeCurrentKey(),
+    }
   );
 
   const hasMore = Boolean(data?.hasMore);
-  const showInitialLoading = loading && page === 1 && items.length === 0;
+  const listUi = resolvePaginatedListUi({
+    loading,
+    refreshing,
+    itemCount: items.length,
+    hasActiveFilters: Boolean(query.trim()),
+    awaitingCurrentKey,
+    error: Boolean(error),
+    entityLabel: "returns",
+  });
 
   const { setSentinelNode } = useInfiniteScrollSentinel({
-    enabled: hasMore && !loading && !refreshing,
+    enabled: hasMore && !listUi.isPending,
     onLoadMore: () => setPage((p) => p + 1),
-    deps: [items.length, page, hasMore],
+    deps: [items.length, page, hasMore, listUi.isPending],
   });
 
   const needsReviewCount = useMemo(
@@ -73,8 +96,8 @@ export default function ReturnsPage() {
             Returns & Replacements
           </h1>
           <p className="mt-1 text-sm text-(--brand-text-muted)">
-            {showInitialLoading
-              ? "…"
+            {listUi.pendingLabel
+              ? listUi.pendingLabel
               : `${data?.total ?? items.length} request${
                   (data?.total ?? items.length) === 1 ? "" : "s"
                 }${
@@ -109,10 +132,19 @@ export default function ReturnsPage() {
         </div>
       ) : null}
 
-      {showInitialLoading ? (
+      <PaginatedListStatusBanner message={listUi.statusBanner} />
+
+      {listUi.showPendingPlaceholder ? (
         <TableSkeleton compact columns={6} rows={8} />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card)">
+        <div
+          className={
+            listUi.showStaleContent
+              ? "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) opacity-55 transition-opacity"
+              : "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) transition-opacity"
+          }
+          aria-busy={listUi.isPending || undefined}
+        >
           <div className="hidden grid-cols-[1fr_1fr_1.4fr_0.85fr_0.75fr_0.75fr] gap-4 border-b border-(--brand-card-border) px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted) md:grid">
             <div>Request</div>
             <div>Customer</div>
@@ -203,9 +235,11 @@ export default function ReturnsPage() {
               </Link>
             );
           })}
-          {items.length === 0 ? (
+          {listUi.showEmpty ? (
             <div className="px-4 py-10 text-center text-sm text-(--brand-text-muted)">
-              No return requests found.
+              {query.trim()
+                ? "No return requests match your search."
+                : "No return requests found."}
             </div>
           ) : null}
           {hasMore ? (

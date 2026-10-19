@@ -1,4 +1,5 @@
 import { adminFetch } from "@/app/lib/admin-api";
+import { formatReturnRequestStatusLabel } from "@/app/lib/return-request-status";
 import type { Paginated } from "@/app/lib/types/api-client";
 
 export type AdminReturnStatus =
@@ -66,6 +67,8 @@ export type AdminReturnRequest = {
   adminRemarks?: string | null;
   rejectionReason?: string | null;
   approvedAmount?: number | null;
+  /** Max credit admin may approve (null when not decidable). Server-computed. */
+  eligibleCreditAmount?: number | null;
   replacementBatchId?: string | null;
   createdAt: string;
   customer: {
@@ -173,22 +176,7 @@ export function formatReturnOrderStatus(status: string) {
 }
 
 export function formatReturnStatus(status: string) {
-  const labels: Record<string, string> = {
-    SUBMITTED: "Pending Admin Review",
-    MORE_INFO_REQUIRED: "More Info Needed",
-    ESCALATED_TO_ADMIN: "Pending Admin Review",
-    AWAITING_MATERIAL: "Replacement Approved",
-    APPROVED_CREDIT: "Credit Approved",
-    APPROVED_REPLACEMENT: "Replacement Approved",
-    REJECTED: "Rejected",
-    CLOSED: "Closed",
-  };
-  if (labels[status]) return labels[status];
-  return status
-    .toLowerCase()
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return formatReturnRequestStatusLabel(status);
 }
 
 export function formatReturnReason(reason: string) {
@@ -249,6 +237,102 @@ export function returnStatusBadgeClass(status: AdminReturnStatus) {
     case "CLOSED":
       return "border-slate-400/50 bg-slate-500/15 text-slate-100";
   }
+}
+
+/** Persisted credit fields shown on Admin Returns detail (read-only). */
+export type ApprovedCreditDisplayInput = {
+  status: string;
+  approvedAmount?: number | null;
+  creditNote?: {
+    creditNoteNumber?: string | null;
+    amount?: number | null;
+    allocations?: Array<{
+      invoiceId?: string | null;
+      amount?: number | null;
+      taxableAmount?: number | null;
+      invoice?: { invoiceNumber?: string | null } | null;
+    }> | null;
+  } | null;
+};
+
+export type ApprovedCreditAllocationDisplay = {
+  invoiceId: string;
+  invoiceNumber: string | null;
+  amount: number;
+  taxableAmount: number;
+};
+
+export type ApprovedCreditDisplay =
+  | { show: false }
+  | {
+      show: true;
+      needsReconciliation: boolean;
+      approvedAmount: number | null;
+      creditNoteNumber: string | null;
+      creditNoteAmount: number | null;
+      /** Empty for historical CNs issued before CreditNoteAllocation existed. */
+      allocations: ApprovedCreditAllocationDisplay[];
+    };
+
+function persistedFiniteAmount(value: number | null | undefined): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Resolve read-only Approved Credit panel state from API-persisted fields only.
+ * Never invents amounts — missing required records → reconciliation flag.
+ */
+export function resolveApprovedCreditDisplay(
+  input: ApprovedCreditDisplayInput
+): ApprovedCreditDisplay {
+  if (input.status !== "APPROVED_CREDIT") {
+    return { show: false };
+  }
+
+  const approvedAmount = persistedFiniteAmount(input.approvedAmount);
+  const creditNoteNumber =
+    typeof input.creditNote?.creditNoteNumber === "string" &&
+    input.creditNote.creditNoteNumber.trim()
+      ? input.creditNote.creditNoteNumber.trim()
+      : null;
+  const creditNoteAmount = persistedFiniteAmount(input.creditNote?.amount);
+
+  const allocations: ApprovedCreditAllocationDisplay[] = (
+    input.creditNote?.allocations ?? []
+  ).flatMap((row) => {
+    const amount = persistedFiniteAmount(row.amount);
+    const invoiceId =
+      typeof row.invoiceId === "string" && row.invoiceId.trim()
+        ? row.invoiceId.trim()
+        : null;
+    if (amount == null || !invoiceId) return [];
+    return [
+      {
+        invoiceId,
+        invoiceNumber:
+          typeof row.invoice?.invoiceNumber === "string" &&
+          row.invoice.invoiceNumber.trim()
+            ? row.invoice.invoiceNumber.trim()
+            : null,
+        amount,
+        taxableAmount: persistedFiniteAmount(row.taxableAmount) ?? 0,
+      },
+    ];
+  });
+
+  const needsReconciliation =
+    approvedAmount == null || creditNoteNumber == null || creditNoteAmount == null;
+
+  return {
+    show: true,
+    needsReconciliation,
+    approvedAmount,
+    creditNoteNumber,
+    creditNoteAmount,
+    allocations,
+  };
 }
 
 export type ListAdminReturnsParams = {

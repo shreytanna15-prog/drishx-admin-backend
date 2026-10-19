@@ -8,3 +8,4 @@ export * from "./credit-limit";
 export * from "./customer-ledger";
 export * from "./payments";
 export * from "./journal";
+export * from "./void-unpaid-invoice";

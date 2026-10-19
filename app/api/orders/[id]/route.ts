@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionOrUnauthorized } from "../../../lib/session-auth";
 import { prisma } from "../../../lib/prisma";
-import { InvoiceStatus, NotificationType, OrderStatus, Prisma } from "@prisma/client";
+import { NotificationType, OrderStatus, Prisma } from "@prisma/client";
 import {
   fulfillOrderPick,
   restorePickedStock,
@@ -33,12 +33,25 @@ import { requireStaffPermission } from "../../../lib/staff-access";
 import {
   parsePackages,
   recordPackingDelivery,
+  resolveActiveDeliveryService,
 } from "../../../lib/delivery-pack";
+import { sumPackageWeights } from "../../../lib/delivery-calc";
 import {
+  assertDispatchReadiness,
   validateCourierName,
   validateTrackingNumber,
 } from "../../../lib/dispatch-validate";
 import { assertDispatchAllowed } from "../../../lib/dispatch-cutoff";
+import { orderTotalFromPairPrice } from "../../../lib/lens-pricing";
+import {
+  OrderPricingInvoiceSyncError,
+  syncUnpaidInvoiceAfterOrderPricingEdit,
+} from "../../../lib/finance/sync-order-invoice-pricing";
+import {
+  assertOrderInvoiceAllowsCancellation,
+  OrderInvoiceCancellationError,
+  voidUnpaidInvoiceOnOrderCancel,
+} from "../../../lib/finance/void-unpaid-invoice";
 import {
   orderDetailInclude,
   serializeOrderDetail,
@@ -349,6 +362,16 @@ export async function PUT(
       }
     }
 
+    if (
+      existingOrder.status === "DISPATCHED" &&
+      deliveryServiceId === null
+    ) {
+      return NextResponse.json(
+        { error: "Cannot remove the delivery service from a dispatched order." },
+        { status: 400 }
+      );
+    }
+
     if (hasAssignment && assignedToId) {
       const employee = await prisma.user.findFirst({
         where: { id: assignedToId, role: "EMPLOYEE" },
@@ -367,6 +390,54 @@ export async function PUT(
     const existingDelivery = await prisma.orderDelivery.findUnique({ where: { orderId: id } });
     const currentServiceId = existingOrder.deliveryServiceId ?? existingDelivery?.deliveryServiceId ?? null;
     const nextDeliveryServiceId: string | null | undefined = deliveryServiceId;
+
+    // PACKED → DISPATCHED (or force) must pass the same readiness gate as POST /dispatch.
+    // Already-dispatched courier/tracking corrections skip this (safe historical edit).
+    if (dispatching) {
+      const nextWeight = hasActualWeight
+        ? actualWeight
+        : hasPackages
+          ? sumPackageWeights(packages!)
+          : undefined;
+      const ready = assertDispatchReadiness({
+        order: {
+          quantity: existingOrder.quantity,
+          reservedQuantity: existingOrder.reservedQuantity,
+          pickedQuantity: existingOrder.pickedQuantity,
+          deliveryServiceId: existingOrder.deliveryServiceId,
+        },
+        delivery: existingDelivery
+          ? {
+              deliveryServiceId: existingDelivery.deliveryServiceId,
+              actualWeight: Number(existingDelivery.actualWeight),
+            }
+          : null,
+        next: {
+          ...(deliveryServiceId !== undefined
+            ? { deliveryServiceId }
+            : {}),
+          ...(nextWeight !== undefined ? { actualWeight: nextWeight } : {}),
+          ...(pickedQuantity !== null ? { pickedQuantity } : {}),
+        },
+      });
+      if (!ready.ok) {
+        return NextResponse.json({ error: ready.error }, { status: 400 });
+      }
+      const effectiveForDispatch =
+        deliveryServiceId !== undefined
+          ? deliveryServiceId
+          : currentServiceId;
+      const service = effectiveForDispatch
+        ? await resolveActiveDeliveryService(effectiveForDispatch)
+        : null;
+      if (!service) {
+        return NextResponse.json(
+          { error: "Selected delivery service is not available." },
+          { status: 400 }
+        );
+      }
+    }
+
     if (deliveryServiceId) {
       const service = await prisma.deliveryService.findUnique({ where: { id: deliveryServiceId } });
       if (!service || !service.isActive) {
@@ -437,19 +508,12 @@ export async function PUT(
     }
 
     if (nextStatus === "CANCELLED" && existingOrder.status !== "CANCELLED") {
-      await restorePickedStock(existingOrder, stockAudit);
-      if (existingOrder.transactionId) {
-        await voidTransaction(
-          existingOrder.transactionId,
-          ReasonCode.VOID.INCORRECT_ENTRY,
-          cancelReason ?? "Order cancelled",
-          session
-        );
+      const invoiceGate = await assertOrderInvoiceAllowsCancellation(existingOrder.id);
+      if (!invoiceGate.ok) {
+        return NextResponse.json({ error: invoiceGate.error }, { status: 400 });
       }
-      await reverseRedemption({
-        customerId: existingOrder.userId,
-        orderId: existingOrder.id,
-      }).catch(() => undefined);
+      // Stock restore, sale void, loyalty reverse, order+invoice void run inside
+      // the cancelling transaction below (Phase 4 atomicity).
     }
 
     if (pickedQuantity !== null && session.role !== "CUSTOMER" && nextStatus !== "CANCELLED") {
@@ -491,10 +555,51 @@ export async function PUT(
         nextDeliveryServiceId === null ? { disconnect: true } : { connect: { id: nextDeliveryServiceId } };
     }
 
-    let updatedOrder = await prisma.order.update({
-      where: { id },
-      data: updateData,
-    });
+    const isCancelling =
+      status === "CANCELLED" && currentStatus !== "CANCELLED";
+
+    let updatedOrder;
+    try {
+      if (isCancelling) {
+        updatedOrder = await prisma.$transaction(async (tx) => {
+          await restorePickedStock(existingOrder, stockAudit, tx);
+          if (existingOrder.transactionId) {
+            await voidTransaction(
+              existingOrder.transactionId,
+              ReasonCode.VOID.INCORRECT_ENTRY,
+              cancelReason ?? "Order cancelled",
+              session,
+              tx
+            );
+          }
+          await reverseRedemption({
+            customerId: existingOrder.userId,
+            orderId: existingOrder.id,
+            db: tx,
+          });
+          const order = await tx.order.update({
+            where: { id },
+            data: updateData,
+          });
+          await voidUnpaidInvoiceOnOrderCancel({
+            orderId: id,
+            reason: cancelReason || "Order cancelled",
+            tx,
+          });
+          return order;
+        });
+      } else {
+        updatedOrder = await prisma.order.update({
+          where: { id },
+          data: updateData,
+        });
+      }
+    } catch (e) {
+      if (e instanceof OrderInvoiceCancellationError) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
 
     // Record packed weight + delivery charge (mandatory at PACKED).
     let packedDelivery: Awaited<ReturnType<typeof recordPackingDelivery>> | null = null;
@@ -560,14 +665,7 @@ export async function PUT(
       await markActiveVersionFinalFulfilled(id);
     }
 
-    if (status && status !== currentStatus) {
-      await prisma.invoice.updateMany({
-        where: { orderId: existingOrder.id },
-        data: {
-          status: status === "COMPLETED" ? InvoiceStatus.PAID : InvoiceStatus.ISSUED,
-        },
-      });
-    }
+    // Invoice PAID/ISSUED is payment-driven only — never flip from order status.
 
     // Loyalty: activate any pending points once the order is completed.
     if (status === "COMPLETED" && status !== currentStatus) {
@@ -754,15 +852,19 @@ export async function PATCH(
     const body = await req.json();
     const data: Prisma.OrderUpdateInput = {};
 
+    // Order.unitPrice is per pair; Order.quantity is pieces.
+    const pricingTouched =
+      body?.quantity !== undefined || body?.unitPrice !== undefined;
+    let nextPairPrice = Number(existingOrder.unitPrice);
+    let nextPieceQty = Number(existingOrder.quantity);
+
     if (body?.quantity !== undefined) {
       const quantity = Number(body.quantity);
       if (!Number.isFinite(quantity) || quantity <= 0) {
         return NextResponse.json({ error: "Invalid quantity." }, { status: 400 });
       }
       data.quantity = quantity;
-      if (body?.unitPrice === undefined) {
-        data.totalAmount = Number(existingOrder.unitPrice) * quantity;
-      }
+      nextPieceQty = quantity;
     }
 
     if (body?.unitPrice !== undefined) {
@@ -771,11 +873,21 @@ export async function PATCH(
         return NextResponse.json({ error: "Invalid unit price." }, { status: 400 });
       }
       data.unitPrice = unitPrice;
-      const qty =
-        body?.quantity !== undefined
-          ? Number(body.quantity)
-          : Number(existingOrder.quantity);
-      data.totalAmount = unitPrice * qty;
+      nextPairPrice = unitPrice;
+    }
+
+    if (pricingTouched) {
+      // C10: wholesale multi-line orders cannot be safely re-priced from header alone.
+      if (existingOrder.lineType === "WHOLESALE") {
+        return NextResponse.json(
+          {
+            error:
+              "Wholesale order quantity or pair price cannot be edited on the header. Multi-line wholesale invoices must be corrected via Finance or a replacement order — incomplete recalculation is not allowed.",
+          },
+          { status: 400 }
+        );
+      }
+      data.totalAmount = orderTotalFromPairPrice(nextPairPrice, nextPieceQty);
     }
 
     if (body?.sph !== undefined || body?.cyl !== undefined || body?.axis !== undefined || body?.add !== undefined || body?.eye !== undefined) {
@@ -837,7 +949,37 @@ export async function PATCH(
       return NextResponse.json({ error: "No editable fields provided." }, { status: 400 });
     }
 
-    await prisma.order.update({ where: { id }, data });
+    try {
+      await prisma.$transaction(async (tx) => {
+        const updated = await tx.order.update({ where: { id }, data });
+
+        if (pricingTouched) {
+          const sync = await syncUnpaidInvoiceAfterOrderPricingEdit(tx, {
+            orderId: id,
+            pairUnitPrice: nextPairPrice,
+            pieceQuantity: nextPieceQty,
+          });
+          if (!sync.ok) {
+            throw new OrderPricingInvoiceSyncError(sync.error);
+          }
+          // Keep linked sale transaction amount aligned with order total (retail).
+          if (existingOrder.transactionId) {
+            await tx.transaction.updateMany({
+              where: {
+                id: existingOrder.transactionId,
+                status: { not: "VOIDED" },
+              },
+              data: { amount: updated.totalAmount },
+            });
+          }
+        }
+      });
+    } catch (err) {
+      if (err instanceof OrderPricingInvoiceSyncError) {
+        return NextResponse.json({ error: err.message }, { status: 400 });
+      }
+      throw err;
+    }
 
     const auditCtx = buildAuditRequestContext(req);
     await recordAuditEvent(prisma, {
@@ -858,13 +1000,6 @@ export async function PATCH(
       message: "Order details edited before fulfillment.",
       metadata: data as Prisma.InputJsonValue,
     });
-
-    if (data.totalAmount !== undefined) {
-      await prisma.invoice.updateMany({
-        where: { orderId: id },
-        data: { amount: data.totalAmount as number },
-      });
-    }
 
     const full = await prisma.order.findUnique({
       where: { id },
@@ -901,30 +1036,60 @@ export async function DELETE(
       return NextResponse.json({ error: "Order is already archived." }, { status: 409 });
     }
 
-    if (existingOrder.status !== OrderStatus.CANCELLED) {
-      await restorePickedStock(existingOrder, {
-        actorUserId: session.userId,
-        orderId: id,
-        request: buildAuditRequestContext(req),
-      });
-      if (existingOrder.transactionId) {
-        await voidTransaction(
-          existingOrder.transactionId,
-          ReasonCode.VOID.INCORRECT_ENTRY,
-          archiveReason,
-          session
-        );
-      }
+    const invoiceGate = await assertOrderInvoiceAllowsCancellation(id);
+    if (!invoiceGate.ok) {
+      return NextResponse.json({ error: invoiceGate.error }, { status: 400 });
     }
 
-    await prisma.order.update({
-      where: { id },
-      data: {
-        archivedAt: new Date(),
-        archiveReason,
-        status: OrderStatus.CANCELLED,
-      },
-    });
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (existingOrder.status !== OrderStatus.CANCELLED) {
+          await restorePickedStock(
+            existingOrder,
+            {
+              actorUserId: session.userId,
+              orderId: id,
+              request: buildAuditRequestContext(req),
+            },
+            tx
+          );
+          if (existingOrder.transactionId) {
+            await voidTransaction(
+              existingOrder.transactionId,
+              ReasonCode.VOID.INCORRECT_ENTRY,
+              archiveReason,
+              session,
+              tx
+            );
+          }
+          await reverseRedemption({
+            customerId: existingOrder.userId,
+            orderId: existingOrder.id,
+            db: tx,
+          });
+        }
+        await tx.order.update({
+          where: { id },
+          data: {
+            archivedAt: new Date(),
+            archiveReason,
+            status: OrderStatus.CANCELLED,
+            transactionId: null,
+            reservedQuantity: 0,
+          },
+        });
+        await voidUnpaidInvoiceOnOrderCancel({
+          orderId: id,
+          reason: archiveReason,
+          tx,
+        });
+      });
+    } catch (e) {
+      if (e instanceof OrderInvoiceCancellationError) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
 
     await logOrderActivity(prisma, {
       orderId: id,

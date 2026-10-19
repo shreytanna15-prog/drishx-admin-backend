@@ -15,12 +15,19 @@ import {
   notifyEmployeeOfReturnAssigned,
 } from "../../../lib/staff-notifications";
 import { getSignedOrderImageUrl } from "../../../lib/supabase-storage";
+import { getEligibleCreditAmountForReturnRequest } from "../../../lib/return-eligibility";
 
 const REASSIGNABLE_STATUSES = new Set<string>([
   ReturnRequestStatus.APPROVED_CREDIT,
   ReturnRequestStatus.AWAITING_MATERIAL,
   ReturnRequestStatus.APPROVED_REPLACEMENT,
   ReturnRequestStatus.MORE_INFO_REQUIRED,
+]);
+
+const DECIDABLE_FOR_CREDIT_UI = new Set<string>([
+  ReturnRequestStatus.SUBMITTED,
+  ReturnRequestStatus.MORE_INFO_REQUIRED,
+  ReturnRequestStatus.ESCALATED_TO_ADMIN,
 ]);
 
 async function serializeReturnRequest(id: string) {
@@ -33,9 +40,14 @@ async function serializeReturnRequest(id: string) {
     }))
   );
 
+  const eligibleCreditAmount = DECIDABLE_FOR_CREDIT_UI.has(request.status)
+    ? await getEligibleCreditAmountForReturnRequest(id)
+    : null;
+
   return {
     ...request,
     approvedAmount: request.approvedAmount !== null ? Number(request.approvedAmount) : null,
+    eligibleCreditAmount,
     primaryOrder: serializeReturnOrderContext(request.primaryOrder),
     primaryInvoice: request.primaryInvoice
       ? {

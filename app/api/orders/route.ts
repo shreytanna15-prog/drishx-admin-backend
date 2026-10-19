@@ -398,9 +398,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: redemption.error }, { status: 400 });
     }
 
+    // COMPLETED does not imply cash settlement — never invent PAID without a payment.
     const { invoiceId } = await createInvoiceFromOrder({
       orderId: newOrder.id,
-      markPaid: newOrder.status === OrderStatus.COMPLETED,
       loyaltyDiscount: redemption.loyaltyDiscount,
     });
     const newInvoice = { id: invoiceId };

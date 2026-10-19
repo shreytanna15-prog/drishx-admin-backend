@@ -1,7 +1,11 @@
 import type { OrderStatus, Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { employeeOrdersWhere } from "./prescription-order-hold";
-import { ordersListLensSelect } from "./orders-list";
+import {
+  ordersListKryptokLensSelect,
+  ordersListProgressiveLensSelect,
+  ordersListSvLensSelect,
+} from "./orders-list";
 
 const IN_PROGRESS: OrderStatus[] = [
   "PENDING",
@@ -228,19 +232,19 @@ async function buildTopProducts(
     svIds.length
       ? prisma.singleVisionLens.findMany({
           where: { id: { in: svIds } },
-          select: ordersListLensSelect,
+          select: ordersListSvLensSelect,
         })
       : Promise.resolve([]),
     ktIds.length
       ? prisma.kryptokLens.findMany({
           where: { id: { in: ktIds } },
-          select: ordersListLensSelect,
+          select: ordersListKryptokLensSelect,
         })
       : Promise.resolve([]),
     progIds.length
       ? prisma.progressiveLens.findMany({
           where: { id: { in: progIds } },
-          select: ordersListLensSelect,
+          select: ordersListProgressiveLensSelect,
         })
       : Promise.resolve([]),
   ]);
@@ -339,9 +343,9 @@ export async function buildCustomerOrdersOverview(
       select: {
         id: true,
         lensType: true,
-        singleVisionLens: { select: ordersListLensSelect },
-        kryptokLens: { select: ordersListLensSelect },
-        progressiveLens: { select: ordersListLensSelect },
+        singleVisionLens: { select: ordersListSvLensSelect },
+        kryptokLens: { select: ordersListKryptokLensSelect },
+        progressiveLens: { select: ordersListProgressiveLensSelect },
       },
     }),
     buildTopProducts(userId),

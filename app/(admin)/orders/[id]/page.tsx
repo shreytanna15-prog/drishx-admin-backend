@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
@@ -31,6 +31,7 @@ import {
   getOrderCatalogLens,
   isColorLensOrder,
   isRxOrder,
+  resolveOrdersBackHref,
   statusBadgeClass,
 } from "@/app/lib/admin-orders";
 import {
@@ -65,8 +66,21 @@ function cleanNotes(notes: string | null | undefined) {
 }
 
 export default function OrderDetailPage() {
+  return (
+    <Suspense fallback={<AdminPage title="Order details" subtitle="Order control & details"><DetailSkeleton cards={4} /></AdminPage>}>
+      <OrderDetailPageContent />
+    </Suspense>
+  );
+}
+
+function OrderDetailPageContent() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const id = params?.id;
+  const backHref = useMemo(
+    () => resolveOrdersBackHref(searchParams),
+    [searchParams]
+  );
 
   const [order, setOrder] = useState<AdminOrder | null>(null);
   const [loading, setLoading] = useState(true);
@@ -125,7 +139,7 @@ export default function OrderDetailPage() {
     <AdminPage title={displayId} subtitle="Order control & details">
       <div className="mb-5">
         <Link
-          href="/orders"
+          href={backHref}
           className="inline-flex items-center gap-1.5 text-sm font-semibold text-(--brand-link) hover:underline"
         >
           <ArrowLeft className="size-4" />
@@ -328,7 +342,7 @@ export default function OrderDetailPage() {
                 value={order.pickedQuantity != null ? order.pickedQuantity : "—"}
               />
               <DetailRow
-                label="Unit price"
+                label="Price per pair"
                 value={formatMoney(order.unitPrice)}
               />
               <DetailRow

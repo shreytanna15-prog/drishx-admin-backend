@@ -174,7 +174,8 @@ export async function setOrderPickedQuantity(
 /** Restore inventory when a picked order is cancelled or deleted. */
 export async function restorePickedStock(
   order: Pick<Order, "lensType" | "singleVisionLensId" | "kryptokLensId" | "progressiveLensId" | "pickedQuantity" | "id">,
-  audit?: StockAuditOptions
+  audit?: StockAuditOptions,
+  db?: import("@prisma/client").Prisma.TransactionClient | typeof import("./prisma").prisma
 ) {
   const lensId = getOrderLensId(order);
   if (!lensId || order.pickedQuantity <= 0) return;
@@ -185,7 +186,8 @@ export async function restorePickedStock(
     stockAuditPayload(
       audit ? { ...audit, orderId: audit.orderId ?? order.id } : undefined,
       "STOCK_RESTORED"
-    )
+    ),
+    db ?? prisma
   );
 }
 

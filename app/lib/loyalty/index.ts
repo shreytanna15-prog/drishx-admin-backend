@@ -10,7 +10,11 @@ export {
   resolveCheckoutRedemption,
   applyOrderRedemption,
 } from "./redeem";
-export { reverseOrderLoyalty, reverseForReturn } from "./reverse";
+export {
+  reverseOrderLoyalty,
+  reverseForReturn,
+  reverseLoyaltyForCreditAllocations,
+} from "./reverse";
 export { expirePoints } from "./expire";
 export { adjustPoints } from "./adjust";
 export { getLoyaltyDashboard, getLoyaltyLedger } from "./dashboard";

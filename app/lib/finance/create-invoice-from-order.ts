@@ -4,19 +4,36 @@ import { getCompanyFinanceSettings, resolveProductTax } from "./company-settings
 import { nextInvoiceNumber } from "./invoice-number";
 import { resolvePlaceOfSupply } from "./place-of-supply";
 import { roundMoney } from "./tax-calc";
-import { computeInvoicePricingFromOrder } from "./invoice-order-pricing";
+import {
+  computeInvoicePricingFromOrder,
+  computeInvoicePricingFromWholesaleLines,
+} from "./invoice-order-pricing";
 import { postCustomerLedgerInvoice } from "./customer-ledger";
 import { postSalesInvoiceJournal } from "./journal";
 import { checkCreditLimitWarning } from "./credit-limit";
+import {
+  MarkPaidWithoutSettlementError,
+  resolveMarkPaidInvoiceSettlement,
+} from "./mark-paid-settlement";
+
+export {
+  MarkPaidWithoutSettlementError,
+  resolveMarkPaidInvoiceSettlement,
+} from "./mark-paid-settlement";
 
 export type CreateInvoiceFromOrderInput = {
   orderId: string;
-  /** When order is COMPLETED, mark invoice paid. */
+  /**
+   * Mark invoice PAID only when grand total is ~0 (e.g. free replacement).
+   * Nonzero markPaid is rejected — record a real payment in Finance instead.
+   */
   markPaid?: boolean;
   /** Loyalty points redeemed against this order (in ₹). Reduces taxable + GST. */
   loyaltyDiscount?: number;
   tx?: Prisma.TransactionClient;
 };
+
+const MARK_PAID_MONEY_EPS = 0.009;
 
 function powerLabel(order: {
   sph?: unknown;
@@ -158,37 +175,123 @@ export async function createInvoiceFromOrder(
   });
 
   // Catalog Order.unitPrice is per pair; Order.quantity is pieces.
-  // Use the same pair→piece conversion as checkout (orderTotalFromPairPrice).
+  // Wholesale with line items: bill from those lines (never header×qty alone).
+  // Retail / header-only: single pair→piece conversion.
   // Idempotent early-return above ensures this never rewrites issued invoices.
   const loyaltyDiscount = roundMoney(Number(input.loyaltyDiscount) || 0);
-  const pricing = computeInvoicePricingFromOrder({
-    pairUnitPrice: Number(order.unitPrice) || 0,
-    pieceQuantity: Number(order.quantity) || 1,
-    discountAmount: loyaltyDiscount,
-    gstRatePercent: tax.gstRatePercent,
-    isInterState: pos.isInterState,
-  });
-  const { quantity: qty, unitPrice, totals } = pricing;
-  const line = totals.lines[0]!;
+  const isWholesaleWithLines =
+    order.lineType === "WHOLESALE" && order.wholesaleLineItems.length > 0;
+
+  const wholesalePricingRaw = isWholesaleWithLines
+    ? computeInvoicePricingFromWholesaleLines({
+        lines: order.wholesaleLineItems.map((w) => ({
+          pairUnitPrice: Number(w.unitPrice) || 0,
+          pieceQuantity: Number(w.quantity) || 0,
+          powerLabel: powerLabel({
+            sph: w.sph,
+            cyl: w.cyl,
+            axis: w.axis,
+            add: w.add,
+            eye: null,
+          }),
+          description: label.description,
+        })),
+        discountAmount: loyaltyDiscount,
+        gstRatePercent: tax.gstRatePercent,
+        isInterState: pos.isInterState,
+      })
+    : null;
+  const wholesalePricing =
+    wholesalePricingRaw && wholesalePricingRaw.lines.length > 0
+      ? wholesalePricingRaw
+      : null;
+
+  const retailPricing = !wholesalePricing
+    ? computeInvoicePricingFromOrder({
+        pairUnitPrice: Number(order.unitPrice) || 0,
+        pieceQuantity: Number(order.quantity) || 1,
+        discountAmount: loyaltyDiscount,
+        gstRatePercent: tax.gstRatePercent,
+        isInterState: pos.isInterState,
+      })
+    : null;
+
+  const totals = wholesalePricing?.totals ?? retailPricing!.totals;
   const issuedAt = new Date();
   const dueDays = settings.paymentTermsDays ?? 30;
   const dueDate = new Date(issuedAt);
   dueDate.setDate(dueDate.getDate() + dueDays);
 
-  const { number: invoiceNumber, financialYear } = await nextInvoiceNumber(issuedAt);
+  const { number: invoiceNumber, financialYear } = await nextInvoiceNumber(
+    issuedAt,
+    db
+  );
 
-  const status: InvoiceStatus = input.markPaid
-    ? InvoiceStatus.PAID
-    : InvoiceStatus.ISSUED;
-
-  const amountPaid = input.markPaid ? totals.grandTotal : 0;
-  const amountOutstanding = roundMoney(totals.grandTotal - amountPaid);
+  const settlement = resolveMarkPaidInvoiceSettlement({
+    markPaid: Boolean(input.markPaid),
+    grandTotal: totals.grandTotal,
+  });
+  if (!settlement.ok) {
+    throw new MarkPaidWithoutSettlementError(settlement.error);
+  }
+  const { status, amountPaid, amountOutstanding } = settlement;
 
   const customerType =
     order.user.customerType ??
     (order.user.gstNumber
       ? CustomerTaxType.REGISTERED
       : CustomerTaxType.UNREGISTERED);
+
+  const lensId =
+    order.singleVisionLensId ||
+    order.kryptokLensId ||
+    order.progressiveLensId ||
+    order.bifocalLensId ||
+    order.oriVisionLensId ||
+    order.magnusLensId;
+
+  const invoiceLines = wholesalePricing
+    ? wholesalePricing.lines.map((prepared, index) => {
+        const taxLine = totals.lines[index]!;
+        return {
+          lineNumber: index + 1,
+          description: prepared.description || label.description,
+          sku: order.lensType,
+          lensType: order.lensType,
+          lensId,
+          powerLabel: prepared.powerLabel,
+          hsnCode: tax.hsnCode,
+          quantity: prepared.quantity,
+          unitPrice: prepared.unitPrice,
+          discountAmount: taxLine.discountAmount,
+          taxableAmount: taxLine.taxableAmount,
+          gstRatePercent: taxLine.gstRatePercent,
+          cgstAmount: taxLine.cgstAmount,
+          sgstAmount: taxLine.sgstAmount,
+          igstAmount: taxLine.igstAmount,
+          lineTotal: taxLine.lineTotal,
+        };
+      })
+    : [
+        {
+          lineNumber: 1,
+          description: label.description,
+          sku: order.lensType,
+          lensType: order.lensType,
+          lensId,
+          powerLabel: powerLabel(order),
+          hsnCode: tax.hsnCode,
+          quantity: retailPricing!.quantity,
+          unitPrice: retailPricing!.unitPrice,
+          discountAmount: totals.lines[0]!.discountAmount,
+          taxableAmount: totals.lines[0]!.taxableAmount,
+          gstRatePercent: totals.lines[0]!.gstRatePercent,
+          cgstAmount: totals.lines[0]!.cgstAmount,
+          sgstAmount: totals.lines[0]!.sgstAmount,
+          igstAmount: totals.lines[0]!.igstAmount,
+          lineTotal: totals.lines[0]!.lineTotal,
+        },
+      ];
 
   const invoice = await db.invoice.create({
     data: {
@@ -227,37 +330,16 @@ export async function createInvoiceFromOrder(
       customerBillingState: order.user.billingState || order.user.state,
       customerTypeSnapshot: customerType,
       lines: {
-        create: [
-          {
-            lineNumber: 1,
-            description: label.description,
-            sku: order.lensType,
-            lensType: order.lensType,
-            lensId:
-              order.singleVisionLensId ||
-              order.kryptokLensId ||
-              order.progressiveLensId ||
-              order.bifocalLensId ||
-              order.oriVisionLensId ||
-              order.magnusLensId,
-            powerLabel: powerLabel(order),
-            hsnCode: tax.hsnCode,
-            quantity: qty,
-            unitPrice,
-            discountAmount: line.discountAmount,
-            taxableAmount: line.taxableAmount,
-            gstRatePercent: line.gstRatePercent,
-            cgstAmount: line.cgstAmount,
-            sgstAmount: line.sgstAmount,
-            igstAmount: line.igstAmount,
-            lineTotal: line.lineTotal,
-          },
-        ],
+        create: invoiceLines,
       },
     },
   });
 
-  if (status === InvoiceStatus.ISSUED || status === InvoiceStatus.PAID) {
+  // Zero-value replacement invoices: skip AR / journal postings (nothing to settle).
+  if (
+    (status === InvoiceStatus.ISSUED || status === InvoiceStatus.PAID) &&
+    Math.abs(totals.grandTotal) > MARK_PAID_MONEY_EPS
+  ) {
     await postCustomerLedgerInvoice({
       customerId: order.userId,
       invoiceId: invoice.id,

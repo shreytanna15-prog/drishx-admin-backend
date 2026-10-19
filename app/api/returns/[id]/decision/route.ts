@@ -14,6 +14,20 @@ import {
   ReturnRequestStatus,
 } from "../../../../lib/returns";
 import {
+  aggregateQuantitiesByOrderId,
+  computeMaxEligibleCredit,
+  lockOrdersForReturnEligibility,
+  loadPriorApprovedCreditsByOrderId,
+  loadReservedReturnQuantitiesByOrderId,
+  resolveApprovedCreditAmount,
+  ReturnEligibilityError,
+  validateRequestedReturnQuantities,
+} from "../../../../lib/return-eligibility";
+import {
+  allocateReturnCreditAcrossInvoices,
+  estimateReturnCreditByOrder,
+} from "../../../../lib/return-credit";
+import {
   notifyCustomerOfReturnDecision,
   notifyEmployeeOfReturnAssigned,
 } from "../../../../lib/staff-notifications";
@@ -25,7 +39,7 @@ import {
   recordAuditEvent,
 } from "../../../../lib/audit";
 import { createInvoiceFromOrder } from "../../../../lib/finance/create-invoice-from-order";
-import { reverseForReturn } from "../../../../lib/loyalty/reverse";
+import { reverseLoyaltyForCreditAllocations } from "../../../../lib/loyalty/reverse";
 
 const DECIDABLE_STATUSES = new Set<string>([
   ReturnRequestStatus.SUBMITTED,
@@ -51,7 +65,8 @@ export async function POST(
   const decision = parseReturnDecision(body?.decision);
   const stockDisposition = parseStockDisposition(body?.stockDisposition);
   const remarks = typeof body?.remarks === "string" ? body.remarks.trim() : "";
-  const approvedAmount = Number(body?.approvedAmount);
+  /** Keep raw so missing/blank can auto-calc; never Number() into NaN early. */
+  const approvedAmountRaw = body?.approvedAmount;
   const assignedEmployeeIdRaw =
     typeof body?.assignedEmployeeId === "string" ? body.assignedEmployeeId.trim() : "";
 
@@ -109,6 +124,16 @@ export async function POST(
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      const live = await tx.returnRequest.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+      if (!live || !DECIDABLE_STATUSES.has(live.status)) {
+        throw new ReturnEligibilityError(
+          "This return request has already been decided or closed."
+        );
+      }
+
       if (decision === "REJECT") {
         if (!remarks) {
           throw new Error("Remarks are required to reject.");
@@ -132,7 +157,45 @@ export async function POST(
         return;
       }
 
-      for (const item of request.items) {
+      const orderIds = [
+        ...new Set(live.items.map((i) => i.originalOrderId)),
+      ];
+      await lockOrdersForReturnEligibility(tx, orderIds);
+
+      const orders = await tx.order.findMany({
+        where: { id: { in: orderIds } },
+        select: {
+          id: true,
+          quantity: true,
+          unitPrice: true,
+          totalAmount: true,
+        },
+      });
+      const orderedQtyByOrderId = new Map(
+        orders.map((o) => [o.id, Number(o.quantity)])
+      );
+      const requestedByOrderId = aggregateQuantitiesByOrderId(
+        live.items.map((i) => ({
+          originalOrderId: i.originalOrderId,
+          quantity: Number(i.quantity),
+        }))
+      );
+      // Exclude this request: its items are pending and already counted in reserved.
+      const reservedExcludingSelf = await loadReservedReturnQuantitiesByOrderId(
+        tx,
+        orderIds,
+        id
+      );
+      const qtyCheck = validateRequestedReturnQuantities({
+        requestedByOrderId,
+        orderedQtyByOrderId,
+        reservedQtyByOrderId: reservedExcludingSelf,
+      });
+      if (!qtyCheck.ok) {
+        throw new ReturnEligibilityError(qtyCheck.error);
+      }
+
+      for (const item of live.items) {
         await tx.inventoryMovement.create({
           data: {
             returnRequestId: id,
@@ -151,36 +214,147 @@ export async function POST(
       }
 
       if (decision === "CREDIT") {
-        const amount =
-          Number.isFinite(approvedAmount) && approvedAmount > 0
-            ? approvedAmount
-            : request.items.reduce((sum, item) => {
-                const unit = request.primaryOrder
-                  ? Number(request.primaryOrder.unitPrice) || 0
-                  : 0;
-                return sum + unit * Number(item.quantity);
-              }, 0);
+        const invoices = await tx.invoice.findMany({
+          where: { orderId: { in: orderIds } },
+          select: {
+            id: true,
+            orderId: true,
+            amount: true,
+            amountOutstanding: true,
+            taxableAmount: true,
+            cgstAmount: true,
+            sgstAmount: true,
+            igstAmount: true,
+            lines: {
+              select: {
+                quantity: true,
+                unitPrice: true,
+                lineTotal: true,
+              },
+              orderBy: { lineNumber: "asc" },
+            },
+          },
+        });
+        const ordersById = new Map(
+          orders.map((o) => [
+            o.id,
+            {
+              id: o.id,
+              quantity: Number(o.quantity),
+              unitPrice: Number(o.unitPrice),
+              totalAmount: Number(o.totalAmount),
+            },
+          ])
+        );
+        const invoicesByOrderId = new Map(
+          invoices.map((inv) => [
+            inv.orderId,
+            {
+              id: inv.id,
+              orderId: inv.orderId,
+              amount: Number(inv.amount),
+              amountOutstanding: Number(inv.amountOutstanding),
+              taxableAmount: Number(inv.taxableAmount),
+              cgstAmount: Number(inv.cgstAmount),
+              sgstAmount: Number(inv.sgstAmount),
+              igstAmount: Number(inv.igstAmount),
+              lines: inv.lines.map((l) => ({
+                quantity: Number(l.quantity),
+                unitPrice: Number(l.unitPrice),
+                lineTotal: Number(l.lineTotal),
+              })),
+            },
+          ])
+        );
+        const creditItems = live.items.map((i) => ({
+          originalOrderId: i.originalOrderId,
+          quantity: Number(i.quantity),
+        }));
+        const priorCreditedByOrderId = await loadPriorApprovedCreditsByOrderId(
+          tx,
+          orderIds,
+          id,
+          { ordersById, invoicesByOrderId }
+        );
+        const maxEligible = computeMaxEligibleCredit({
+          items: creditItems,
+          ordersById,
+          invoicesByOrderId,
+          priorCreditedByOrderId,
+        });
+        const resolved = resolveApprovedCreditAmount({
+          requestedAmount: approvedAmountRaw,
+          maxEligible,
+        });
+        if (!resolved.ok) {
+          throw new ReturnEligibilityError(resolved.error);
+        }
+        const amount = resolved.amount;
 
-        await createCreditNoteForReturn(tx, {
+        const eligibleByOrderId = estimateReturnCreditByOrder({
+          items: creditItems,
+          ordersById,
+          invoicesByOrderId,
+        });
+        // Cap each order's weight by remaining eligible after prior credits.
+        for (const [orderId, elig] of eligibleByOrderId) {
+          const order = ordersById.get(orderId);
+          if (!order) continue;
+          const full = estimateReturnCreditByOrder({
+            items: [
+              {
+                originalOrderId: orderId,
+                quantity: Number(order.quantity),
+              },
+            ],
+            ordersById,
+            invoicesByOrderId,
+          }).get(orderId) ?? 0;
+          const prior = Number(priorCreditedByOrderId.get(orderId) ?? 0);
+          const remaining = Math.max(0, full - prior);
+          eligibleByOrderId.set(orderId, Math.min(elig, remaining));
+        }
+
+        const allocation = allocateReturnCreditAcrossInvoices({
+          approvedAmount: amount,
+          eligibleByOrderId,
+          invoices: invoices.map((inv) => ({
+            orderId: inv.orderId,
+            invoiceId: inv.id,
+            invoiceAmount: Number(inv.amount),
+            amountOutstanding: Number(inv.amountOutstanding),
+            taxableAmount: Number(inv.taxableAmount),
+            cgstAmount: Number(inv.cgstAmount),
+            sgstAmount: Number(inv.sgstAmount),
+            igstAmount: Number(inv.igstAmount),
+          })),
+        });
+        if (!allocation.ok) {
+          throw new ReturnEligibilityError(allocation.error);
+        }
+
+        const { creditNote } = await createCreditNoteForReturn(tx, {
           returnRequestId: id,
-          invoiceId: request.primaryInvoiceId,
           userId: request.customerId,
           amount,
           reason: remarks || "Return approved as credit.",
+          allocations: allocation.allocations,
+          primaryInvoiceId: request.primaryInvoiceId,
         });
 
-        // Loyalty: reverse points proportionally on the returned value.
-        if (request.primaryOrderId) {
-          await reverseForReturn({
-            customerId: request.customerId,
-            orderId: request.primaryOrderId,
-            invoiceId: request.primaryInvoiceId,
-            returnRequestId: id,
-            returnedTaxable: amount,
-            reason: `Return ${request.requestNumber}: ${remarks || "credit approved"}`,
-            db: tx,
-          }).catch(() => undefined);
-        }
+        // Loyalty: reverse from tax-exclusive allocation shares (same tx — no silent swallow).
+        await reverseLoyaltyForCreditAllocations({
+          customerId: request.customerId,
+          returnRequestId: id,
+          creditNoteId: creditNote.id,
+          reason: `Return ${request.requestNumber}: ${remarks || "credit approved"}`,
+          allocations: allocation.allocations.map((a) => ({
+            orderId: a.orderId,
+            invoiceId: a.invoiceId,
+            taxableAmount: a.taxableAmount,
+          })),
+          db: tx,
+        });
 
         await tx.returnRequest.update({
           where: { id },
@@ -303,7 +477,12 @@ export async function POST(
         actor: actorFromSession(session),
         request: auditCtx,
         context: {
-          approvedAmount: Number.isFinite(approvedAmount) ? approvedAmount : null,
+          approvedAmount:
+            approvedAmountRaw === undefined ||
+            approvedAmountRaw === null ||
+            approvedAmountRaw === ""
+              ? null
+              : Number(approvedAmountRaw),
           requestNumber: request.requestNumber,
         },
         relatedRefs: { returnId: id },

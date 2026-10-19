@@ -21,6 +21,7 @@ import {
 } from "./assign-order-to-employee";
 import type { WholesaleExpandedLine } from "./wholesale-cart";
 import { createInvoiceFromOrder } from "./finance/create-invoice-from-order";
+import { wholesaleHeaderPairUnitPrice } from "./finance/invoice-order-pricing";
 import {
   applyOrderRedemption,
   resolveCheckoutRedemption,
@@ -307,7 +308,8 @@ export async function placeWholesaleCheckoutBatches(
           quantity: batch.totalQuantity,
           reservedQuantity: batch.totalReservedQuantity,
           pickedQuantity: 0,
-          unitPrice: Number(primaryRow.unitPrice),
+          // Authoritative catalog pair price from prepared lines — never cart.unitPrice.
+          unitPrice: wholesaleHeaderPairUnitPrice(batch.lines),
           totalAmount: batch.totalAmount,
           sph: null,
           cyl: null,
@@ -356,9 +358,9 @@ export async function placeWholesaleCheckoutBatches(
           throw new Error(redemption.error);
         }
 
+        // COMPLETED does not imply cash settlement — never invent PAID without a payment.
         const { invoiceId } = await createInvoiceFromOrder({
           orderId: newOrder.id,
-          markPaid: newOrder.status === OrderStatus.COMPLETED,
           loyaltyDiscount: redemption.loyaltyDiscount,
           tx,
         });

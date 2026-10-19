@@ -4,12 +4,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
-import { ListSkeleton } from "@/components/admin-skeletons";
+import {
+  ListSkeleton,
+  PaginatedListStatusBanner,
+} from "@/components/admin-skeletons";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { LoyaltyCustomerRow } from "@/app/lib/admin-loyalty";
-import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
+import {
+  resolvePaginatedListUi,
+  usePaginatedListState,
+} from "@/app/lib/hooks/use-paginated-list-state";
 import { useGetLoyaltyCustomers } from "@/app/lib/modules/loyalty/query/use-get-loyalty-customers";
 import { useInfiniteScrollSentinel } from "@/hooks/use-progressive-list";
 
@@ -26,8 +32,14 @@ export default function LoyaltyCustomersPage() {
     return () => window.clearTimeout(t);
   }, [query]);
 
-  const { page, setPage, items, onPageSuccess } =
-    usePaginatedListState<LoyaltyCustomerRow>(debouncedQ);
+  const {
+    page,
+    setPage,
+    items,
+    onPageSuccess,
+    acknowledgeCurrentKey,
+    awaitingCurrentKey,
+  } = usePaginatedListState<LoyaltyCustomerRow>(debouncedQ);
 
   const { data, loading, refreshing, error, refetch } = useGetLoyaltyCustomers(
     {
@@ -35,16 +47,27 @@ export default function LoyaltyCustomersPage() {
       limit: 30,
       q: debouncedQ || undefined,
     },
-    { onSuccess: onPageSuccess }
+    {
+      onSuccess: onPageSuccess,
+      onError: () => acknowledgeCurrentKey(),
+    }
   );
 
   const hasMore = Boolean(data?.hasMore);
-  const showInitialLoading = loading && page === 1 && items.length === 0;
+  const listUi = resolvePaginatedListUi({
+    loading,
+    refreshing,
+    itemCount: items.length,
+    hasActiveFilters: Boolean(query.trim()),
+    awaitingCurrentKey,
+    error: Boolean(error),
+    entityLabel: "customers",
+  });
 
   const { setSentinelNode } = useInfiniteScrollSentinel({
-    enabled: hasMore && !loading && !refreshing,
+    enabled: hasMore && !listUi.isPending,
     onLoadMore: () => setPage((p) => p + 1),
-    deps: [items.length, page, hasMore],
+    deps: [items.length, page, hasMore, listUi.isPending],
   });
 
   const sorted = useMemo(
@@ -91,12 +114,23 @@ export default function LoyaltyCustomersPage() {
           </div>
         ) : null}
 
-        {showInitialLoading ? (
+        <PaginatedListStatusBanner message={listUi.statusBanner} />
+
+        {listUi.showPendingPlaceholder ? (
           <ListSkeleton rows={8} />
-        ) : sorted.length === 0 ? (
-          <p className="text-sm text-(--brand-muted)">No customers found.</p>
+        ) : listUi.showEmpty ? (
+          <p className="text-sm text-(--brand-muted)">
+            {query.trim() ? "No customers match your search." : "No customers found."}
+          </p>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card)">
+          <div
+            className={
+              listUi.showStaleContent
+                ? "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) opacity-55 transition-opacity"
+                : "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) transition-opacity"
+            }
+            aria-busy={listUi.isPending || undefined}
+          >
             <ul className="divide-y divide-(--brand-card-border)">
               {sorted.map((row) => (
                 <li key={row.id}>

@@ -736,7 +736,7 @@ sequenceDiagram
     alt decision = CREDIT
         BE->>DB: InventoryMovement per item with disposition
         BE->>DB: if RETURN_TO_SALEABLE then incrementLensStock
-        BE->>DB: CreditNote (amount or fallback unitPrice x qty)
+        BE->>DB: CreditNote + CreditNoteAllocation(s) (tax-inclusive invoice credit; no unitPrice×qty fallback)
         BE->>DB: status = APPROVED_CREDIT + timeline APPROVED_CREDIT
     else decision = REPLACEMENT
         BE->>DB: InventoryMovement per item

@@ -35,8 +35,11 @@ const ORDER_STATUSES = new Set<string>([
   "CANCELLED",
 ]);
 
-/** Slim lens fields for catalog summary on list rows. */
-export const ordersListLensSelect = {
+/**
+ * Slim lens fields per Prisma model (families differ — do not share one select).
+ * SV: no axis/add/eye. Kryptok: no index/eye. Progressive: no crossPower.
+ */
+export const ordersListSvLensSelect = {
   id: true,
   brand: true,
   category: true,
@@ -46,10 +49,34 @@ export const ordersListLensSelect = {
   sph: true,
   cyl: true,
   crossPower: true,
+} as const satisfies Prisma.SingleVisionLensSelect;
+
+export const ordersListKryptokLensSelect = {
+  id: true,
+  brand: true,
+  category: true,
+  item: true,
+  coating: true,
+  sph: true,
+  cyl: true,
+  crossPower: true,
+  axis: true,
+  add: true,
+} as const satisfies Prisma.KryptokLensSelect;
+
+export const ordersListProgressiveLensSelect = {
+  id: true,
+  brand: true,
+  category: true,
+  item: true,
+  coating: true,
+  index: true,
+  sph: true,
+  cyl: true,
   axis: true,
   add: true,
   eye: true,
-} as const;
+} as const satisfies Prisma.ProgressiveLensSelect;
 
 export const ordersListInclude = {
   user: {
@@ -70,9 +97,9 @@ export const ordersListInclude = {
     },
   },
   ...orderPlacedByInclude,
-  singleVisionLens: { select: ordersListLensSelect },
-  kryptokLens: { select: ordersListLensSelect },
-  progressiveLens: { select: ordersListLensSelect },
+  singleVisionLens: { select: ordersListSvLensSelect },
+  kryptokLens: { select: ordersListKryptokLensSelect },
+  progressiveLens: { select: ordersListProgressiveLensSelect },
 } satisfies Prisma.OrderInclude;
 
 export function parseOrdersListParams(searchParams: URLSearchParams): OrdersListParams {
@@ -320,7 +347,6 @@ export function serializeOrderListItem(order: ListOrderRow, role: string) {
           cyl: num(order.kryptokLens.cyl),
           crossPower: num(order.kryptokLens.crossPower),
           add: num(order.kryptokLens.add),
-          index: num(order.kryptokLens.index),
         }
       : null,
     progressiveLens: order.progressiveLens
@@ -328,7 +354,6 @@ export function serializeOrderListItem(order: ListOrderRow, role: string) {
           ...order.progressiveLens,
           sph: num(order.progressiveLens.sph),
           cyl: num(order.progressiveLens.cyl),
-          crossPower: num(order.progressiveLens.crossPower),
           add: num(order.progressiveLens.add),
           index: num(order.progressiveLens.index),
         }

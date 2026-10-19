@@ -15,6 +15,7 @@ import {
   formatReturnPowerLine,
   formatReturnReason,
   formatReturnStatus,
+  resolveApprovedCreditDisplay,
   returnStatusBadgeClass,
   type AdminReturnOrderContext,
   type AdminReturnRequest,
@@ -86,7 +87,7 @@ function ReturnOrderContextBlock({
         {" · "}
         {formatReturnMoney(order.totalAmount)}
         {" · "}
-        {formatReturnMoney(order.unitPrice)} / unit
+        {formatReturnMoney(order.unitPrice)} per pair
         {" · "}
         {formatReturnDate(order.createdAt)}
       </p>
@@ -153,6 +154,9 @@ export default function ReturnDetailPage() {
         request.status === "APPROVED_REPLACEMENT" ||
         (request.status === "MORE_INFO_REQUIRED" && Boolean(request.assignedEmployee)))
     : false;
+  const approvedCredit = request
+    ? resolveApprovedCreditDisplay(request)
+    : { show: false as const };
 
   const activeEmployees = useMemo(
     () => employees.filter((e) => e.isActive !== false),
@@ -195,6 +199,24 @@ export default function ReturnDetailPage() {
       setError("Select an employee to assign before approving.");
       return;
     }
+    if (decision === "CREDIT" && approvedAmount.trim()) {
+      const entered = Number(approvedAmount);
+      const maxEligible = request.eligibleCreditAmount;
+      if (!Number.isFinite(entered) || entered <= 0) {
+        setError("Approved amount must be a positive number, or leave blank for auto-calc.");
+        return;
+      }
+      if (
+        maxEligible != null &&
+        Number.isFinite(maxEligible) &&
+        entered > maxEligible + 0.009
+      ) {
+        setError(
+          `Approved amount ₹${entered.toFixed(2)} exceeds eligible credit ₹${maxEligible.toFixed(2)} for this return.`
+        );
+        return;
+      }
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -203,7 +225,7 @@ export default function ReturnDetailPage() {
         body: JSON.stringify({
           decision,
           remarks,
-          approvedAmount: approvedAmount ? Number(approvedAmount) : undefined,
+          approvedAmount: approvedAmount.trim() ? Number(approvedAmount) : undefined,
           stockDisposition,
           ...(decision !== "REJECT" ? { assignedEmployeeId } : {}),
         }),
@@ -311,6 +333,75 @@ export default function ReturnDetailPage() {
               </div>
             ) : null}
           </section>
+
+          {approvedCredit.show ? (
+            <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+              <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+                Approved Credit
+              </h2>
+              {approvedCredit.needsReconciliation ? (
+                <p className="mt-3 rounded-xl border border-amber-400/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                  Reconciliation needed — approved amount or linked credit note is missing from
+                  persisted records.
+                </p>
+              ) : null}
+              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted)">
+                    Approved amount
+                  </p>
+                  <p className="mt-2 font-semibold text-(--brand-text)">
+                    {approvedCredit.approvedAmount != null
+                      ? formatReturnMoney(approvedCredit.approvedAmount)
+                      : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted)">
+                    Credit note
+                  </p>
+                  <p className="mt-2 font-semibold text-(--brand-text)">
+                    {approvedCredit.creditNoteNumber ?? "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted)">
+                    Credit note amount
+                  </p>
+                  <p className="mt-2 font-semibold text-(--brand-text)">
+                    {approvedCredit.creditNoteAmount != null
+                      ? formatReturnMoney(approvedCredit.creditNoteAmount)
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+              {approvedCredit.allocations.length > 0 ? (
+                <div className="mt-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-(--brand-text-muted)">
+                    Allocations by invoice
+                  </p>
+                  <ul className="mt-2 space-y-2">
+                    {approvedCredit.allocations.map((row) => (
+                      <li
+                        key={row.invoiceId}
+                        className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-(--brand-card-border) px-3 py-2 text-sm"
+                      >
+                        <span className="font-medium text-(--brand-text)">
+                          {row.invoiceNumber ?? row.invoiceId}
+                        </span>
+                        <span className="text-(--brand-text-muted)">
+                          {formatReturnMoney(row.amount)}
+                          <span className="ml-2 text-xs">
+                            (taxable {formatReturnMoney(row.taxableAmount)})
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
             <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
@@ -434,11 +525,22 @@ export default function ReturnDetailPage() {
                   <Input
                     type="number"
                     min={0}
+                    max={
+                      request.eligibleCreditAmount != null
+                        ? request.eligibleCreditAmount
+                        : undefined
+                    }
                     step="0.01"
                     value={approvedAmount}
                     onChange={(e) => setApprovedAmount(e.target.value)}
-                    placeholder="Optional for auto-calc"
+                    placeholder="Leave blank for auto-calc"
                   />
+                  {request.eligibleCreditAmount != null ? (
+                    <span className="text-xs text-(--brand-text-muted)">
+                      Max eligible {formatReturnMoney(request.eligibleCreditAmount)} (pair
+                      pricing; prior credits deducted). Over-limit amounts are rejected.
+                    </span>
+                  ) : null}
                 </label>
                 <label className="block space-y-1 md:col-span-2">
                   <span className="text-xs font-semibold text-(--brand-text-muted)">

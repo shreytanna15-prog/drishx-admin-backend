@@ -21,3 +21,26 @@ These items from the Finance PDF are **intentionally not built** in this deliver
 - Company / employee cash + no-bill expense approval (mobile submit)
 - GST summary, HSN, power-wise reports
 - Finance settings (company GSTIN, defaults)
+
+## Phase 1–4 integrity — deploy order (required)
+
+`CreditNoteAllocation` and related client types must exist **before** the app that writes nested allocations is live. Wrong order causes runtime failures on credit approval.
+
+1. **Migrate** (apply SQL, including `prisma/migrations/20261019120000_credit_note_allocation`):
+   ```bash
+   npx prisma migrate deploy
+   ```
+2. **Generate** Prisma Client (so `creditNoteAllocation` / nested `allocations.create` types exist):
+   ```bash
+   npx prisma generate
+   ```
+3. **Deploy** the application build that depends on those models.
+
+Do **not** deploy the app before migrate + generate. Historical credit notes without allocation rows remain valid (no backfill).
+
+## Remaining policy blockers (not implemented)
+
+| Item | Status |
+|------|--------|
+| GST **credit-note reverse journal** (input tax / CN GST posting) | Deferred — needs written CA policy; do not invent |
+| NIC e-Invoice / e-Way Bill, payment gateway, hard credit-limit block | See table above |

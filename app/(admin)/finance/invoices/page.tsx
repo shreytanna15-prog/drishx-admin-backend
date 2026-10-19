@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AdminPage } from "@/components/admin-shell";
-import { TableSkeleton } from "@/components/admin-skeletons";
+import {
+  PaginatedListStatusBanner,
+  TableSkeleton,
+} from "@/components/admin-skeletons";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +26,10 @@ import {
   invoiceCustomerLabel,
   invoiceStatusClass,
 } from "@/app/lib/admin-invoices";
-import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
+import {
+  resolvePaginatedListUi,
+  usePaginatedListState,
+} from "@/app/lib/hooks/use-paginated-list-state";
 import { useGetInvoices } from "@/app/lib/modules/invoices/query/use-get-invoices";
 import { useInfiniteScrollSentinel } from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
@@ -37,8 +43,14 @@ export default function SalesInvoicesPage() {
     return () => window.clearTimeout(t);
   }, [query]);
 
-  const { page, setPage, items, onPageSuccess } =
-    usePaginatedListState<AdminInvoice>(debouncedQ);
+  const {
+    page,
+    setPage,
+    items,
+    onPageSuccess,
+    acknowledgeCurrentKey,
+    awaitingCurrentKey,
+  } = usePaginatedListState<AdminInvoice>(debouncedQ);
 
   const { data, loading, refreshing, error, refetch } = useGetInvoices(
     {
@@ -46,17 +58,28 @@ export default function SalesInvoicesPage() {
       limit: 30,
       q: debouncedQ || undefined,
     },
-    { onSuccess: onPageSuccess }
+    {
+      onSuccess: onPageSuccess,
+      onError: () => acknowledgeCurrentKey(),
+    }
   );
 
   const hasMore = Boolean(data?.hasMore);
-  const showInitialLoading = loading && page === 1 && items.length === 0;
+  const listUi = resolvePaginatedListUi({
+    loading,
+    refreshing,
+    itemCount: items.length,
+    hasActiveFilters: Boolean(query.trim()),
+    awaitingCurrentKey,
+    error: Boolean(error),
+    entityLabel: "invoices",
+  });
   const loadingMore = (loading || refreshing) && page > 1;
 
   const { setSentinelNode } = useInfiniteScrollSentinel({
-    enabled: hasMore && !loading && !refreshing,
+    enabled: hasMore && !listUi.isPending,
     onLoadMore: () => setPage((p) => p + 1),
-    deps: [items.length, page, hasMore],
+    deps: [items.length, page, hasMore, listUi.isPending],
   });
 
   const totals = useMemo(() => {
@@ -77,8 +100,8 @@ export default function SalesInvoicesPage() {
             Sales & Invoices
           </h1>
           <p className="mt-1 text-sm text-(--brand-text-muted)">
-            {showInitialLoading
-              ? "…"
+            {listUi.pendingLabel
+              ? listUi.pendingLabel
               : `${data?.total ?? items.length} invoice${
                   (data?.total ?? items.length) === 1 ? "" : "s"
                 } · Paid ${formatInvoiceMoney(totals.paid)} · Unpaid ${formatInvoiceMoney(totals.unpaid)} (loaded pages)`}
@@ -101,10 +124,19 @@ export default function SalesInvoicesPage() {
         </div>
       ) : null}
 
-      {showInitialLoading ? (
+      <PaginatedListStatusBanner message={listUi.statusBanner} />
+
+      {listUi.showPendingPlaceholder ? (
         <TableSkeleton compact columns={6} rows={8} />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+        <div
+          className={
+            listUi.showStaleContent
+              ? "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow) opacity-55 transition-opacity"
+              : "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow) transition-opacity"
+          }
+          aria-busy={listUi.isPending || undefined}
+        >
           <Table>
             <TableHeader>
               <TableRow className="border-(--brand-card-border) hover:bg-transparent">
@@ -117,7 +149,7 @@ export default function SalesInvoicesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.length === 0 ? (
+              {listUi.showEmpty ? (
                 <TableRow>
                   <TableCell
                     colSpan={6}

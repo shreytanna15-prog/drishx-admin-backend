@@ -15,6 +15,14 @@ describe("orderTotalFromPairPrice", () => {
     assert.equal(orderTotalFromPairPrice(86, 2), 86);
   });
 
+  it("two pieces at ₹192/pair → ₹192 (QA regression)", () => {
+    assert.equal(orderTotalFromPairPrice(192, 2), 192);
+  });
+
+  it("four pieces at ₹192/pair → ₹384 (multiple pairs)", () => {
+    assert.equal(orderTotalFromPairPrice(192, 4), 384);
+  });
+
   it("one piece is half a pair", () => {
     assert.equal(orderTotalFromPairPrice(86, 1), 43);
   });

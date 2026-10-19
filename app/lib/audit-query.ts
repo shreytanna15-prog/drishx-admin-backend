@@ -10,60 +10,76 @@ import {
 } from "./audit";
 import type { SessionPayload } from "./auth";
 
-export async function voidTransaction(
+async function voidTransactionInTx(
+  tx: Prisma.TransactionClient,
   transactionId: string,
   reasonCode: string,
   reasonText: string | null,
   session: SessionPayload
 ) {
-  return prisma.$transaction(async (tx) => {
-    const existing = await tx.transaction.findUnique({
-      where: { id: transactionId },
-      include: { ledgerEntries: true },
-    });
-    if (!existing) throw new Error("Transaction not found.");
-    if (existing.status === TransactionStatus.VOIDED) {
-      throw new Error("Transaction is already voided.");
-    }
+  const existing = await tx.transaction.findUnique({
+    where: { id: transactionId },
+    include: { ledgerEntries: true },
+  });
+  if (!existing) throw new Error("Transaction not found.");
+  if (existing.status === TransactionStatus.VOIDED) {
+    // Idempotent: already voided inside a cancel retry.
+    return existing;
+  }
 
-    await tx.transaction.update({
-      where: { id: transactionId },
+  await tx.transaction.update({
+    where: { id: transactionId },
+    data: {
+      status: TransactionStatus.VOIDED,
+      voidedAt: new Date(),
+      voidReason: reasonText ?? reasonCode,
+    },
+  });
+
+  for (const entry of existing.ledgerEntries) {
+    await tx.ledgerEntry.create({
       data: {
-        status: TransactionStatus.VOIDED,
-        voidedAt: new Date(),
-        voidReason: reasonText ?? reasonCode,
+        transactionId,
+        entryType:
+          entry.entryType === LedgerEntryType.DEBIT
+            ? LedgerEntryType.CREDIT
+            : LedgerEntryType.DEBIT,
+        amount: entry.amount,
+        description: `Reversal: ${entry.description ?? "void"}`,
       },
     });
+  }
 
-    for (const entry of existing.ledgerEntries) {
-      await tx.ledgerEntry.create({
-        data: {
-          transactionId,
-          entryType:
-            entry.entryType === LedgerEntryType.DEBIT
-              ? LedgerEntryType.CREDIT
-              : LedgerEntryType.DEBIT,
-          amount: entry.amount,
-          description: `Reversal: ${entry.description ?? "void"}`,
-        },
-      });
-    }
-
-    await recordAuditEvent(tx, {
-      action: AuditAction.TRANSACTION_VOIDED,
-      module: AuditModule.FINANCE,
-      entityType: "Transaction",
-      entityId: transactionId,
-      actor: actorFromSession(session),
-      reasonCode,
-      reasonText,
-      changes: singleChange("status", existing.status, TransactionStatus.VOIDED),
-      context: { reference: existing.reference, amount: String(existing.amount) },
-      activityMessage: `Transaction ${existing.reference} voided`,
-    });
-
-    return tx.transaction.findUnique({ where: { id: transactionId } });
+  await recordAuditEvent(tx, {
+    action: AuditAction.TRANSACTION_VOIDED,
+    module: AuditModule.FINANCE,
+    entityType: "Transaction",
+    entityId: transactionId,
+    actor: actorFromSession(session),
+    reasonCode,
+    reasonText,
+    changes: singleChange("status", existing.status, TransactionStatus.VOIDED),
+    context: { reference: existing.reference, amount: String(existing.amount) },
+    activityMessage: `Transaction ${existing.reference} voided`,
   });
+
+  return tx.transaction.findUnique({ where: { id: transactionId } });
+}
+
+export async function voidTransaction(
+  transactionId: string,
+  reasonCode: string,
+  reasonText: string | null,
+  session: SessionPayload,
+  /** Join an outer cancel/archive transaction when provided. */
+  tx?: Prisma.TransactionClient
+) {
+  if (tx) {
+    return voidTransactionInTx(tx, transactionId, reasonCode, reasonText, session);
+  }
+  return prisma.$transaction((inner) =>
+    voidTransactionInTx(inner, transactionId, reasonCode, reasonText, session)
+  );
 }
 
 export function buildAuditListWhere(

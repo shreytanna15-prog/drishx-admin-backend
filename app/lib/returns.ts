@@ -1,4 +1,5 @@
 import {
+  InvoiceStatus,
   LedgerEntryType,
   LensType,
   Prisma,
@@ -7,6 +8,13 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "./prisma";
+import { postCustomerLedgerCreditNote } from "./finance/customer-ledger";
+import { lockInvoicesForUpdate } from "./finance/invoice-locks";
+import { nextCreditNoteNumber } from "./finance/invoice-number";
+import { roundMoney } from "./finance/tax-calc";
+import { invoiceStatusAfterCreditApplication } from "./return-credit";
+
+export { ReturnRequestStatus } from "./return-request-status";
 
 export const ReturnRequestType = {
   RETURN: "RETURN",
@@ -14,19 +22,6 @@ export const ReturnRequestType = {
 } as const;
 export type ReturnRequestType =
   (typeof ReturnRequestType)[keyof typeof ReturnRequestType];
-
-export const ReturnRequestStatus = {
-  SUBMITTED: "SUBMITTED",
-  MORE_INFO_REQUIRED: "MORE_INFO_REQUIRED",
-  ESCALATED_TO_ADMIN: "ESCALATED_TO_ADMIN",
-  AWAITING_MATERIAL: "AWAITING_MATERIAL",
-  APPROVED_CREDIT: "APPROVED_CREDIT",
-  APPROVED_REPLACEMENT: "APPROVED_REPLACEMENT",
-  REJECTED: "REJECTED",
-  CLOSED: "CLOSED",
-} as const;
-export type ReturnRequestStatus =
-  (typeof ReturnRequestStatus)[keyof typeof ReturnRequestStatus];
 
 export const ReturnReason = {
   WRONG_POWER: "WRONG_POWER",
@@ -69,14 +64,110 @@ export const ReturnTimelineEventType = {
 export type ReturnTimelineEventType =
   (typeof ReturnTimelineEventType)[keyof typeof ReturnTimelineEventType];
 
+/** Order fields staff need on returns list/detail (aligned with Orders table). */
+const returnOrderContextSelect = {
+  id: true,
+  orderNumber: true,
+  status: true,
+  lineType: true,
+  lensType: true,
+  quantity: true,
+  unitPrice: true,
+  totalAmount: true,
+  notes: true,
+  sph: true,
+  cyl: true,
+  axis: true,
+  add: true,
+  eye: true,
+  createdAt: true,
+  user: {
+    select: { id: true, name: true, email: true, businessName: true },
+  },
+  assignedTo: {
+    select: { id: true, name: true, email: true },
+  },
+  singleVisionLens: {
+    select: { brand: true, coating: true, item: true },
+  },
+  kryptokLens: {
+    select: { brand: true, coating: true, item: true },
+  },
+  progressiveLens: {
+    select: { brand: true, coating: true, item: true },
+  },
+} as const;
+
+const returnRequestDetailInclude = {
+  customer: {
+    select: { id: true, name: true, email: true, businessName: true, role: true },
+  },
+  assignedEmployee: {
+    select: { id: true, name: true, email: true, role: true },
+  },
+  reviewedByAdmin: {
+    select: { id: true, name: true, email: true, role: true },
+  },
+  primaryOrder: {
+    select: returnOrderContextSelect,
+  },
+  primaryInvoice: true,
+  items: {
+    include: {
+      originalOrder: {
+        select: returnOrderContextSelect,
+      },
+    },
+  },
+  images: {
+    include: {
+      uploadedBy: {
+        select: { id: true, name: true, email: true, role: true },
+      },
+    },
+    orderBy: { createdAt: "asc" as const },
+  },
+  timelineEvents: {
+    include: {
+      actorUser: {
+        select: { id: true, name: true, email: true, role: true },
+      },
+    },
+    orderBy: { createdAt: "asc" as const },
+  },
+  creditNote: {
+    include: {
+      allocations: {
+        include: {
+          invoice: {
+            select: {
+              id: true,
+              invoiceNumber: true,
+              orderId: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "asc" as const },
+      },
+    },
+  },
+  inventoryMovements: {
+    orderBy: { createdAt: "asc" as const },
+  },
+} as const;
+
+export type ReturnRequestWithRelations = Prisma.ReturnRequestGetPayload<{
+  include: typeof returnRequestDetailInclude;
+}>;
+
 /** Narrow accessor for return models when the editor TS server lags behind prisma generate. */
 function asReturnsDb<T>(client: T) {
   return client as T & {
     returnRequest: {
       findUnique: (args: {
         where: { id: string };
-        include?: Record<string, unknown>;
-      }) => Promise<any>;
+        include?: typeof returnRequestDetailInclude;
+      }) => Promise<ReturnRequestWithRelations | null>;
     };
     returnTimelineEvent: {
       create: (args: {
@@ -119,6 +210,7 @@ export function buildReturnRequestNumber() {
   return `RET-${stamp}${random}`;
 }
 
+/** @deprecated Prefer nextCreditNoteNumber inside the creating transaction. */
 export function buildCreditNoteNumber() {
   const stamp = Date.now().toString().slice(-6);
   const random = Math.floor(Math.random() * 900 + 100);
@@ -222,16 +314,113 @@ export async function createCreditNoteForReturn(
   tx: Prisma.TransactionClient,
   input: {
     returnRequestId: string;
-    invoiceId?: string | null;
     userId: string;
     amount: number;
     reason?: string | null;
+    /**
+     * Per-invoice applications. Outstanding is reduced on every listed invoice;
+     * CreditNoteAllocation rows are persisted atomically (Phase 4A).
+     * CreditNote.invoiceId remains the primary/first allocation for legacy readers.
+     * Historical CNs without allocation rows stay valid (no backfill).
+     */
+    allocations: Array<{
+      invoiceId: string;
+      amount: number;
+      taxableAmount: number;
+      cgstAmount: number;
+      sgstAmount: number;
+      igstAmount: number;
+    }>;
+    /** Preferred invoice FK on the credit note (e.g. primary invoice). */
+    primaryInvoiceId?: string | null;
   }
 ) {
+  const existingCn = await tx.creditNote.findUnique({
+    where: { returnRequestId: input.returnRequestId },
+    select: { id: true },
+  });
+  if (existingCn) {
+    throw new Error("A credit note already exists for this return request.");
+  }
+
+  const amount = roundMoney(Number(input.amount) || 0);
+  if (!(amount > 0.009) || input.allocations.length === 0) {
+    throw new Error("Credit note requires a positive amount and invoice allocations.");
+  }
+
+  const allocTotal = roundMoney(
+    input.allocations.reduce((s, a) => s + Number(a.amount), 0)
+  );
+  if (Math.abs(allocTotal - amount) > 0.009) {
+    throw new Error("Credit allocations must sum to the approved credit amount.");
+  }
+
+  // Deduplicate invoice ids — unique(creditNoteId, invoiceId) would fail otherwise.
+  const seenInvoice = new Set<string>();
+  for (const alloc of input.allocations) {
+    if (seenInvoice.has(alloc.invoiceId)) {
+      throw new Error("Duplicate invoice in credit allocations.");
+    }
+    seenInvoice.add(alloc.invoiceId);
+  }
+
+  // Deterministic invoice row locks before outstanding re-read (payment↔credit races).
+  await lockInvoicesForUpdate(
+    tx,
+    input.allocations.map((a) => a.invoiceId)
+  );
+
+  // Re-validate outstanding inside the transaction after FOR UPDATE.
+  for (const alloc of input.allocations) {
+    const inv = await tx.invoice.findUnique({ where: { id: alloc.invoiceId } });
+    if (!inv) {
+      throw new Error(`Invoice not found for credit allocation: ${alloc.invoiceId}`);
+    }
+    const outstanding = roundMoney(Number(inv.amountOutstanding) || 0);
+    const apply = roundMoney(Number(alloc.amount) || 0);
+    if (apply > outstanding + 0.009) {
+      throw new Error(
+        `Cannot apply ₹${apply.toFixed(2)} to invoice ${inv.invoiceNumber}: outstanding is ₹${outstanding.toFixed(2)}. Refunds for paid invoices are not supported.`
+      );
+    }
+    const newOutstanding = roundMoney(Math.max(0, outstanding - apply));
+    const nextStatus = invoiceStatusAfterCreditApplication({
+      invoiceAmount: Number(inv.amount),
+      amountOutstandingAfter: newOutstanding,
+      previousStatus: inv.status,
+    });
+    await tx.invoice.update({
+      where: { id: inv.id },
+      data: {
+        amountOutstanding: newOutstanding,
+        status: nextStatus as InvoiceStatus,
+      },
+    });
+  }
+
+  const taxableAmount = roundMoney(
+    input.allocations.reduce((s, a) => s + Number(a.taxableAmount), 0)
+  );
+  const cgstAmount = roundMoney(
+    input.allocations.reduce((s, a) => s + Number(a.cgstAmount), 0)
+  );
+  const sgstAmount = roundMoney(
+    input.allocations.reduce((s, a) => s + Number(a.sgstAmount), 0)
+  );
+  const igstAmount = roundMoney(
+    input.allocations.reduce((s, a) => s + Number(a.igstAmount), 0)
+  );
+
+  const primaryInvoiceId =
+    input.primaryInvoiceId &&
+    input.allocations.some((a) => a.invoiceId === input.primaryInvoiceId)
+      ? input.primaryInvoiceId
+      : input.allocations[0]!.invoiceId;
+
   const transaction = await tx.transaction.create({
     data: {
       reference: `RET-CREDIT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      amount: input.amount,
+      amount,
       type: TransactionType.DEBIT,
       status: TransactionStatus.COMPLETED,
       description: input.reason ?? "Return request credit note",
@@ -239,163 +428,81 @@ export async function createCreditNoteForReturn(
       ledgerEntries: {
         create: {
           entryType: LedgerEntryType.DEBIT,
-          amount: input.amount,
+          amount,
           description: input.reason ?? "Return request credit note",
         },
       },
     },
   });
 
-  let taxableAmount = input.amount;
-  let cgstAmount = 0;
-  let sgstAmount = 0;
-  let igstAmount = 0;
+  const { number: creditNoteNumber } = await nextCreditNoteNumber(undefined, tx);
 
-  if (input.invoiceId) {
-    const inv = await tx.invoice.findUnique({ where: { id: input.invoiceId } });
-    if (inv && Number(inv.amount) > 0) {
-      const ratio = input.amount / Number(inv.amount);
-      taxableAmount = Math.round(Number(inv.taxableAmount) * ratio * 100) / 100;
-      cgstAmount = Math.round(Number(inv.cgstAmount) * ratio * 100) / 100;
-      sgstAmount = Math.round(Number(inv.sgstAmount) * ratio * 100) / 100;
-      igstAmount = Math.round(Number(inv.igstAmount) * ratio * 100) / 100;
+  // Nested allocations require generated client; cast keeps editor usable pre-generate.
+  const creditNoteDb = tx as Prisma.TransactionClient & {
+    creditNote: {
+      create: (args: {
+        data: Record<string, unknown>;
+        include?: { allocations: boolean };
+      }) => Promise<{
+        id: string;
+        creditNoteNumber: string;
+        amount: unknown;
+        taxableAmount: unknown;
+        allocations: Array<{
+          id: string;
+          invoiceId: string;
+          amount: unknown;
+          taxableAmount: unknown;
+          cgstAmount: unknown;
+          sgstAmount: unknown;
+          igstAmount: unknown;
+        }>;
+      }>;
+    };
+  };
 
-      const amountPaid = Number(inv.amountPaid);
-      const newOutstanding = Math.max(
-        0,
-        Math.round((Number(inv.amountOutstanding) - input.amount) * 100) / 100
-      );
-      await tx.invoice.update({
-        where: { id: inv.id },
-        data: {
-          amountOutstanding: newOutstanding,
-          status:
-            newOutstanding <= 0.009 && amountPaid + input.amount >= Number(inv.amount)
-              ? "PAID"
-              : newOutstanding < Number(inv.amount)
-                ? "PARTIALLY_PAID"
-                : inv.status,
-        },
-      });
-    }
-  }
-
-  const creditNote = await asReturnsDb(tx).creditNote.create({
+  const creditNote = await creditNoteDb.creditNote.create({
     data: {
-      creditNoteNumber: buildCreditNoteNumber(),
+      creditNoteNumber,
       returnRequestId: input.returnRequestId,
-      invoiceId: input.invoiceId ?? null,
+      invoiceId: primaryInvoiceId,
       userId: input.userId,
-      amount: input.amount,
+      amount,
       taxableAmount,
       cgstAmount,
       sgstAmount,
       igstAmount,
       reason: input.reason ?? null,
+      allocations: {
+        create: input.allocations.map((a) => ({
+          invoiceId: a.invoiceId,
+          amount: roundMoney(Number(a.amount)),
+          taxableAmount: roundMoney(Number(a.taxableAmount)),
+          cgstAmount: roundMoney(Number(a.cgstAmount)),
+          sgstAmount: roundMoney(Number(a.sgstAmount)),
+          igstAmount: roundMoney(Number(a.igstAmount)),
+        })),
+      },
     },
+    include: { allocations: true },
   });
 
-  const last = await tx.customerLedgerEntry.findFirst({
-    where: { customerId: input.userId },
-    orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
-  });
-  const balanceAfter =
-    Math.round((Number(last?.balanceAfter ?? 0) - input.amount) * 100) / 100;
-  await tx.customerLedgerEntry.create({
-    data: {
-      customerId: input.userId,
-      entryType: "CREDIT_NOTE",
-      debitAmount: 0,
-      creditAmount: input.amount,
-      balanceAfter,
-      description: `Credit note ${creditNote.creditNoteNumber}`,
-      creditNoteId: creditNote.id,
-      invoiceId: input.invoiceId ?? undefined,
-    },
+  await postCustomerLedgerCreditNote({
+    customerId: input.userId,
+    creditNoteId: creditNote.id,
+    invoiceId: primaryInvoiceId,
+    amount,
+    description: `Credit note ${creditNote.creditNoteNumber}`,
+    tx,
   });
 
   return { transaction, creditNote };
 }
 
-/** Order fields staff need on returns list/detail (aligned with Orders table). */
-const returnOrderContextSelect = {
-  id: true,
-  orderNumber: true,
-  status: true,
-  lineType: true,
-  lensType: true,
-  quantity: true,
-  unitPrice: true,
-  totalAmount: true,
-  notes: true,
-  sph: true,
-  cyl: true,
-  axis: true,
-  add: true,
-  eye: true,
-  createdAt: true,
-  user: {
-    select: { id: true, name: true, email: true, businessName: true },
-  },
-  assignedTo: {
-    select: { id: true, name: true, email: true },
-  },
-  singleVisionLens: {
-    select: { brand: true, coating: true, item: true },
-  },
-  kryptokLens: {
-    select: { brand: true, coating: true, item: true },
-  },
-  progressiveLens: {
-    select: { brand: true, coating: true, item: true },
-  },
-} as const;
-
 export async function getReturnRequestWithRelations(id: string) {
   return asReturnsDb(prisma).returnRequest.findUnique({
     where: { id },
-    include: {
-      customer: {
-        select: { id: true, name: true, email: true, businessName: true, role: true },
-      },
-      assignedEmployee: {
-        select: { id: true, name: true, email: true, role: true },
-      },
-      reviewedByAdmin: {
-        select: { id: true, name: true, email: true, role: true },
-      },
-      primaryOrder: {
-        select: returnOrderContextSelect,
-      },
-      primaryInvoice: true,
-      items: {
-        include: {
-          originalOrder: {
-            select: returnOrderContextSelect,
-          },
-        },
-      },
-      images: {
-        include: {
-          uploadedBy: {
-            select: { id: true, name: true, email: true, role: true },
-          },
-        },
-        orderBy: { createdAt: "asc" },
-      },
-      timelineEvents: {
-        include: {
-          actorUser: {
-            select: { id: true, name: true, email: true, role: true },
-          },
-        },
-        orderBy: { createdAt: "asc" },
-      },
-      creditNote: true,
-      inventoryMovements: {
-        orderBy: { createdAt: "asc" },
-      },
-    },
+    include: returnRequestDetailInclude,
   });
 }
 

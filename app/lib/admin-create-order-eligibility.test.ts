@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  filterEligibleCreateOrderCustomers,
   formatCustomerPickerLabel,
   isEligibleCreateOrderCustomer,
   matchesCustomerSearch,
+  resolveCatalogLensSearchUi,
   type CreateOrderCustomerCandidate,
 } from "./admin-create-order-eligibility";
 
@@ -65,5 +69,53 @@ describe("admin create-order customer eligibility (RW-10 / RW-04)", () => {
 
   it("formats picker label preferring business name", () => {
     assert.equal(formatCustomerPickerLabel(approved), "Riya Optics");
+  });
+
+  it("filters eligible customers for create-order accumulation", () => {
+    const rows = filterEligibleCreateOrderCustomers([
+      approved,
+      { ...approved, id: "admin", role: "ADMIN" },
+      { ...approved, id: "off", isActive: false },
+    ]);
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      ["c1"]
+    );
+  });
+
+  it("hides lens hits until search is ready (no sync clear needed)", () => {
+    const hits = [{ id: "l1" }];
+    assert.deepEqual(
+      resolveCatalogLensSearchUi({ search: "a", hits, loading: true }),
+      { queryReady: false, hits: [], loading: false }
+    );
+    assert.deepEqual(
+      resolveCatalogLensSearchUi({ search: "ab", hits, loading: true }),
+      { queryReady: true, hits, loading: true }
+    );
+  });
+});
+
+describe("admin-create-order-panel state patterns", () => {
+  it("avoids set-state-in-effect for page reset, customer accumulate, and lens clear", () => {
+    const src = readFileSync(
+      join(process.cwd(), "components/admin-create-order-panel.tsx"),
+      "utf8"
+    );
+    assert.match(src, /usePaginatedListState/);
+    assert.match(src, /filterEligibleCreateOrderCustomers/);
+    assert.match(src, /resolveCatalogLensSearchUi/);
+    assert.match(src, /orderTotalFromPairPrice/);
+    assert.equal(
+      /useEffect\(\(\) => \{\s*setCustomerPage\(1\);\s*\}, \[debouncedCustomerQ\]\)/.test(
+        src
+      ),
+      false
+    );
+    assert.equal(src.includes("setCustomers((prev)"), false);
+    assert.equal(
+      /if \(q\.length < 2\) \{\s*setLensHits\(\[\]\)/.test(src),
+      false
+    );
   });
 });

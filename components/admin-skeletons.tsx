@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -185,6 +186,33 @@ export function CardGridSkeleton({ className }: SkeletonProps) {
           <Skeleton className="mt-6 h-40 w-full" />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Live status while a paginated list filter/search request is in flight. */
+export function PaginatedListStatusBanner({
+  message,
+  className,
+}: {
+  message: string | null | undefined;
+  className?: string;
+}) {
+  if (!message) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        "mb-3 flex items-center gap-2 rounded-xl border border-(--brand-primary)/35 bg-[rgba(240,161,50,0.12)] px-3 py-2 text-sm font-semibold text-(--brand-text)",
+        className
+      )}
+    >
+      <Loader2
+        className="size-4 shrink-0 animate-spin text-(--brand-primary)"
+        aria-hidden
+      />
+      <span>{message}</span>
     </div>
   );
 }

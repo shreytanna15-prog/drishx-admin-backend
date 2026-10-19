@@ -26,6 +26,30 @@ export function isEligibleCreateOrderCustomer(
   );
 }
 
+/** Filter a customers API page to eligible create-order picker rows. */
+export function filterEligibleCreateOrderCustomers<
+  T extends CreateOrderCustomerCandidate,
+>(items: T[]): T[] {
+  return items.filter(isEligibleCreateOrderCustomer);
+}
+
+/**
+ * Catalog lens typeahead shows hits only after 2+ trimmed characters.
+ * Keeps stale hits out of the UI without a sync setState-in-effect clear.
+ */
+export function resolveCatalogLensSearchUi<T>(input: {
+  search: string;
+  hits: T[];
+  loading: boolean;
+}): { queryReady: boolean; hits: T[]; loading: boolean } {
+  const queryReady = input.search.trim().length >= 2;
+  return {
+    queryReady,
+    hits: queryReady ? input.hits : [],
+    loading: queryReady && input.loading,
+  };
+}
+
 export function matchesCustomerSearch(
   customer: CreateOrderCustomerCandidate,
   query: string

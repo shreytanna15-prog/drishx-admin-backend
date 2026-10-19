@@ -21,6 +21,13 @@ import {
   returnsListInclude,
   serializeReturnListItem,
 } from "../../lib/returns-list";
+import {
+  aggregateQuantitiesByOrderId,
+  lockOrdersForReturnEligibility,
+  loadReservedReturnQuantitiesByOrderId,
+  ReturnEligibilityError,
+  validateRequestedReturnQuantities,
+} from "../../lib/return-eligibility";
 import { notifyAdminsOfReturnSubmitted, notifyCustomerOfReturnSubmittedOnBehalf } from "../../lib/staff-notifications";
 import { requireStaffPermission } from "../../lib/staff-access";
 import { getSignedOrderImageUrl } from "../../lib/supabase-storage";
@@ -201,10 +208,9 @@ export async function POST(req: NextRequest) {
           !order ||
           !reason ||
           !Number.isFinite(quantity) ||
-          quantity <= 0 ||
-          quantity > Number(order.quantity)
+          quantity <= 0
         ) {
-          throw new Error("Invalid return item.");
+          throw new ReturnEligibilityError("Invalid return item.");
         }
 
         const lensLabel =
@@ -266,7 +272,31 @@ export async function POST(req: NextRequest) {
     const primaryOrder = orders[0]!;
     const customerId = primaryOrder.userId;
 
+    const requestedByOrderId = aggregateQuantitiesByOrderId(
+      normalizedItems.map((item) => ({
+        originalOrderId: item.originalOrderId,
+        quantity: item.quantity,
+      }))
+    );
+    const orderedQtyByOrderId = new Map(
+      orders.map((order) => [order.id, Number(order.quantity)])
+    );
+
     const created = await prisma.$transaction(async (tx) => {
+      await lockOrdersForReturnEligibility(tx, [...requestedByOrderId.keys()]);
+      const reservedQtyByOrderId = await loadReservedReturnQuantitiesByOrderId(
+        tx,
+        [...requestedByOrderId.keys()]
+      );
+      const qtyCheck = validateRequestedReturnQuantities({
+        requestedByOrderId,
+        orderedQtyByOrderId,
+        reservedQtyByOrderId,
+      });
+      if (!qtyCheck.ok) {
+        throw new ReturnEligibilityError(qtyCheck.error);
+      }
+
       const request = await tx.returnRequest.create({
         data: {
           requestNumber: buildReturnRequestNumber(),
@@ -326,6 +356,9 @@ export async function POST(req: NextRequest) {
     const full = await getReturnRequestWithRelations(created.id);
     return NextResponse.json(await serializeReturnRequest(full), { status: 201 });
   } catch (error) {
+    if (error instanceof ReturnEligibilityError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("POST /api/returns error:", error);
     const message = error instanceof Error ? error.message : "Internal Server Error";
     return NextResponse.json({ error: message }, { status: 500 });

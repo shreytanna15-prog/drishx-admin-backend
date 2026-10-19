@@ -8,9 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
-import { ListSkeleton } from "@/components/admin-skeletons";
+import {
+  ListSkeleton,
+  PaginatedListStatusBanner,
+} from "@/components/admin-skeletons";
 import { adminFetch } from "@/app/lib/admin-api";
-import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
+import {
+  resolvePaginatedListUi,
+  usePaginatedListState,
+} from "@/app/lib/hooks/use-paginated-list-state";
 import {
   type AdminOrder,
   type OrderGroupSort,
@@ -19,7 +25,9 @@ import {
   ORDER_LINE_SORT_OPTIONS,
   ORDER_STATUS_FILTERS,
   applyOrdersListFiltersToSearchParams,
+  buildOrderDetailHref,
   buildOrdersListHref,
+  buildOrdersReturnTo,
   formatCatalogSummary,
   formatDate,
   formatMoney,
@@ -98,8 +106,14 @@ export function AdminOrdersGroupedOverview() {
     dateFrom,
     dateTo,
   ].join("|");
-  const { page, setPage, items: orders, onPageSuccess } =
-    usePaginatedListState<AdminOrder>(listResetKey);
+  const {
+    page,
+    setPage,
+    items: orders,
+    onPageSuccess,
+    acknowledgeCurrentKey,
+    awaitingCurrentKey,
+  } = usePaginatedListState<AdminOrder>(listResetKey);
 
   const {
     data,
@@ -120,15 +134,13 @@ export function AdminOrdersGroupedOverview() {
       dateTo: dateTo || undefined,
       scope: "catalog",
     },
-    { onSuccess: onPageSuccess }
+    {
+      onSuccess: onPageSuccess,
+      onError: () => acknowledgeCurrentKey(),
+    }
   );
 
   const serverHasMore = Boolean(data?.hasMore);
-  const { setSentinelNode: setPageSentinel } = useInfiniteScrollSentinel({
-    enabled: serverHasMore && !loading && !refreshing,
-    onLoadMore: () => setPage((p) => p + 1),
-    deps: [orders.length, page, serverHasMore],
-  });
 
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +217,24 @@ export function AdminOrdersGroupedOverview() {
   );
 
   const filtered = orders;
+  const hasActiveFilters = Boolean(
+    query.trim() || status || lineType || orderKind || assigneeId || dateFrom || dateTo
+  );
+  const listUi = resolvePaginatedListUi({
+    loading,
+    refreshing,
+    itemCount: orders.length,
+    hasActiveFilters,
+    awaitingCurrentKey,
+    error: Boolean(error),
+    entityLabel: "orders",
+  });
+
+  const { setSentinelNode: setPageSentinel } = useInfiniteScrollSentinel({
+    enabled: serverHasMore && !listUi.isPending,
+    onLoadMore: () => setPage((p) => p + 1),
+    deps: [orders.length, page, serverHasMore, listUi.isPending],
+  });
 
   const groups = useMemo(() => {
     const raw =
@@ -225,7 +255,11 @@ export function AdminOrdersGroupedOverview() {
   } = useProgressiveList(groups, { pageSize: 16, preloadAt: 10 });
 
   const openOrder = (orderId: string) => {
-    router.push(`/orders/${orderId}`);
+    router.push(
+      buildOrderDetailHref(orderId, {
+        returnTo: buildOrdersReturnTo(pathname, searchParams),
+      })
+    );
   };
 
   const totalAmount = filtered.reduce((sum, o) => {
@@ -238,8 +272,8 @@ export function AdminOrdersGroupedOverview() {
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="mt-1 text-sm text-(--brand-text-muted)">
-            {loading
-              ? "…"
+            {listUi.pendingLabel
+              ? listUi.pendingLabel
               : `${groups.length} group${groups.length === 1 ? "" : "s"} · ${filtered.length} order${filtered.length === 1 ? "" : "s"} · ${formatMoney(totalAmount)}`}
           </p>
         </div>
@@ -386,16 +420,25 @@ export function AdminOrdersGroupedOverview() {
         </div>
       ) : null}
 
-      {loading && page === 1 && orders.length === 0 ? (
+      <PaginatedListStatusBanner message={listUi.statusBanner} />
+
+      {listUi.showPendingPlaceholder ? (
         <ListSkeleton rows={6} />
-      ) : groups.length === 0 ? (
+      ) : listUi.showEmpty ? (
         <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) px-4 py-12 text-center text-sm text-(--brand-text-muted)">
-          {query.trim() || status || lineType || orderKind || assigneeId || dateFrom || dateTo
+          {hasActiveFilters
             ? "No orders match your search."
             : "No orders found yet."}
         </div>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div
+          className={
+            listUi.showStaleContent
+              ? "flex flex-col gap-4 opacity-55 transition-opacity"
+              : "flex flex-col gap-4 transition-opacity"
+          }
+          aria-busy={listUi.isPending || undefined}
+        >
           {visibleItems.map((group, index) => (
             <section
               key={group.key}

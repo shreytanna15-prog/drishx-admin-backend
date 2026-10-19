@@ -747,7 +747,7 @@ export function AdminOrderControlPanel({
             />
           </div>
           <div>
-            <label className={labelClass}>Unit price</label>
+            <label className={labelClass}>Price per pair</label>
             <Input
               type="number"
               min={0}

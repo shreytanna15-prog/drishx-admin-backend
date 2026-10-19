@@ -24,14 +24,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
-import { TableSkeleton } from "@/components/admin-skeletons";
+import {
+  PaginatedListStatusBanner,
+  TableSkeleton,
+} from "@/components/admin-skeletons";
 import { adminFetch } from "@/app/lib/admin-api";
-import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
+import {
+  resolvePaginatedListUi,
+  usePaginatedListState,
+} from "@/app/lib/hooks/use-paginated-list-state";
 import {
   type AdminOrder,
   type OrdersListFilters,
   ORDER_STATUS_FILTERS,
   applyOrdersListFiltersToSearchParams,
+  buildOrderDetailHref,
+  buildOrdersReturnTo,
   formatDate,
   formatLensType,
   formatMoney,
@@ -122,11 +130,6 @@ function AdminOrdersTableImpl({
     ? parseOrdersListFilters(urlBridge.searchParams)
     : null;
 
-  const openOrder = (orderId: string) => {
-    const path = `/orders/${orderId}`;
-    router.push(orderDetailHash ? `${path}#${orderDetailHash}` : path);
-  };
-
   const [query, setQuery] = useState(urlFilters?.q ?? "");
   const [debouncedQ, setDebouncedQ] = useState(query);
   const [status, setStatus] = useState(urlFilters?.status || defaultStatus);
@@ -136,6 +139,27 @@ function AdminOrdersTableImpl({
   const [dateFrom, setDateFrom] = useState(urlFilters?.dateFrom ?? "");
   const [dateTo, setDateTo] = useState(urlFilters?.dateTo ?? "");
   const [employees, setEmployees] = useState<AdminEmployee[]>([]);
+
+  const openOrder = (orderId: string) => {
+    const listPath = urlBridge?.pathname ?? "/orders";
+    const listSearch = urlBridge
+      ? urlBridge.searchParams
+      : applyOrdersListFiltersToSearchParams(new URLSearchParams(), {
+          q: query,
+          status,
+          lineType,
+          orderKind,
+          assigneeId,
+          dateFrom,
+          dateTo,
+        });
+    router.push(
+      buildOrderDetailHref(orderId, {
+        returnTo: buildOrdersReturnTo(listPath, listSearch),
+        hash: orderDetailHash,
+      })
+    );
+  };
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQ(query.trim()), 300);
@@ -152,8 +176,14 @@ function AdminOrdersTableImpl({
     dateTo,
     scope ?? "",
   ].join("|");
-  const { page, setPage, items, onPageSuccess } =
-    usePaginatedListState<AdminOrder>(listResetKey);
+  const {
+    page,
+    setPage,
+    items,
+    onPageSuccess,
+    acknowledgeCurrentKey,
+    awaitingCurrentKey,
+  } = usePaginatedListState<AdminOrder>(listResetKey);
 
   const listParams = useMemo(
     () => ({
@@ -183,7 +213,10 @@ function AdminOrdersTableImpl({
 
   const { data, loading, refreshing, error, refetch } = useGetOrders(
     listParams,
-    { onSuccess: onPageSuccess }
+    {
+      onSuccess: onPageSuccess,
+      onError: () => acknowledgeCurrentKey(),
+    }
   );
 
   useEffect(() => {
@@ -243,14 +276,31 @@ function AdminOrdersTableImpl({
 
   const hasMore = Boolean(data?.hasMore);
   const total = data?.total;
-  const showInitialLoading = loading && page === 1 && items.length === 0;
+  const hasActiveFilters = Boolean(
+    query.trim() ||
+      status ||
+      lineType ||
+      orderKind ||
+      assigneeId ||
+      dateFrom ||
+      dateTo
+  );
+  const listUi = resolvePaginatedListUi({
+    loading,
+    refreshing,
+    itemCount: items.length,
+    hasActiveFilters,
+    awaitingCurrentKey,
+    error: Boolean(error),
+    entityLabel: "orders",
+  });
   const colSpan = showNotes ? 8 : 7;
   const loadingMore = (loading || refreshing) && page > 1;
 
   const { setSentinelNode } = useInfiniteScrollSentinel({
-    enabled: hasMore && !loading && !refreshing,
+    enabled: hasMore && !listUi.isPending,
     onLoadMore: () => setPage((p) => p + 1),
-    deps: [items.length, page, hasMore],
+    deps: [items.length, page, hasMore, listUi.isPending],
   });
 
   return (
@@ -261,12 +311,11 @@ function AdminOrdersTableImpl({
             {title}
           </h1>
           <p className="mt-1 text-sm text-(--brand-text-muted)">
-            {showInitialLoading
-              ? "…"
+            {listUi.pendingLabel
+              ? listUi.pendingLabel
               : `${description} · ${
                   typeof total === "number" ? total : items.length
                 } order${(typeof total === "number" ? total : items.length) === 1 ? "" : "s"}`}
-            {refreshing ? " · updating…" : ""}
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -355,10 +404,19 @@ function AdminOrdersTableImpl({
         </div>
       ) : null}
 
-      {showInitialLoading ? (
+      <PaginatedListStatusBanner message={listUi.statusBanner} />
+
+      {listUi.showPendingPlaceholder ? (
         <TableSkeleton compact columns={colSpan} rows={8} />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+        <div
+          className={
+            listUi.showStaleContent
+              ? "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow) opacity-55 transition-opacity"
+              : "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow) transition-opacity"
+          }
+          aria-busy={listUi.isPending || undefined}
+        >
           <Table>
             <TableHeader>
               <TableRow className="border-(--brand-card-border) hover:bg-transparent">
@@ -375,21 +433,13 @@ function AdminOrdersTableImpl({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.length === 0 ? (
+              {listUi.showEmpty ? (
                 <TableRow>
                   <TableCell
                     colSpan={colSpan}
                     className="h-28 text-center text-(--brand-text-muted)"
                   >
-                    {query.trim() ||
-                    status ||
-                    lineType ||
-                    orderKind ||
-                    assigneeId ||
-                    dateFrom ||
-                    dateTo
-                      ? emptySearchMessage
-                      : emptyMessage}
+                    {hasActiveFilters ? emptySearchMessage : emptyMessage}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -453,7 +503,7 @@ function AdminOrdersTableImpl({
                           {formatMoney(order.totalAmount)}
                         </div>
                         <div className="mt-0.5 text-xs text-(--brand-text-muted)">
-                          {formatMoney(order.unitPrice)} / unit
+                          {formatMoney(order.unitPrice)} per pair
                         </div>
                       </TableCell>
                       <TableCell className="align-top">

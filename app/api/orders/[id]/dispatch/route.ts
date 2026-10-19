@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { InvoiceStatus, NotificationType } from "@prisma/client";
+import { NotificationType } from "@prisma/client";
 import { getSessionOrUnauthorized } from "../../../../lib/session-auth";
 import { prisma } from "../../../../lib/prisma";
 import {
@@ -9,6 +9,11 @@ import {
 } from "../../../../lib/order-status-transitions";
 import { logOrderActivity } from "../../../../lib/order-activity";
 import { assertDispatchAllowed } from "../../../../lib/dispatch-cutoff";
+import {
+  assertDispatchReadiness,
+  validateCourierName,
+  validateTrackingNumber,
+} from "../../../../lib/dispatch-validate";
 import {
   AuditAction,
   AuditModule,
@@ -24,13 +29,7 @@ import {
   serializeOrderDetail,
 } from "../../../../lib/order-detail";
 import { employeeMayAccessOrder } from "../../../../lib/prescription-order-hold";
-
-function parseDispatchField(value: unknown, maxLen = 200): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.slice(0, maxLen);
-}
+import { resolveActiveDeliveryService } from "../../../../lib/delivery-pack";
 
 // ─────────────────────────────────────────────────────────────
 // POST /api/orders/:id/dispatch
@@ -53,14 +52,16 @@ export async function POST(
 
   try {
     const body = await req.json().catch(() => null);
-    const courierName = parseDispatchField(body?.courierName);
-    const trackingNumber = parseDispatchField(body?.trackingNumber);
-    if (!courierName || !trackingNumber) {
-      return NextResponse.json(
-        { error: "Courier name and tracking number are required to dispatch." },
-        { status: 400 }
-      );
+    const courierCheck = validateCourierName(body?.courierName);
+    if (!courierCheck.ok) {
+      return NextResponse.json({ error: courierCheck.error }, { status: 400 });
     }
+    const trackingCheck = validateTrackingNumber(body?.trackingNumber);
+    if (!trackingCheck.ok) {
+      return NextResponse.json({ error: trackingCheck.error }, { status: 400 });
+    }
+    const courierName = courierCheck.value;
+    const trackingNumber = trackingCheck.value;
 
     const order = await prisma.order.findUnique({
       where: { id },
@@ -130,6 +131,41 @@ export async function POST(
       if (!cutoff.ok) {
         return NextResponse.json({ error: cutoff.error }, { status: 400 });
       }
+
+      const delivery = await prisma.orderDelivery.findUnique({
+        where: { orderId: id },
+        select: { deliveryServiceId: true, actualWeight: true },
+      });
+      const ready = assertDispatchReadiness({
+        order: {
+          quantity: order.quantity,
+          reservedQuantity: order.reservedQuantity,
+          pickedQuantity: order.pickedQuantity,
+          deliveryServiceId: order.deliveryServiceId,
+        },
+        delivery: delivery
+          ? {
+              deliveryServiceId: delivery.deliveryServiceId,
+              actualWeight: Number(delivery.actualWeight),
+            }
+          : null,
+      });
+      if (!ready.ok) {
+        return NextResponse.json({ error: ready.error }, { status: 400 });
+      }
+      const serviceId =
+        order.deliveryServiceId?.trim() ||
+        delivery?.deliveryServiceId?.trim() ||
+        null;
+      const service = serviceId
+        ? await resolveActiveDeliveryService(serviceId)
+        : null;
+      if (!service) {
+        return NextResponse.json(
+          { error: "Selected delivery service is not available." },
+          { status: 400 }
+        );
+      }
     }
 
     const auditCtx = buildAuditRequestContext(req);
@@ -147,12 +183,7 @@ export async function POST(
       if (statusChanged && order.lineType === "RETAIL") {
         await markActiveVersionFinalFulfilled(id);
       }
-      if (statusChanged) {
-        await tx.invoice.updateMany({
-          where: { orderId: order.id },
-          data: { status: InvoiceStatus.ISSUED },
-        });
-      }
+      // Do not overwrite invoice payment status on dispatch (preserve PAID / PARTIALLY_PAID).
 
       await logOrderActivity(tx, {
         orderId: order.id,

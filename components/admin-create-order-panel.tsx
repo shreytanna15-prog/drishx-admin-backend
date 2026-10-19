@@ -12,11 +12,14 @@ import {
 } from "lucide-react";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import {
+  filterEligibleCreateOrderCustomers,
   formatCustomerPickerLabel,
-  isEligibleCreateOrderCustomer,
+  resolveCatalogLensSearchUi,
   type CreateOrderCustomerCandidate,
 } from "@/app/lib/admin-create-order-eligibility";
 import { formatMoney } from "@/app/lib/admin-orders";
+import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
+import { orderTotalFromPairPrice } from "@/app/lib/lens-pricing";
 import { useGetCustomers } from "@/app/lib/modules/customers/query/use-get-customers";
 import {
   QueryEmptyState,
@@ -123,8 +126,6 @@ export function AdminCreateOrderPanel() {
   const [step, setStep] = useState<Step>(1);
   const [customerQuery, setCustomerQuery] = useState("");
   const [debouncedCustomerQ, setDebouncedCustomerQ] = useState("");
-  const [customerPage, setCustomerPage] = useState(1);
-  const [customers, setCustomers] = useState<CreateOrderCustomerCandidate[]>([]);
   const [selectedCustomer, setSelectedCustomer] =
     useState<CreateOrderCustomerCandidate | null>(null);
   const [channel, setChannel] = useState<OrderChannel | null>(null);
@@ -157,9 +158,13 @@ export function AdminCreateOrderPanel() {
     return () => window.clearTimeout(t);
   }, [customerQuery]);
 
-  useEffect(() => {
-    setCustomerPage(1);
-  }, [debouncedCustomerQ]);
+  const {
+    page: customerPage,
+    setPage: setCustomerPage,
+    items: customers,
+    onPageSuccess: onCustomersPageSuccess,
+    acknowledgeCurrentKey: acknowledgeCustomersKey,
+  } = usePaginatedListState<CreateOrderCustomerCandidate>(debouncedCustomerQ);
 
   const {
     data: customersPage,
@@ -167,29 +172,26 @@ export function AdminCreateOrderPanel() {
     refreshing: customersRefreshing,
     error: customersQueryError,
     refetch: refetchCustomers,
-  } = useGetCustomers({
-    status: "approved",
-    activeOnly: true,
-    page: customerPage,
-    limit: 30,
-    q: debouncedCustomerQ || undefined,
-  });
-
-  useEffect(() => {
-    if (!customersPage) return;
-    const mapped = customersPage.items
-      .filter(isEligibleCreateOrderCustomer)
-      .map((c) => c as CreateOrderCustomerCandidate);
-    setCustomers((prev) => {
-      if (customersPage.page <= 1) return mapped;
-      const seen = new Set(prev.map((c) => c.id));
-      const merged = [...prev];
-      for (const row of mapped) {
-        if (!seen.has(row.id)) merged.push(row);
-      }
-      return merged;
-    });
-  }, [customersPage]);
+  } = useGetCustomers(
+    {
+      status: "approved",
+      activeOnly: true,
+      page: customerPage,
+      limit: 30,
+      q: debouncedCustomerQ || undefined,
+    },
+    {
+      onSuccess: (page) => {
+        onCustomersPageSuccess({
+          page: page.page,
+          items: filterEligibleCreateOrderCustomers(
+            page.items as CreateOrderCustomerCandidate[]
+          ),
+        });
+      },
+      onError: () => acknowledgeCustomersKey(),
+    }
+  );
 
   const customersError = customersQueryError?.message ?? null;
   const customersHasMore = Boolean(customersPage?.hasMore);
@@ -213,13 +215,16 @@ export function AdminCreateOrderPanel() {
     };
   }, []);
 
+  const lensSearchUi = resolveCatalogLensSearchUi({
+    search: lensSearch,
+    hits: lensHits,
+    loading: lensLoading,
+  });
+
   useEffect(() => {
     if (step !== 3 || channel !== "CATALOG") return;
+    if (!lensSearchUi.queryReady) return;
     const q = lensSearch.trim();
-    if (q.length < 2) {
-      setLensHits([]);
-      return;
-    }
     let cancelled = false;
     const handle = window.setTimeout(() => {
       startTransition(() => {
@@ -250,7 +255,7 @@ export function AdminCreateOrderPanel() {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [step, channel, lensSearch, lensTypeFilter]);
+  }, [step, channel, lensSearch, lensTypeFilter, lensSearchUi.queryReady]);
 
   function goNext() {
     setSubmitError(null);
@@ -383,7 +388,10 @@ export function AdminCreateOrderPanel() {
 
   const catalogTotal =
     catalog.lens != null
-      ? Number(catalog.lens.price) * Number(catalog.quantity)
+      ? orderTotalFromPairPrice(
+          Number(catalog.lens.price),
+          Number(catalog.quantity)
+        )
       : 0;
 
   return (
@@ -585,13 +593,13 @@ export function AdminCreateOrderPanel() {
               placeholder="Search brand, item, coating, power…"
               className="h-11 rounded-xl"
             />
-            {lensLoading ? (
+            {lensSearchUi.loading ? (
               <p className="flex items-center gap-2 text-sm text-(--brand-text-muted)">
                 <Loader2 className="size-4 animate-spin" /> Searching…
               </p>
             ) : null}
             <ul className="max-h-56 space-y-2 overflow-y-auto">
-              {lensHits.map((lens) => (
+              {lensSearchUi.hits.map((lens) => (
                 <li key={lens.id}>
                   <button
                     type="button"
@@ -609,7 +617,8 @@ export function AdminCreateOrderPanel() {
                       {lensLabel(lens)}
                     </div>
                     <div className="text-xs text-(--brand-text-muted)">
-                      {formatMoney(lens.price)} · Stock {lens.quantity}
+                      {formatMoney(lens.price)} per pair · Stock{" "}
+                      {lens.quantity}
                     </div>
                   </button>
                 </li>
@@ -830,7 +839,7 @@ export function AdminCreateOrderPanel() {
                   <ReviewRow label="Product" value={lensLabel(catalog.lens)} />
                   <ReviewRow label="Quantity" value={String(catalog.quantity)} />
                   <ReviewRow
-                    label="Unit price"
+                    label="Price per pair"
                     value={formatMoney(catalog.lens.price)}
                   />
                   <ReviewRow

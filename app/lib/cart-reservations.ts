@@ -70,22 +70,23 @@ export async function incrementLensStock(
     movementType?: "STOCK_RESTORED" | "STOCK_INCREMENTED" | "STOCK_RECEIVED";
     referenceId?: string;
     request?: import("./audit").AuditRequestContext | null;
-  }
+  },
+  db: typeof prisma | import("@prisma/client").Prisma.TransactionClient = prisma
 ) {
   if (quantity <= 0) return;
-  const before = (await getLensQuantity(prisma, lensType, lensId)) ?? 0;
+  const before = (await getLensQuantity(db, lensType, lensId)) ?? 0;
   if (lensType === LensType.SINGLE_VISION) {
-    await prisma.singleVisionLens.update({
+    await db.singleVisionLens.update({
       where: { id: lensId },
       data: { quantity: { increment: quantity } },
     });
   } else if (lensType === LensType.KRYPTOK) {
-    await prisma.kryptokLens.update({
+    await db.kryptokLens.update({
       where: { id: lensId },
       data: { quantity: { increment: quantity } },
     });
   } else if (lensType === LensType.PROGRESSIVE) {
-    await prisma.progressiveLens.update({
+    await db.progressiveLens.update({
       where: { id: lensId },
       data: { quantity: { increment: quantity } },
     });
@@ -104,6 +105,8 @@ export async function incrementLensStock(
       orderId: audit.orderId,
       referenceId: audit.referenceId,
       request: audit.request,
+      // Keep stock movement + audit inside the same cancel/archive transaction.
+      client: db,
     });
   }
 }

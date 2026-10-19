@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import { ReturnRequestStatus } from "./returns";
+import {
+  parseExactReturnRequestStatus,
+  ReturnRequestStatus,
+  statusesMatchingDisplayLabel,
+} from "./return-request-status";
 
 export const RETURNS_LIST_DEFAULT_LIMIT = 30;
 export const RETURNS_LIST_MAX_LIMIT = 100;
@@ -119,6 +123,18 @@ export function parseReturnsListParams(
   return { page, limit, status, orderId, q, requestType };
 }
 
+/**
+ * Exact order-number token for returns search (`504094`, `#504094`).
+ * Rejects non-digit / partial tokens so text searches stay unaffected.
+ */
+export function parseExactOrderNumberQuery(raw: string): number | null {
+  const trimmed = raw.trim().replace(/^#/, "").trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  if (!Number.isSafeInteger(n) || n <= 0) return null;
+  return n;
+}
+
 export function buildReturnsListWhere(
   roleScope: Prisma.ReturnRequestWhereInput,
   params: ReturnsListParams
@@ -180,10 +196,26 @@ export function buildReturnsListWhere(
         },
       },
     ];
-    const statusQ = q.toUpperCase();
-    if ((Object.values(ReturnRequestStatus) as string[]).includes(statusQ)) {
+    // Exact enum token (SUBMITTED) and/or UI label ("Pending Admin Review").
+    const statusFromEnum = parseExactReturnRequestStatus(q);
+    const statusesFromLabel = statusesMatchingDisplayLabel(q);
+    const statusMatches = new Set(
+      [
+        ...(statusFromEnum ? [statusFromEnum] : []),
+        ...statusesFromLabel,
+      ]
+    );
+    if (statusMatches.size === 1) {
+      or.push({ status: [...statusMatches][0]! });
+    } else if (statusMatches.size > 1) {
+      or.push({ status: { in: [...statusMatches] } });
+    }
+    // Linked Order.orderNumber (primary and any item.originalOrder).
+    const orderNumber = parseExactOrderNumberQuery(q);
+    if (orderNumber != null) {
+      or.push({ primaryOrder: { orderNumber } });
       or.push({
-        status: statusQ as (typeof ReturnRequestStatus)[keyof typeof ReturnRequestStatus],
+        items: { some: { originalOrder: { orderNumber } } },
       });
     }
     parts.push({ OR: or });

@@ -346,6 +346,70 @@ export function buildOrdersListHref(
   return qs ? `${path}?${qs}` : path;
 }
 
+/** Query key carrying the originating orders list URL on detail pages. */
+export const ORDERS_RETURN_TO_PARAM = "returnTo";
+
+/**
+ * Allow only same-app `/orders…` relative paths (list/overview/queues).
+ * Rejects absolute URLs, protocol-relative paths, and `..` segments.
+ */
+export function sanitizeOrdersReturnTo(
+  raw: string | null | undefined
+): string {
+  if (!raw?.trim()) return "/orders";
+  const value = raw.trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return "/orders";
+  if (value.startsWith("//") || value.includes("\\")) return "/orders";
+  if (!value.startsWith("/orders")) return "/orders";
+
+  const qIndex = value.indexOf("?");
+  const path = qIndex >= 0 ? value.slice(0, qIndex) : value;
+  const query = qIndex >= 0 ? value.slice(qIndex) : "";
+  if (path.includes("..")) return "/orders";
+  if (path !== "/orders" && !path.startsWith("/orders/")) return "/orders";
+  return `${path}${query}`;
+}
+
+/** Snapshot the current list location for a later “Back to orders” link. */
+export function buildOrdersReturnTo(
+  pathname: string,
+  search: string | Pick<URLSearchParams, "toString">
+): string {
+  const path = pathname.startsWith("/orders") ? pathname : "/orders";
+  const qs =
+    typeof search === "string"
+      ? search.replace(/^\?/, "").trim()
+      : search.toString().trim();
+  return sanitizeOrdersReturnTo(qs ? `${path}?${qs}` : path);
+}
+
+/** Detail href that preserves the originating list filters via `returnTo`. */
+export function buildOrderDetailHref(
+  orderId: string,
+  options?: { returnTo?: string | null; hash?: string | null }
+): string {
+  const id = orderId.trim();
+  const params = new URLSearchParams();
+  if (options?.returnTo?.trim()) {
+    params.set(
+      ORDERS_RETURN_TO_PARAM,
+      sanitizeOrdersReturnTo(options.returnTo)
+    );
+  }
+  const qs = params.toString();
+  let href = qs ? `/orders/${id}?${qs}` : `/orders/${id}`;
+  const hash = options?.hash?.trim().replace(/^#/, "");
+  if (hash) href += `#${hash}`;
+  return href;
+}
+
+/** Resolve “Back to orders” from a detail page’s search params. */
+export function resolveOrdersBackHref(
+  searchParams: Pick<URLSearchParams, "get">
+): string {
+  return sanitizeOrdersReturnTo(searchParams.get(ORDERS_RETURN_TO_PARAM));
+}
+
 export function formatOrderDisplayId(
   order: Pick<AdminOrder, "id" | "orderNumber">
 ) {

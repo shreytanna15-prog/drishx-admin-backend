@@ -800,6 +800,7 @@ model Invoice {
   lines                InvoiceLine[]
   returnRequests       ReturnRequest[]
   creditNotes          CreditNote[]
+  creditNoteAllocations CreditNoteAllocation[]
   paymentAllocations   PaymentAllocation[]
   paymentClaimItems    PaymentClaimItem[]
   customerLedgerEntries CustomerLedgerEntry[]
@@ -996,6 +997,7 @@ model CreditNote {
   returnRequestId  String        @unique
   user             User          @relation(fields: [userId], references: [id])
   userId           String
+  /// Primary / display invoice (legacy + first allocation). Prefer allocations[] for audit.
   invoice          Invoice?      @relation(fields: [invoiceId], references: [id])
   invoiceId        String?
   amount           Decimal
@@ -1007,6 +1009,28 @@ model CreditNote {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   customerLedgerEntries CustomerLedgerEntry[]
+  /// Per-invoice applications (Phase 4A). Empty for historical CNs issued before this table.
+  allocations      CreditNoteAllocation[]
+}
+
+/// Durable per-invoice attribution for a credit note (multi-order returns).
+model CreditNoteAllocation {
+  id             String     @id @default(cuid())
+  creditNote     CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  creditNoteId   String
+  invoice        Invoice    @relation(fields: [invoiceId], references: [id])
+  invoiceId      String
+  /// Tax-inclusive amount applied to this invoice's outstanding.
+  amount         Decimal
+  taxableAmount  Decimal    @default(0)
+  cgstAmount     Decimal    @default(0)
+  sgstAmount     Decimal    @default(0)
+  igstAmount     Decimal    @default(0)
+  createdAt      DateTime   @default(now())
+
+  @@unique([creditNoteId, invoiceId])
+  @@index([creditNoteId])
+  @@index([invoiceId])
 }
 
 model InventoryMovement {
