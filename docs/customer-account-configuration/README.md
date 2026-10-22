@@ -1,0 +1,14 @@
+# Customer account configuration
+
+Development plan for **customer onboarding / account configuration** (from Oct 2026 client meeting notes).
+
+| Document | Audience | Purpose |
+|----------|----------|---------|
+| [CLIENT-PLAN.md](./CLIENT-PLAN.md) | Client + product | UI, flows, data shapes, APIs (what/why), acceptance |
+| [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | How to implement (schema, routes, phases, checklists) |
+
+**Related:** broader backlog lives in [`../remaining-work.md`](../remaining-work.md). This folder is the signed scope for this slice — not the full historical “CUSTOMER ONBOARDING” wishlist.
+
+**Create paths:** A self-signup · B Admin panel · C Employee staff login.  
+**Providers:** mobile OTP = **2factor**; email OTP = **TBD** (full optional verify → `emailVerifiedAt`); GST = **GSTIN.cloud** (Admin button only).  
+**Deferred:** Live / Non-live stock order views → separate module.
