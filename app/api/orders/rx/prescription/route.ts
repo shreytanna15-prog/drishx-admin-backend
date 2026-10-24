@@ -5,7 +5,7 @@ import {
   getSignedOrderImageUrl,
   uploadColorReferenceImage,
 } from "../../../../lib/supabase-storage";
-import { isCustomerApproved } from "../../../../lib/user-public";
+import { assessSelfServeOrderEligibility } from "../../../../lib/customer-order-eligibility";
 import { prisma } from "../../../../lib/prisma";
 
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -26,11 +26,15 @@ export async function POST(req: NextRequest) {
   try {
     if (session.role === "CUSTOMER") {
       const customer = await prisma.user.findUnique({ where: { id: session.userId } });
-      if (!customer || !isCustomerApproved(customer)) {
-        return NextResponse.json(
-          { error: "Your account is pending admin approval. You cannot upload images yet." },
-          { status: 403 }
-        );
+      const selfGate = customer
+        ? assessSelfServeOrderEligibility(customer)
+        : ({
+            ok: false as const,
+            message:
+              "Your account is pending admin approval. You cannot upload images yet.",
+          });
+      if (!selfGate.ok) {
+        return NextResponse.json({ error: selfGate.message }, { status: 403 });
       }
     }
 

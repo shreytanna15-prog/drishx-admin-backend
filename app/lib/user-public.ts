@@ -16,14 +16,24 @@ export type SafeUser = {
   isActive: boolean;
   isApproved: boolean;
   approvalStatus: User["approvalStatus"];
+  accountAction: User["accountAction"];
+  creditLimit: string | null;
+  creditAllowed: boolean;
+  pricingTierId: string | null;
+  pricingTierCode: string | null;
+  createdByStaffId: string | null;
+  gstinVerifyStatus: User["gstinVerifyStatus"];
+  gstinVerifiedAt: Date | null;
   gstNumber: string | null;
   businessName: string | null;
   businessAddress: string | null;
   state: string | null;
   pincode: string | null;
   mobileNumber: string | null;
+  mobileVerifiedAt: Date | null;
   alternateMobileNumber: string | null;
   whatsappNumber: string | null;
+  emailVerifiedAt: Date | null;
   shopName: string | null;
   businessType: string | null;
   addressLine1: string | null;
@@ -55,7 +65,10 @@ export type SafeUser = {
 };
 
 export function toSafeUser(
-  user: User & { staffRole?: StaffRole | null }
+  user: User & {
+    staffRole?: StaffRole | null;
+    pricingTier?: { code: string } | null;
+  }
 ): SafeUser {
   const staffRole = user.staffRole ? serializeStaffRole(user.staffRole) : null;
   let permissions: StaffPermission[] = [];
@@ -73,14 +86,25 @@ export function toSafeUser(
     isActive: user.isActive,
     isApproved: user.isApproved,
     approvalStatus: user.approvalStatus,
+    accountAction: user.accountAction ?? "NONE",
+    creditLimit:
+      user.creditLimit != null ? String(user.creditLimit) : null,
+    creditAllowed: user.creditAllowed ?? true,
+    pricingTierId: user.pricingTierId ?? null,
+    pricingTierCode: user.pricingTier?.code ?? null,
+    createdByStaffId: user.createdByStaffId ?? null,
+    gstinVerifyStatus: user.gstinVerifyStatus ?? "UNKNOWN",
+    gstinVerifiedAt: user.gstinVerifiedAt ?? null,
     gstNumber: user.gstNumber,
     businessName: user.businessName,
     businessAddress: user.businessAddress,
     state: user.state,
     pincode: user.pincode,
     mobileNumber: user.mobileNumber,
+    mobileVerifiedAt: user.mobileVerifiedAt ?? null,
     alternateMobileNumber: user.alternateMobileNumber,
     whatsappNumber: user.whatsappNumber,
+    emailVerifiedAt: user.emailVerifiedAt ?? null,
     shopName: user.shopName,
     businessType: user.businessType,
     addressLine1: user.addressLine1,

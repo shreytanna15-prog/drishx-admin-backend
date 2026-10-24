@@ -40,9 +40,12 @@ export async function issueAuthTokens(
   return response;
 }
 
-/** Login gate for inactive staff and suspended/rejected customers (RW-04). */
+/** Login gate for inactive staff, suspended, and closed customers. */
 export function inactiveStaffLoginError(
-  user: Pick<User, "role" | "isActive" | "isApproved" | "approvalStatus">
+  user: Pick<
+    User,
+    "role" | "isActive" | "isApproved" | "approvalStatus" | "accountAction"
+  >
 ) {
   return accountAccessErrorResponse(user);
 }

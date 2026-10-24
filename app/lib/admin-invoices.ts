@@ -1,5 +1,120 @@
-import { adminFetch } from "@/app/lib/admin-api";
+import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
 import type { Paginated } from "@/app/lib/types/api-client";
+
+/** Delay before revoking a blob object URL after opening the tax invoice. */
+export const ADMIN_INVOICE_TAX_PDF_OBJECT_URL_REVOKE_MS = 60_000;
+
+/** Same-origin API path — never put tokens in the URL. */
+export function adminInvoiceTaxPdfPath(invoiceId: string): string {
+  const id = invoiceId.trim();
+  if (!id) {
+    throw new AdminApiError("Missing invoice id.", 400);
+  }
+  const path = `/api/invoices/${encodeURIComponent(id)}/pdf`;
+  if (path.includes("?") || /access_token|token=/i.test(path)) {
+    throw new AdminApiError("Invalid tax invoice path.", 400);
+  }
+  return path;
+}
+
+/** Authenticated fetch of the tax invoice document (HTML printable view). */
+export async function fetchAdminInvoiceTaxPdfBlob(
+  invoiceId: string
+): Promise<Blob> {
+  const path = adminInvoiceTaxPdfPath(invoiceId);
+  const res = await adminAuthFetch(path, { method: "GET" });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new AdminApiError(
+      typeof data.error === "string"
+        ? data.error
+        : "Failed to open tax invoice.",
+      res.status,
+      data
+    );
+  }
+  return res.blob();
+}
+
+/**
+ * Show a fetched tax document in a pre-opened tab (avoids popup blockers).
+ * Schedules object-URL cleanup; does not navigate to the authenticated API path.
+ */
+export function presentAdminInvoiceTaxDocument(
+  blob: Blob,
+  popup: Window | null,
+  options?: {
+    revokeAfterMs?: number;
+    schedule?: typeof setTimeout;
+    createObjectUrl?: (blob: Blob) => string;
+    revokeObjectUrl?: (url: string) => void;
+  }
+): { objectUrl: string; openedInPopup: boolean; usedAnchorFallback: boolean } {
+  const createObjectUrl =
+    options?.createObjectUrl ?? ((b: Blob) => URL.createObjectURL(b));
+  const revokeObjectUrl =
+    options?.revokeObjectUrl ?? ((url: string) => URL.revokeObjectURL(url));
+  const schedule = options?.schedule ?? setTimeout;
+  const revokeAfterMs =
+    options?.revokeAfterMs ?? ADMIN_INVOICE_TAX_PDF_OBJECT_URL_REVOKE_MS;
+
+  const objectUrl = createObjectUrl(blob);
+  let openedInPopup = false;
+
+  if (popup && !popup.closed) {
+    try {
+      popup.location.replace(objectUrl);
+      openedInPopup = true;
+    } catch {
+      try {
+        popup.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  let usedAnchorFallback = false;
+  if (!openedInPopup && typeof document !== "undefined") {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.target = "_blank";
+    anchor.rel = "noopener,noreferrer";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    usedAnchorFallback = true;
+  }
+
+  schedule(() => {
+    revokeObjectUrl(objectUrl);
+  }, revokeAfterMs);
+
+  return { objectUrl, openedInPopup, usedAnchorFallback };
+}
+
+/**
+ * Fetch tax invoice via Bearer auth and present it in `popup` (open about:blank
+ * synchronously on click before awaiting this).
+ */
+export async function openAdminInvoiceTaxPdf(
+  invoiceId: string,
+  options?: { popup?: Window | null }
+): Promise<void> {
+  const popup = options?.popup ?? null;
+  try {
+    const blob = await fetchAdminInvoiceTaxPdfBlob(invoiceId);
+    presentAdminInvoiceTaxDocument(blob, popup);
+  } catch (err) {
+    try {
+      popup?.close();
+    } catch {
+      // ignore
+    }
+    throw err;
+  }
+}
 
 export type InvoiceCustomer = {
   id: string;
@@ -66,9 +181,44 @@ export function invoiceCustomerLabel(invoice: AdminInvoice) {
   );
 }
 
+/** Human label for invoice.status — never collapse VOID/CANCELLED into "Unpaid". */
+export function formatInvoiceStatusLabel(status: string): string {
+  switch (status) {
+    case "PAID":
+      return "Paid";
+    case "PARTIALLY_PAID":
+      return "Partially paid";
+    case "OVERDUE":
+      return "Overdue";
+    case "VOID":
+      return "Void";
+    case "CANCELLED":
+      return "Cancelled";
+    case "DRAFT":
+      return "Draft";
+    case "ISSUED":
+      return "Unpaid";
+    default:
+      return status.replace(/_/g, " ");
+  }
+}
+
+/** Open AR for list totals — excludes settled and closed (VOID/CANCELLED) invoices. */
+export function invoiceContributesToUnpaidTotal(status: string): boolean {
+  return (
+    status !== "PAID" && status !== "VOID" && status !== "CANCELLED"
+  );
+}
+
 export function invoiceStatusClass(status: string) {
   if (status === "PAID") {
     return "border-(--brand-success-border) bg-(--brand-success-bg) text-(--brand-success)";
+  }
+  if (status === "VOID" || status === "CANCELLED") {
+    return "border-(--brand-card-border) bg-(--brand-card) text-(--brand-text-muted)";
+  }
+  if (status === "PARTIALLY_PAID" || status === "OVERDUE") {
+    return "border-[rgba(240,161,50,0.45)] bg-[rgba(240,161,50,0.12)] text-(--brand-primary)";
   }
   return "border-[rgba(240,161,50,0.45)] bg-[rgba(240,161,50,0.12)] text-(--brand-primary)";
 }

@@ -1,5 +1,14 @@
 import { prisma } from "@/app/lib/prisma";
 import { roundMoney } from "./tax-calc";
+import {
+  assessCheckoutCreditSync,
+  creditLimitExceededMessage,
+  type CheckoutCreditDenial,
+  type CheckoutCreditFields,
+} from "./credit-limit-gate";
+
+export type { CheckoutCreditDenial, CheckoutCreditFields };
+export { assessCheckoutCreditSync };
 
 export async function checkCreditLimitWarning(
   customerId: string,
@@ -35,4 +44,27 @@ export async function getCustomerOutstanding(customerId: string): Promise<number
     _sum: { amountOutstanding: true },
   });
   return Number(agg._sum.amountOutstanding ?? 0);
+}
+
+/**
+ * Phase D hard credit gate before committing an order that increases receivables.
+ */
+export async function assertHardCreditAtCheckout(
+  customer: CheckoutCreditFields & { id: string },
+  orderTotal: number
+): Promise<{ ok: true } | CheckoutCreditDenial> {
+  const sync = assessCheckoutCreditSync(customer, orderTotal);
+  if (sync) return sync;
+
+  const amount = roundMoney(Math.max(0, Number(orderTotal) || 0));
+  const limit = Number(customer.creditLimit);
+  const outstanding = await getCustomerOutstanding(customer.id);
+  const projected = roundMoney(outstanding + amount);
+  if (projected <= limit) return { ok: true };
+
+  return creditLimitExceededMessage({
+    outstanding,
+    orderTotal: amount,
+    limit,
+  });
 }

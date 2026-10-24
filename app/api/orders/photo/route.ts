@@ -4,7 +4,7 @@ import { LensType } from "@prisma/client";
 
 import { prisma } from "../../../lib/prisma";
 import { generateUniqueOrderNumber } from "../../../lib/order-numbers";
-import { isCustomerApproved } from "../../../lib/user-public";
+import { assessSelfServeOrderEligibility } from "../../../lib/customer-order-eligibility";
 import { getSignedOrderImageUrl, uploadOrderImage } from "../../../lib/supabase-storage";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
 import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
@@ -27,11 +27,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const customer = await prisma.user.findUnique({ where: { id: session.userId } });
-    if (!customer || !isCustomerApproved(customer)) {
-      return NextResponse.json(
-        { error: "Your account is pending admin approval. You cannot place orders yet." },
-        { status: 403 }
-      );
+    const selfGate = customer
+      ? assessSelfServeOrderEligibility(customer)
+      : ({
+          ok: false as const,
+          message:
+            "Your account is pending admin approval. You cannot place orders yet.",
+        });
+    if (!selfGate.ok) {
+      return NextResponse.json({ error: selfGate.message }, { status: 403 });
     }
 
     const formData = await req.formData();

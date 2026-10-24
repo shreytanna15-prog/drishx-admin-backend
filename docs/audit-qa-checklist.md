@@ -20,6 +20,18 @@ Use this checklist when validating the audit platform against the client spec in
 - [ ] Login success/failure creates `SecurityEvent`
 - [ ] Logout creates security event
 - [ ] Customer approve/reject creates audit event
+- [ ] OTP send/verify/fail creates `SecurityEvent` (`OTP_SENT` / `OTP_VERIFIED` / `OTP_FAILED`)
+
+## Customer account configuration (CAC)
+
+- [ ] Admin Verify GST emits `GSTIN_VERIFIED` (mock OK in DEV)
+- [ ] Account action change emits `CUSTOMER_ACCOUNT_ACTION`
+- [ ] Admin create / walk-in create emits `CUSTOMER_CREATED` with `createdByStaffId`
+- [ ] Tier / credit commercial save emits `CUSTOMER_UPDATED` (or dedicated tier/credit codes if used)
+- [ ] Customer self profile PATCH emits `CUSTOMER_PROFILE_RESUBMITTED` and flips to pending
+- [ ] Refund payout emits `ORDER_REFUND_PAYOUT` with amount/mode in context
+- [ ] Staff email/password login unaffected by customer OTP paths
+- [ ] Dual-login: customer mobile OTP and email/password both issue sessions when allowed
 
 ## Admin UI
 

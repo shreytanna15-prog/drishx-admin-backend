@@ -6,8 +6,26 @@ export type AuthErrorCode =
   | "TOKEN_MISSING"
   | "ACCOUNT_PENDING"
   | "ACCOUNT_INACTIVE"
+  | "ACCOUNT_REJECTED"
+  | "ACCOUNT_BLOCKED"
+  | "ACCOUNT_CLOSED"
   | "MISSING_PERMISSION"
-  | "FORBIDDEN";
+  | "FORBIDDEN"
+  | "OTP_INVALID"
+  | "OTP_RATE_LIMITED"
+  | "MOBILE_IN_USE"
+  | "CREDIT_LIMIT_EXCEEDED"
+  | "CREDIT_SUSPENDED"
+  | "GSTIN_MISSING"
+  | "GSTIN_PROVIDER_ERROR";
+
+export function jsonError(
+  code: AuthErrorCode | string,
+  message: string,
+  status: number
+) {
+  return NextResponse.json({ error: message, code }, { status });
+}
 
 export function unauthorizedResponse(
   code: AuthErrorCode = "TOKEN_INVALID",

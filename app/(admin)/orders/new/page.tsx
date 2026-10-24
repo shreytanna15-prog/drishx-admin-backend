@@ -7,7 +7,7 @@ export default function AdminCreateOrderPage() {
   return (
     <AdminPage
       title="Create Order"
-      subtitle="Place a catalog or RX order on behalf of an approved customer"
+      subtitle="Place a catalog or RX order on behalf of an approved or walk-in customer"
     >
       <AdminCreateOrderPanel />
     </AdminPage>

@@ -9,6 +9,9 @@ export type CustomersListParams = {
   status: string;
   activeOnly: boolean;
   q?: string;
+  accountAction?: string;
+  /** Pricing tier code A–F (case-insensitive). */
+  tierCode?: string;
 };
 
 export function parseCustomersListParams(
@@ -35,8 +38,11 @@ export function parseCustomersListParams(
     searchParams.get("activeOnly") === "1" ||
     searchParams.get("activeOnly") === "true";
   const q = searchParams.get("q")?.trim() || undefined;
+  const accountAction =
+    searchParams.get("accountAction")?.trim().toUpperCase() || undefined;
+  const tierCode = searchParams.get("tierCode")?.trim().toUpperCase() || undefined;
 
-  return { page, limit, status, activeOnly, q };
+  return { page, limit, status, activeOnly, q, accountAction, tierCode };
 }
 
 export function buildCustomersListWhere(
@@ -57,6 +63,23 @@ export function buildCustomersListWhere(
       isApproved: true,
       isActive: false,
     };
+  } else if (params.status === "orderable") {
+    // Create-order picker: approved+active OR pending staff-created (Path B/C).
+    where = {
+      role: "CUSTOMER",
+      accountAction: { notIn: ["CLOSED", "BLOCKED"] },
+      OR: [
+        {
+          isApproved: true,
+          approvalStatus: "APPROVED",
+          isActive: true,
+        },
+        {
+          approvalStatus: "PENDING_REVIEW",
+          createdByStaffId: { not: null },
+        },
+      ],
+    };
   } else {
     where = {
       role: "CUSTOMER",
@@ -68,23 +91,37 @@ export function buildCustomersListWhere(
     }
   }
 
+  const andParts: Prisma.UserWhereInput[] = [where];
+
   const q = params.q?.trim();
   if (q) {
-    where = {
-      AND: [
-        where,
-        {
-          OR: [
-            { name: { contains: q, mode: "insensitive" } },
-            { businessName: { contains: q, mode: "insensitive" } },
-            { shopName: { contains: q, mode: "insensitive" } },
-            { email: { contains: q, mode: "insensitive" } },
-            { mobileNumber: { contains: q, mode: "insensitive" } },
-          ],
-        },
+    andParts.push({
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        { businessName: { contains: q, mode: "insensitive" } },
+        { shopName: { contains: q, mode: "insensitive" } },
+        { email: { contains: q, mode: "insensitive" } },
+        { mobileNumber: { contains: q, mode: "insensitive" } },
+        { gstNumber: { contains: q, mode: "insensitive" } },
       ],
-    };
+    });
   }
 
-  return where;
+  const action = params.accountAction?.trim().toUpperCase();
+  if (
+    action === "NONE" ||
+    action === "BLOCKED" ||
+    action === "CREDIT_SUSPENDED" ||
+    action === "CLOSED"
+  ) {
+    andParts.push({ accountAction: action });
+  }
+
+  const tier = params.tierCode?.trim().toUpperCase();
+  if (tier && /^[A-F]$/.test(tier)) {
+    andParts.push({ pricingTier: { code: tier } });
+  }
+
+  if (andParts.length === 1) return andParts[0]!;
+  return { AND: andParts };
 }

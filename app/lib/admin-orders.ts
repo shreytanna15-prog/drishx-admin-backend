@@ -213,6 +213,33 @@ export function getStaffStatusOptions(current: string): string[] {
   }
 }
 
+/**
+ * Admin detail status select: current status first, then legal next transitions.
+ * Does not change transition rules — only presentation / default selection safety.
+ */
+export function buildAdminStatusSelectOptions(current: string): string[] {
+  const status = current.trim().toUpperCase();
+  if (!status) return [];
+  const seen = new Set<string>();
+  const options: string[] = [];
+  for (const value of [status, ...getStaffStatusOptions(status)]) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    options.push(value);
+  }
+  return options;
+}
+
+/** True when the select value is a real change (not the current status). */
+export function isAdminStatusChangeSelected(
+  current: string,
+  selected: string
+): boolean {
+  const from = current.trim().toUpperCase();
+  const to = selected.trim().toUpperCase();
+  return Boolean(from && to && from !== to);
+}
+
 export function isEditableOrderStatus(status: string) {
   return status === "PENDING" || status === "AWAITING_PROCUREMENT";
 }

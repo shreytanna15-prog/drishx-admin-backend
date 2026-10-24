@@ -25,7 +25,12 @@ import {
   AuditModule,
   recordAuditEvent,
 } from "./audit";
+import { assertHardCreditAtCheckout } from "./finance/credit-limit";
 import { createInvoiceFromOrder } from "./finance/create-invoice-from-order";
+import {
+  buildOrderTierSnapshot,
+  resolveCustomerPricingTier,
+} from "./finance/pricing-tier";
 import {
   applyOrderRedemption,
   resolveCheckoutRedemption,
@@ -116,7 +121,31 @@ export async function placeOrderLine(
   }
 
   const unitPrice = lens.price;
-  const totalAmount = orderTotalFromPairPrice(Number(unitPrice), orderQty);
+  const grossAmount = orderTotalFromPairPrice(Number(unitPrice), orderQty);
+  const tier = await resolveCustomerPricingTier(context.resolvedUserId);
+  const tierSnap = buildOrderTierSnapshot(tier, grossAmount);
+  const totalAmount = tierSnap.totalAfterTier;
+
+  const creditCustomer = await prisma.user.findUnique({
+    where: { id: context.resolvedUserId },
+    select: {
+      id: true,
+      accountAction: true,
+      creditAllowed: true,
+      creditLimit: true,
+    },
+  });
+  if (!creditCustomer) {
+    throw new Error("Customer not found.");
+  }
+  const creditGate = await assertHardCreditAtCheckout(
+    creditCustomer,
+    totalAmount
+  );
+  if (!creditGate.ok) {
+    throw new Error(creditGate.message);
+  }
+
   const prescription = resolveOrderPrescription(
     input.reservation ?? null,
     {
@@ -193,6 +222,9 @@ export async function placeOrderLine(
       pickedQuantity: 0,
       unitPrice: Number(unitPrice),
       totalAmount,
+      tierCode: tierSnap.tierCode,
+      tierDiscountPercent: tierSnap.tierDiscountPercent,
+      tierDiscountAmount: tierSnap.tierDiscountAmount,
       sph: prescription.sph,
       cyl: prescription.cyl,
       axis: prescription.axis,

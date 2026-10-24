@@ -211,6 +211,11 @@ const NAV_SECTIONS: NavSection[] = [
       },
       { title: "Expenses", icon: List, href: "/finance/expenses" },
       {
+        title: "Pricing tiers",
+        icon: CircleDollarSign,
+        href: "/finance/pricing-tiers",
+      },
+      {
         title: "Finance Settings",
         icon: Settings,
         href: "/finance/settings",

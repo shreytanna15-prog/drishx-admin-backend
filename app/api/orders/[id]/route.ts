@@ -561,33 +561,37 @@ export async function PUT(
     let updatedOrder;
     try {
       if (isCancelling) {
-        updatedOrder = await prisma.$transaction(async (tx) => {
-          await restorePickedStock(existingOrder, stockAudit, tx);
-          if (existingOrder.transactionId) {
-            await voidTransaction(
-              existingOrder.transactionId,
-              ReasonCode.VOID.INCORRECT_ENTRY,
-              cancelReason ?? "Order cancelled",
-              session,
-              tx
-            );
-          }
-          await reverseRedemption({
-            customerId: existingOrder.userId,
-            orderId: existingOrder.id,
-            db: tx,
-          });
-          const order = await tx.order.update({
-            where: { id },
-            data: updateData,
-          });
-          await voidUnpaidInvoiceOnOrderCancel({
-            orderId: id,
-            reason: cancelReason || "Order cancelled",
-            tx,
-          });
-          return order;
-        });
+        // Stock + sale void + loyalty + invoice/ledger need > Prisma default 5s (P2028).
+        updatedOrder = await prisma.$transaction(
+          async (tx) => {
+            await restorePickedStock(existingOrder, stockAudit, tx);
+            if (existingOrder.transactionId) {
+              await voidTransaction(
+                existingOrder.transactionId,
+                ReasonCode.VOID.INCORRECT_ENTRY,
+                cancelReason ?? "Order cancelled",
+                session,
+                tx
+              );
+            }
+            await reverseRedemption({
+              customerId: existingOrder.userId,
+              orderId: existingOrder.id,
+              db: tx,
+            });
+            const order = await tx.order.update({
+              where: { id },
+              data: updateData,
+            });
+            await voidUnpaidInvoiceOnOrderCancel({
+              orderId: id,
+              reason: cancelReason || "Order cancelled",
+              tx,
+            });
+            return order;
+          },
+          { maxWait: 10_000, timeout: 60_000 }
+        );
       } else {
         updatedOrder = await prisma.order.update({
           where: { id },
@@ -1042,48 +1046,52 @@ export async function DELETE(
     }
 
     try {
-      await prisma.$transaction(async (tx) => {
-        if (existingOrder.status !== OrderStatus.CANCELLED) {
-          await restorePickedStock(
-            existingOrder,
-            {
-              actorUserId: session.userId,
-              orderId: id,
-              request: buildAuditRequestContext(req),
-            },
-            tx
-          );
-          if (existingOrder.transactionId) {
-            await voidTransaction(
-              existingOrder.transactionId,
-              ReasonCode.VOID.INCORRECT_ENTRY,
-              archiveReason,
-              session,
+      // Same cancel stack as PUT; raise interactive txn limits to avoid P2028.
+      await prisma.$transaction(
+        async (tx) => {
+          if (existingOrder.status !== OrderStatus.CANCELLED) {
+            await restorePickedStock(
+              existingOrder,
+              {
+                actorUserId: session.userId,
+                orderId: id,
+                request: buildAuditRequestContext(req),
+              },
               tx
             );
+            if (existingOrder.transactionId) {
+              await voidTransaction(
+                existingOrder.transactionId,
+                ReasonCode.VOID.INCORRECT_ENTRY,
+                archiveReason,
+                session,
+                tx
+              );
+            }
+            await reverseRedemption({
+              customerId: existingOrder.userId,
+              orderId: existingOrder.id,
+              db: tx,
+            });
           }
-          await reverseRedemption({
-            customerId: existingOrder.userId,
-            orderId: existingOrder.id,
-            db: tx,
+          await tx.order.update({
+            where: { id },
+            data: {
+              archivedAt: new Date(),
+              archiveReason,
+              status: OrderStatus.CANCELLED,
+              transactionId: null,
+              reservedQuantity: 0,
+            },
           });
-        }
-        await tx.order.update({
-          where: { id },
-          data: {
-            archivedAt: new Date(),
-            archiveReason,
-            status: OrderStatus.CANCELLED,
-            transactionId: null,
-            reservedQuantity: 0,
-          },
-        });
-        await voidUnpaidInvoiceOnOrderCancel({
-          orderId: id,
-          reason: archiveReason,
-          tx,
-        });
-      });
+          await voidUnpaidInvoiceOnOrderCancel({
+            orderId: id,
+            reason: archiveReason,
+            tx,
+          });
+        },
+        { maxWait: 10_000, timeout: 60_000 }
+      );
     } catch (e) {
       if (e instanceof OrderInvoiceCancellationError) {
         return NextResponse.json({ error: e.message }, { status: 400 });

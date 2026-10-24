@@ -12,14 +12,14 @@ import { forbiddenResponse } from "./auth-errors";
 
 export type AccountAccessFields = Pick<
   User,
-  "role" | "isActive" | "isApproved" | "approvalStatus"
+  "role" | "isActive" | "isApproved" | "approvalStatus" | "accountAction"
 >;
 
 export type AccountAccessDenial =
   | { ok: true }
   | {
       ok: false;
-      code: "ACCOUNT_INACTIVE" | "FORBIDDEN";
+      code: "ACCOUNT_INACTIVE" | "ACCOUNT_CLOSED" | "FORBIDDEN";
       message: string;
       status: 403;
     };
@@ -44,7 +44,8 @@ export function isInactiveStaff(user: AccountAccessFields): boolean {
 
 /**
  * Whether the account may receive new access/refresh tokens or continue a session.
- * Pending / incomplete customers remain allowed (RW-04 incomplete workflow).
+ * Pending / incomplete / rejected customers remain allowed (edit & resubmit UX).
+ * Suspended customers and inactive staff are blocked.
  */
 export function assessAccountAccess(user: AccountAccessFields): AccountAccessDenial {
   if (isInactiveStaff(user)) {
@@ -55,14 +56,15 @@ export function assessAccountAccess(user: AccountAccessFields): AccountAccessDen
       status: 403,
     };
   }
-  if (isRejectedCustomer(user)) {
+  if (user.role === "CUSTOMER" && user.accountAction === "CLOSED") {
     return {
       ok: false,
-      code: "FORBIDDEN",
-      message: "Your account was rejected by admin.",
+      code: "ACCOUNT_CLOSED",
+      message: "This account has been closed.",
       status: 403,
     };
   }
+  // Rejected customers may authenticate (OTP or password) to edit & resubmit.
   if (isSuspendedCustomer(user)) {
     return {
       ok: false,

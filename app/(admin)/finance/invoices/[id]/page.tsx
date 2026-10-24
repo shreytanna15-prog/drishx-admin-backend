@@ -8,7 +8,10 @@ import { DetailSkeleton } from "@/components/admin-skeletons";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatInvoiceMoney } from "@/app/lib/admin-invoices";
+import {
+  formatInvoiceMoney,
+  openAdminInvoiceTaxPdf,
+} from "@/app/lib/admin-invoices";
 
 type InvoiceDetail = {
   id: string;
@@ -53,6 +56,7 @@ export default function InvoiceDetailPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payRef, setPayRef] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     void adminFetch<InvoiceDetail>(`/api/invoices/${id}`)
@@ -87,6 +91,28 @@ export default function InvoiceDetailPage() {
       setError(err instanceof AdminApiError ? err.message : "Payment failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function openTaxInvoicePdf() {
+    if (!invoice || pdfBusy) return;
+    setError("");
+    setPdfBusy(true);
+    // Open blank tab synchronously so popup blockers allow the later blob URL.
+    const popup =
+      typeof window !== "undefined"
+        ? window.open("about:blank", "_blank")
+        : null;
+    try {
+      await openAdminInvoiceTaxPdf(invoice.id, { popup });
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Failed to open tax invoice."
+      );
+    } finally {
+      setPdfBusy(false);
     }
   }
 
@@ -139,10 +165,14 @@ export default function InvoiceDetailPage() {
                 Paid {formatInvoiceMoney(invoice.amountPaid)} · Outstanding{" "}
                 {formatInvoiceMoney(invoice.amountOutstanding)}
               </p>
-              <Button asChild className="mt-4" variant="outline" size="sm">
-                <a href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noreferrer">
-                  Open tax invoice PDF
-                </a>
+              <Button
+                className="mt-4"
+                variant="outline"
+                size="sm"
+                disabled={pdfBusy}
+                onClick={() => void openTaxInvoicePdf()}
+              >
+                {pdfBusy ? "Opening…" : "Open tax invoice PDF"}
               </Button>
             </div>
           </div>

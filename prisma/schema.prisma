@@ -21,6 +21,37 @@ enum AccountApprovalStatus {
   REJECTED
 }
 
+/// Commercial / enforcement action separate from approval (Phase B).
+enum AccountAction {
+  NONE
+  BLOCKED
+  CREDIT_SUSPENDED
+  CLOSED
+}
+
+enum GstinVerifyStatus {
+  UNKNOWN
+  ACTIVE
+  INACTIVE
+  INVALID
+  ERROR
+}
+
+/// OTP channel for customer identity (Phase A — customer account configuration).
+enum OtpChannel {
+  MOBILE
+  EMAIL
+}
+
+/// Why an OTP was sent. Used for rate limits, audit, and verify side effects.
+enum OtpPurpose {
+  SIGNUP
+  LOGIN
+  VERIFY_EMAIL
+  WALK_IN
+  ADMIN_INVITE
+}
+
 enum CustomerTaxType {
   REGISTERED
   UNREGISTERED
@@ -43,8 +74,12 @@ model User {
   state                  String?
   pincode                String?
   mobileNumber           String?
+  /// Set only after successful mobile OTP (2factor / OTP_DEV_MODE).
+  mobileVerifiedAt       DateTime?
   alternateMobileNumber  String?
   whatsappNumber         String?
+  /// Set only after successful email OTP. Null if email skipped or not yet verified.
+  emailVerifiedAt        DateTime?
   shopName               String?
   businessType           String?
   addressLine1           String?
@@ -69,8 +104,19 @@ model User {
   shippingPincode        String?
   /// GST customer classification for invoicing.
   customerType           CustomerTaxType       @default(UNREGISTERED)
-  /// Max receivable balance before admin warning (warn-only, not hard block).
+  /// Max receivable balance before checkout hard-block (Phase D).
   creditLimit            Decimal?
+  creditAllowed          Boolean               @default(true)
+  accountAction          AccountAction         @default(NONE)
+  /// Pricing tier A–F (default D = base / 0% until assigned).
+  pricingTierId         String?
+  pricingTier           PricingTier?         @relation(fields: [pricingTierId], references: [id])
+  /// Staff who created this customer (Path B admin / Path C walk-in).
+  createdByStaffId       String?
+  gstinVerifyStatus      GstinVerifyStatus     @default(UNKNOWN)
+  gstinVerifiedAt        DateTime?
+  gstinVerifyRaw         Json?
+  gstinVerifiedById      String?
   approvedAt             DateTime?
   approvedById           String?
   rejectionReason        String?
@@ -111,6 +157,42 @@ model User {
   loyaltyCreatedTransactions LoyaltyTransaction[] @relation("LoyaltyCreatedBy")
   attendanceRecords      AttendanceRecord[]       @relation("AttendanceEmployee")
   attendanceMarkedBy     AttendanceRecord[]       @relation("AttendanceMarkedBy")
+  orderRefunds           OrderRefund[]
+  orderRefundPayouts     OrderRefundPayout[]      @relation("OrderRefundPayoutRecorder")
+}
+
+/// Customer pricing tiers A–F. Tier D is the base (isBase=true).
+model PricingTier {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String?
+  discountPercent Decimal  @default(0)
+  isBase          Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  users           User[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Local OTP challenge row for rate limits + audit. Never store the raw OTP code.
+model OtpChallenge {
+  id                String     @id @default(cuid())
+  channel           OtpChannel
+  destination       String
+  provider          String
+  providerSessionId String?
+  purpose           OtpPurpose
+  expiresAt         DateTime
+  attempts          Int        @default(0)
+  consumedAt        DateTime?
+  createdByStaffId  String?
+  /// DEV-mode only: sha256 of the issued code. Null when provider holds the OTP.
+  codeHash          String?
+  createdAt         DateTime   @default(now())
+
+  @@index([destination, channel, createdAt])
+  @@index([destination, purpose, consumedAt])
 }
 
 model RefreshToken {
@@ -606,6 +688,10 @@ model Order {
   pickedQuantity     Float                    @default(0)
   unitPrice          Decimal
   totalAmount        Decimal
+  /// Snapshot of customer pricing tier at placement (invoice reprint fidelity).
+  tierCode             String?
+  tierDiscountPercent  Decimal?
+  tierDiscountAmount   Decimal?
   /// Customer-selected prescription at checkout (cart), not catalog lens defaults.
   sph                Decimal?
   cyl                Decimal?
@@ -645,6 +731,7 @@ model Order {
   powerVersions      OrderPowerVersion[]
   alternateSuggestions AlternatePowerSuggestion[]
   procurementRequests ProcurementRequest[]
+  orderRefund         OrderRefund?
 
   @@index([checkoutBatchId])
   @@index([assignedToId])
@@ -2275,4 +2362,45 @@ model OpenPurchaseOrderPower {
 
   @@id([lensType, lensId])
   @@index([purchaseOrderId])
+}
+
+/// Phase F — cancelled-order money owed back to the customer.
+enum OrderRefundStatus {
+  DUE
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+model OrderRefund {
+  id         String              @id @default(cuid())
+  orderId    String              @unique
+  order      Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   User                @relation(fields: [customerId], references: [id])
+  amountDue  Decimal
+  amountPaid Decimal             @default(0)
+  status     OrderRefundStatus   @default(DUE)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  payouts    OrderRefundPayout[]
+
+  @@index([customerId, status])
+  @@index([status, createdAt])
+}
+
+model OrderRefundPayout {
+  id           String      @id @default(cuid())
+  refundId     String
+  refund       OrderRefund @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  amount       Decimal
+  mode         PaymentMode
+  paidAt       DateTime
+  reference    String?
+  notes        String?
+  recordedById String?
+  recordedBy   User?       @relation("OrderRefundPayoutRecorder", fields: [recordedById], references: [id])
+  createdAt    DateTime    @default(now())
+
+  @@index([refundId, paidAt])
 }

@@ -15,13 +15,21 @@ import {
   assignmentCreateFields,
   resolveOrderAssigneeId,
 } from "../../lib/assign-order-to-employee";
-import { isCustomerApproved } from "../../lib/user-public";
+import {
+  assessSelfServeOrderEligibility,
+  assessStaffOnBehalfOrderEligibility,
+} from "../../lib/customer-order-eligibility";
 import {
   serializeOrderPrescription,
   serializeWholesaleLineItem,
 } from "../../lib/serialize-order";
 import { createOriginalPowerVersion } from "../../lib/alternate-power-workflow";
+import { assertHardCreditAtCheckout } from "../../lib/finance/credit-limit";
 import { createInvoiceFromOrder } from "../../lib/finance/create-invoice-from-order";
+import {
+  buildOrderTierSnapshot,
+  resolveCustomerPricingTier,
+} from "../../lib/finance/pricing-tier";
 import {
   applyOrderRedemption,
   resolveCheckoutRedemption,
@@ -119,7 +127,7 @@ export async function GET(req: NextRequest) {
 // POST /api/orders
 // Access: ADMIN | EMPLOYEE
 // Create an order, decrement lens stock, add income transaction
-// Body: { userId?, user?: { name, email, password? }, lensType, quantity, lensId?, sph?, cyl?, axis?, add?, eye?, notes? }
+// Body: { userId?, lensType, quantity, lensId?, sph?, cyl?, axis?, add?, eye?, notes? }
 // ─────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);
@@ -136,11 +144,15 @@ export async function POST(req: NextRequest) {
   try {
     if (session.role === "CUSTOMER") {
       const customer = await prisma.user.findUnique({ where: { id: session.userId } });
-      if (!customer || !isCustomerApproved(customer)) {
-        return NextResponse.json(
-          { error: "Your account is pending admin approval. You cannot place orders yet." },
-          { status: 403 }
-        );
+      const selfGate = customer
+        ? assessSelfServeOrderEligibility(customer)
+        : ({
+            ok: false as const,
+            message:
+              "Your account is pending admin approval. You cannot place orders yet.",
+          });
+      if (!selfGate.ok) {
+        return NextResponse.json({ error: selfGate.message }, { status: 403 });
       }
     }
 
@@ -148,10 +160,9 @@ export async function POST(req: NextRequest) {
 
     const rawBody = (await req.json()) as Record<string, unknown>;
     const body = stripClientOrderAttribution(rawBody);
-    const { userId, user, lensType, quantity, lensId, cartLineKey, notes: rawNotes, checkoutBatchId, redeemPoints, deliveryServiceId: rawDeliveryServiceId } =
+    const { userId, lensType, quantity, lensId, cartLineKey, notes: rawNotes, checkoutBatchId, redeemPoints, deliveryServiceId: rawDeliveryServiceId } =
       body as {
         userId?: string;
-        user?: { name?: string; email?: string; password?: string };
         lensType?: string;
         quantity?: number;
         lensId?: string;
@@ -175,9 +186,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (session.role !== "CUSTOMER" && !userId && (!user || !user.name || !user.email)) {
+    if (
+      session.role !== "CUSTOMER" &&
+      !(typeof userId === "string" && userId.trim())
+    ) {
       return NextResponse.json(
-        { error: "Either userId or user details (name, email) are required when not acting as a customer." },
+        {
+          error:
+            "Customer userId is required. Create walk-in customers via OTP first.",
+        },
         { status: 400 }
       );
     }
@@ -245,7 +262,7 @@ export async function POST(req: NextRequest) {
     }
 
     const unitPrice = lens.price;
-    const totalAmount = orderTotalFromPairPrice(Number(unitPrice), orderQty);
+    const grossAmount = orderTotalFromPairPrice(Number(unitPrice), orderQty);
     const prescription = resolveOrderPrescription(reservation, body, lens);
     // Delivery service chosen at order time; charge calculated after packing.
     let deliveryServiceId: string | null = null;
@@ -277,47 +294,46 @@ export async function POST(req: NextRequest) {
       if (!onBehalf || onBehalf.role !== "CUSTOMER") {
         return NextResponse.json({ error: "Customer not found." }, { status: 404 });
       }
-      if (!isCustomerApproved(onBehalf)) {
+      const onBehalfGate = assessStaffOnBehalfOrderEligibility(onBehalf);
+      if (!onBehalfGate.ok) {
         return NextResponse.json(
-          {
-            error:
-              "This customer cannot place orders (pending approval, rejected, or suspended).",
-          },
+          { error: onBehalfGate.message },
           { status: 403 }
         );
       }
       resolvedUserId = onBehalf.id;
-    } else if (!resolvedUserId) {
-      // Check if user already exists by email first
-      if (!user?.email || !user?.name) {
-        return NextResponse.json(
-          { error: "Customer userId or user details are required." },
-          { status: 400 }
-        );
-      }
-      const existingUser = await prisma.user.findUnique({ where: { email: user.email } });
-      if (existingUser) {
-        if (existingUser.role !== "CUSTOMER" || !isCustomerApproved(existingUser)) {
-          return NextResponse.json(
-            {
-              error:
-                "This customer cannot place orders (pending approval, rejected, or suspended).",
-            },
-            { status: 403 }
-          );
-        }
-        resolvedUserId = existingUser.id;
-      } else {
-        const newUser = await prisma.user.create({
-          data: {
-            name: user.name,
-            email: user.email,
-            password: user.password || "defaultPassword123!", // Should be hashed in a real scenario
-            role: "CUSTOMER",
-          },
-        });
-        resolvedUserId = newUser.id;
-      }
+    } else {
+      return NextResponse.json(
+        {
+          error:
+            "Customer userId is required. Create walk-in customers via OTP first.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const tier = await resolveCustomerPricingTier(String(resolvedUserId));
+    const tierSnap = buildOrderTierSnapshot(tier, grossAmount);
+    const totalAmount = tierSnap.totalAfterTier;
+
+    const creditCustomer = await prisma.user.findUnique({
+      where: { id: String(resolvedUserId) },
+      select: {
+        id: true,
+        accountAction: true,
+        creditAllowed: true,
+        creditLimit: true,
+      },
+    });
+    if (!creditCustomer) {
+      return NextResponse.json({ error: "Customer not found." }, { status: 404 });
+    }
+    const creditGate = await assertHardCreditAtCheckout(
+      creditCustomer,
+      totalAmount
+    );
+    if (!creditGate.ok) {
+      return NextResponse.json({ error: creditGate.message }, { status: 403 });
     }
 
     const attribution = resolveOrderAttribution({
@@ -372,6 +388,9 @@ export async function POST(req: NextRequest) {
         pickedQuantity: 0,
         unitPrice: Number(unitPrice),
         totalAmount: totalAmount,
+        tierCode: tierSnap.tierCode,
+        tierDiscountPercent: tierSnap.tierDiscountPercent,
+        tierDiscountAmount: tierSnap.tierDiscountAmount,
         sph: prescription.sph,
         cyl: prescription.cyl,
         axis: prescription.axis,

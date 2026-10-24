@@ -22,4 +22,5 @@ export {
   getOrCreateWallet,
   recomputeWallet,
   getExpiringWithinDays,
+  isPrismaUniqueConstraintError,
 } from "./wallet";

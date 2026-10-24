@@ -19,8 +19,9 @@ export type InvoiceCancelSettlementSnapshot = {
 /**
  * Returns an error message when cancel/archive must be rejected.
  * Already VOID/CANCELLED invoices do not block (idempotent).
- * Status PAID/PARTIALLY_PAID with no money and no allocations/CNs is treated as
- * unpaid (legacy status-only PAID bug) and does not block.
+ *
+ * Phase F: paid / allocated invoices may cancel — OrderRefund tracks money to return.
+ * Credit notes still block (avoid double-refund vs return credit notes).
  */
 export function invoiceBlocksOrderCancellation(
   inv: InvoiceCancelSettlementSnapshot
@@ -32,13 +33,8 @@ export function invoiceBlocksOrderCancellation(
   if (inv.creditNoteCount > 0) {
     return "Cannot cancel this order: the invoice has credit notes. Handle refunds or adjustments in Finance.";
   }
-  if (inv.paymentAllocationCount > 0) {
-    return "Cannot cancel this order: the invoice has recorded payment allocations. Handle refunds in Finance.";
-  }
-  if (Number(inv.amountPaid) > VOID_INVOICE_MONEY_EPS) {
-    return "Cannot cancel this order: the invoice is paid or partially paid. Handle refunds in Finance before cancelling.";
-  }
 
+  // amountPaid / allocations intentionally allowed — OrderRefund tracks money to return.
   return null;
 }
 

@@ -1,7 +1,11 @@
 import type { OrderStatus, Prisma } from "@prisma/client";
 import { orderPlacedByInclude } from "./order-attribution";
-import { employeeOrdersWhere } from "./prescription-order-hold";
+import {
+  COLOR_LENS_NOTES_MARKER,
+  employeeOrdersWhere,
+} from "./prescription-order-hold";
 import { sanitizeOrderForRole } from "./order-activity";
+import { RX_ORDER_NOTES_MARKER } from "./reports/rx-marker";
 
 export const ORDERS_LIST_DEFAULT_LIMIT = 30;
 export const ORDERS_LIST_MAX_LIMIT = 100;
@@ -147,45 +151,97 @@ export function parseOrdersListParams(searchParams: URLSearchParams): OrdersList
   };
 }
 
+/**
+ * SQL NULL-safe: `notes` is null OR does not contain `marker`.
+ * Plain `NOT { contains }` is UNKNOWN when notes IS NULL and drops the row.
+ */
+export function notesDoesNotContainMarker(
+  marker: string
+): Prisma.OrderWhereInput {
+  return {
+    OR: [{ notes: null }, { NOT: { notes: { contains: marker } } }],
+  };
+}
+
+export type OrdersListScopeFields = {
+  warehouseHold: boolean;
+  notes: string | null;
+  orderImageUrl: string | null;
+};
+
+/**
+ * Pure classification matching list scopes (catalog vs rx_lab).
+ * Color-lens jobs with a reference image stay catalog (marker in notes).
+ */
+export function classifyOrdersListScope(
+  order: OrdersListScopeFields
+): "catalog" | "rx_lab" {
+  if (order.warehouseHold) return "rx_lab";
+  if (order.notes?.includes(RX_ORDER_NOTES_MARKER)) return "rx_lab";
+  // Match Prisma `{ orderImageUrl: { not: null } }` (empty string counts as present).
+  if (
+    order.orderImageUrl != null &&
+    !order.notes?.includes(RX_ORDER_NOTES_MARKER) &&
+    !order.notes?.includes(COLOR_LENS_NOTES_MARKER)
+  ) {
+    return "rx_lab";
+  }
+  return "catalog";
+}
+
 /** Prescription lab: RX form, photo prescription, or still on warehouse hold. */
-function rxLabWhere(): Prisma.OrderWhereInput {
+export function rxLabWhere(): Prisma.OrderWhereInput {
   return {
     OR: [
       { warehouseHold: true },
-      { notes: { contains: "[RX Order]" } },
+      { notes: { contains: RX_ORDER_NOTES_MARKER } },
       {
         AND: [
           { orderImageUrl: { not: null } },
-          { NOT: { notes: { contains: "[RX Order]" } } },
-          { NOT: { notes: { contains: "[Color Lens]" } } },
+          notesDoesNotContainMarker(RX_ORDER_NOTES_MARKER),
+          notesDoesNotContainMarker(COLOR_LENS_NOTES_MARKER),
         ],
       },
     ],
   };
 }
 
-/** Catalog / color / wholesale — excludes prescription lab jobs. */
-function catalogWhere(): Prisma.OrderWhereInput {
-  return { NOT: rxLabWhere() };
+/**
+ * Catalog / color / wholesale — excludes prescription lab jobs.
+ * Positive NULL-safe predicates (never `NOT(rxLabWhere())`).
+ */
+export function catalogWhere(): Prisma.OrderWhereInput {
+  return {
+    AND: [
+      { warehouseHold: false },
+      notesDoesNotContainMarker(RX_ORDER_NOTES_MARKER),
+      {
+        OR: [
+          { orderImageUrl: null },
+          { notes: { contains: RX_ORDER_NOTES_MARKER } },
+          { notes: { contains: COLOR_LENS_NOTES_MARKER } },
+        ],
+      },
+    ],
+  };
 }
 
 function orderKindWhere(orderKind: string): Prisma.OrderWhereInput | null {
   switch (orderKind) {
     case "RX":
-      return { notes: { contains: "[RX Order]" } };
+      return { notes: { contains: RX_ORDER_NOTES_MARKER } };
     case "COLOR":
-      return { notes: { contains: "[Color Lens]" } };
+      return { notes: { contains: COLOR_LENS_NOTES_MARKER } };
     case "WHOLESALE":
       return { lineType: "WHOLESALE" };
     case "RETAIL":
+      // NULL-safe: notes=null must remain retail (not dropped by NOT contains).
       return {
-        lineType: "RETAIL",
-        NOT: {
-          OR: [
-            { notes: { contains: "[RX Order]" } },
-            { notes: { contains: "[Color Lens]" } },
-          ],
-        },
+        AND: [
+          { lineType: "RETAIL" },
+          notesDoesNotContainMarker(RX_ORDER_NOTES_MARKER),
+          notesDoesNotContainMarker(COLOR_LENS_NOTES_MARKER),
+        ],
       };
     default:
       return null;

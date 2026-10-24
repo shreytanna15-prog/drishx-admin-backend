@@ -243,6 +243,23 @@ describe("Phase 4 cancellation atomicity contracts", () => {
     );
   });
 
+  it("cancel and archive interactive transactions raise timeout/maxWait (P2028)", () => {
+    const src = readFileSync(
+      join(process.cwd(), "app/api/orders/[id]/route.ts"),
+      "utf8"
+    );
+    const cancelTxn = /if \(isCancelling\)[\s\S]*?prisma\.\$transaction\([\s\S]*?\{ maxWait: 10_000, timeout: 60_000 \}/;
+    const archiveTxn =
+      /export async function DELETE[\s\S]*?prisma\.\$transaction\([\s\S]*?\{ maxWait: 10_000, timeout: 60_000 \}/;
+    assert.match(src, cancelTxn);
+    assert.match(src, archiveTxn);
+    // Still a single atomic cancel path (stock + void + invoice inside txn).
+    assert.match(
+      src,
+      /if \(isCancelling\)[\s\S]*?restorePickedStock\(existingOrder, stockAudit, tx\)[\s\S]*?voidUnpaidInvoiceOnOrderCancel\([\s\S]*?\{ maxWait: 10_000, timeout: 60_000 \}/
+    );
+  });
+
   it("incrementLensStock passes transaction client into logStockDelta", () => {
     const src = readFileSync(
       join(process.cwd(), "app/lib/cart-reservations.ts"),

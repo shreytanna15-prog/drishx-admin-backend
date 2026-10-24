@@ -179,6 +179,9 @@ export async function createInvoiceFromOrder(
   // Retail / header-only: single pair→piece conversion.
   // Idempotent early-return above ensures this never rewrites issued invoices.
   const loyaltyDiscount = roundMoney(Number(input.loyaltyDiscount) || 0);
+  // Tier discount is snapshotted on the order at placement (before GST).
+  const tierDiscount = roundMoney(Number(order.tierDiscountAmount) || 0);
+  const preTaxDiscount = roundMoney(tierDiscount + loyaltyDiscount);
   const isWholesaleWithLines =
     order.lineType === "WHOLESALE" && order.wholesaleLineItems.length > 0;
 
@@ -196,7 +199,7 @@ export async function createInvoiceFromOrder(
           }),
           description: label.description,
         })),
-        discountAmount: loyaltyDiscount,
+        discountAmount: preTaxDiscount,
         gstRatePercent: tax.gstRatePercent,
         isInterState: pos.isInterState,
       })
@@ -210,7 +213,7 @@ export async function createInvoiceFromOrder(
     ? computeInvoicePricingFromOrder({
         pairUnitPrice: Number(order.unitPrice) || 0,
         pieceQuantity: Number(order.quantity) || 1,
-        discountAmount: loyaltyDiscount,
+        discountAmount: preTaxDiscount,
         gstRatePercent: tax.gstRatePercent,
         isInterState: pos.isInterState,
       })

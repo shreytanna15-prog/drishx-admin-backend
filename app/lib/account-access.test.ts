@@ -13,6 +13,7 @@ const baseCustomer = {
   isActive: true,
   isApproved: true,
   approvalStatus: "APPROVED" as const,
+  accountAction: "NONE" as const,
 };
 
 describe("customer suspension (RW-04)", () => {
@@ -34,12 +35,13 @@ describe("customer suspension (RW-04)", () => {
         isActive: false,
         isApproved: false,
         approvalStatus: "PENDING_REVIEW",
+        accountAction: "NONE",
       }),
       false
     );
   });
 
-  it("rejects login/refresh for suspended and rejected customers", () => {
+  it("rejects login/refresh for suspended customers only", () => {
     const suspended = assessAccountAccess({
       ...baseCustomer,
       isActive: false,
@@ -48,30 +50,36 @@ describe("customer suspension (RW-04)", () => {
     if (!suspended.ok) {
       assert.equal(suspended.code, "ACCOUNT_INACTIVE");
     }
-
-    const rejected = assessAccountAccess({
-      role: "CUSTOMER",
-      isActive: false,
-      isApproved: false,
-      approvalStatus: "REJECTED",
-    });
-    assert.equal(rejected.ok, false);
-    if (!rejected.ok) {
-      assert.equal(rejected.code, "FORBIDDEN");
-    }
   });
 
-  it("allows pending incomplete and approved active customers", () => {
+  it("allows pending, rejected, and approved active customers", () => {
     assert.equal(
       assessAccountAccess({
         role: "CUSTOMER",
         isActive: false,
         isApproved: false,
         approvalStatus: "PENDING_REVIEW",
+        accountAction: "NONE",
+      }).ok,
+      true
+    );
+    assert.equal(
+      assessAccountAccess({
+        role: "CUSTOMER",
+        isActive: false,
+        isApproved: false,
+        approvalStatus: "REJECTED",
+        accountAction: "NONE",
       }).ok,
       true
     );
     assert.equal(assessAccountAccess(baseCustomer).ok, true);
+    const closed = assessAccountAccess({
+      ...baseCustomer,
+      accountAction: "CLOSED",
+    });
+    assert.equal(closed.ok, false);
+    if (!closed.ok) assert.equal(closed.code, "ACCOUNT_CLOSED");
   });
 
   it("reactivated customers pass approved+active check", () => {
@@ -91,6 +99,7 @@ describe("staff inactivity", () => {
         isActive: false,
         isApproved: true,
         approvalStatus: "APPROVED",
+        accountAction: "NONE",
       }),
       true
     );
@@ -99,6 +108,7 @@ describe("staff inactivity", () => {
       isActive: false,
       isApproved: true,
       approvalStatus: "APPROVED",
+      accountAction: "NONE",
     });
     assert.equal(denied.ok, false);
   });
@@ -112,6 +122,7 @@ describe("rejected helper", () => {
         isActive: false,
         isApproved: false,
         approvalStatus: "REJECTED",
+        accountAction: "NONE",
       }),
       true
     );
