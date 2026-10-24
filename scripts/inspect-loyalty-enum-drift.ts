@@ -73,18 +73,25 @@ async function main() {
     Array<{ total: bigint | number }>
   >(`SELECT COUNT(*)::bigint AS total FROM "LoyaltyTransaction"`);
 
-  console.log("Total rows:", String(asRows(totalRows)[0]?.total ?? 0));
+  const totalRow = asRows<{ total: bigint | number }>(totalRows)[0];
+  console.log("Total rows:", String(totalRow?.total ?? 0));
   console.log("type distribution:");
   console.table(
-    asRows(typeCounts).map((r) => ({
-      type: r.type,
-      count: Number(r.row_count),
-      in_schema_enum: r.type != null && EXPECTED_TYPES.includes(r.type as (typeof EXPECTED_TYPES)[number]),
-    }))
+    asRows<{ type: string | null; row_count: bigint | number }>(typeCounts).map(
+      (r) => ({
+        type: r.type,
+        count: Number(r.row_count),
+        in_schema_enum:
+          r.type != null &&
+          EXPECTED_TYPES.includes(r.type as (typeof EXPECTED_TYPES)[number]),
+      })
+    )
   );
   console.log("status distribution:");
   console.table(
-    asRows(statusCounts).map((r) => ({
+    asRows<{ status: string | null; row_count: bigint | number }>(
+      statusCounts
+    ).map((r) => ({
       status: r.status,
       count: Number(r.row_count),
       in_schema_enum:
@@ -93,13 +100,13 @@ async function main() {
     }))
   );
 
-  const unknownTypes = asRows(typeCounts)
+  const unknownTypes = asRows<{ type: string | null }>(typeCounts)
     .map((r) => r.type)
     .filter(
       (t): t is string =>
         t != null && !EXPECTED_TYPES.includes(t as (typeof EXPECTED_TYPES)[number])
     );
-  const unknownStatuses = asRows(statusCounts)
+  const unknownStatuses = asRows<{ status: string | null }>(statusCounts)
     .map((r) => r.status)
     .filter(
       (s): s is string =>
