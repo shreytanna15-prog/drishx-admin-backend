@@ -6,7 +6,10 @@ import {
   releaseExpiredReservations,
 } from "../../../lib/cart-reservations";
 import { prisma } from "../../../lib/prisma";
-import { isCustomerApproved } from "../../../lib/user-public";
+import {
+  assessSelfServeOrderEligibility,
+  assessStaffOnBehalfOrderEligibility,
+} from "../../../lib/customer-order-eligibility";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
 import { placeWholesaleCheckoutBatches } from "../../../lib/wholesale-checkout-batch";
 import {
@@ -30,21 +33,6 @@ export async function POST(req: NextRequest) {
   }
   const session = auth.session;
   try {
-    if (session.role === "CUSTOMER") {
-      const customer = await prisma.user.findUnique({
-        where: { id: session.userId },
-      });
-      if (!customer || !isCustomerApproved(customer)) {
-        return NextResponse.json(
-          {
-            error:
-              "Your account is pending admin approval. You cannot place orders yet.",
-          },
-          { status: 403 }
-        );
-      }
-    }
-
     void releaseExpiredReservations().catch((error) => {
       console.error("releaseExpiredReservations (async) error:", error);
     });
@@ -68,6 +56,20 @@ export async function POST(req: NextRequest) {
         { error: "Customer userId is required." },
         { status: 400 }
       );
+    }
+
+    const targetCustomer = await prisma.user.findUnique({
+      where: { id: targetCustomerId },
+    });
+    if (!targetCustomer || targetCustomer.role !== "CUSTOMER") {
+      return NextResponse.json({ error: "Customer not found." }, { status: 404 });
+    }
+    const orderGate =
+      session.role === "CUSTOMER"
+        ? assessSelfServeOrderEligibility(targetCustomer)
+        : assessStaffOnBehalfOrderEligibility(targetCustomer);
+    if (!orderGate.ok) {
+      return NextResponse.json({ error: orderGate.message }, { status: 403 });
     }
 
     const requestedKeys = Array.isArray(body?.cartLineKeys)

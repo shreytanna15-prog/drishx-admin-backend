@@ -10,6 +10,7 @@ export const QUERY_REGISTRY = {
   getOrder: "getOrder",
   getOrdersOverview: "getOrdersOverview",
   getCustomers: "getCustomers",
+  getCustomer: "getCustomer",
   getReturns: "getReturns",
   getInvoices: "getInvoices",
 } as const;
@@ -17,6 +18,11 @@ export const QUERY_REGISTRY = {
 export const MUTATION_REGISTRY = {
   updateLoyaltySettings: "updateLoyaltySettings",
   createOrder: "createOrder",
+  createCustomer: "createCustomer",
+  updateCustomer: "updateCustomer",
+  setCustomerAccountAction: "setCustomerAccountAction",
+  verifyCustomerGst: "verifyCustomerGst",
+  createWalkInCustomer: "createWalkInCustomer",
 } as const;
 
 export type QueryRegistryKey =

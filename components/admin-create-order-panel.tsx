@@ -12,8 +12,14 @@ import {
 } from "lucide-react";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import {
+  createWalkInCustomer,
+  sendWalkInMobileOtp,
+  verifyWalkInMobileOtp,
+} from "@/app/lib/admin-customers";
+import {
   filterEligibleCreateOrderCustomers,
   formatCustomerPickerLabel,
+  isEligibleCreateOrderCustomer,
   resolveCatalogLensSearchUi,
   type CreateOrderCustomerCandidate,
 } from "@/app/lib/admin-create-order-eligibility";
@@ -150,6 +156,21 @@ export function AdminCreateOrderPanel() {
   const submitLockRef = useRef(false);
   const [, startTransition] = useTransition();
 
+  const [customerMode, setCustomerMode] = useState<"search" | "walkin">(
+    "search"
+  );
+  const [walkInMobile, setWalkInMobile] = useState("");
+  const [walkInCode, setWalkInCode] = useState("");
+  const [walkInName, setWalkInName] = useState("");
+  const [walkInShop, setWalkInShop] = useState("");
+  const [walkInSessionId, setWalkInSessionId] = useState<string | null>(null);
+  const [walkInChallengeId, setWalkInChallengeId] = useState<string | null>(
+    null
+  );
+  const [walkInOtpVerified, setWalkInOtpVerified] = useState(false);
+  const [walkInBusy, setWalkInBusy] = useState(false);
+  const [walkInError, setWalkInError] = useState<string | null>(null);
+
   useEffect(() => {
     const t = window.setTimeout(
       () => setDebouncedCustomerQ(customerQuery.trim()),
@@ -174,8 +195,7 @@ export function AdminCreateOrderPanel() {
     refetch: refetchCustomers,
   } = useGetCustomers(
     {
-      status: "approved",
-      activeOnly: true,
+      status: "orderable",
       page: customerPage,
       limit: 30,
       q: debouncedCustomerQ || undefined,
@@ -195,6 +215,78 @@ export function AdminCreateOrderPanel() {
 
   const customersError = customersQueryError?.message ?? null;
   const customersHasMore = Boolean(customersPage?.hasMore);
+
+  async function handleWalkInSendOtp() {
+    setWalkInError(null);
+    setWalkInBusy(true);
+    setWalkInOtpVerified(false);
+    setWalkInChallengeId(null);
+    try {
+      const res = await sendWalkInMobileOtp(walkInMobile.trim());
+      setWalkInSessionId(res.providerSessionId);
+      setWalkInMobile(res.mobileNumber);
+    } catch (err) {
+      setWalkInError(
+        err instanceof AdminApiError ? err.message : "Failed to send OTP."
+      );
+    } finally {
+      setWalkInBusy(false);
+    }
+  }
+
+  async function handleWalkInVerifyOtp() {
+    setWalkInError(null);
+    setWalkInBusy(true);
+    try {
+      const res = await verifyWalkInMobileOtp({
+        mobileNumber: walkInMobile.trim(),
+        code: walkInCode.trim(),
+        sessionId: walkInSessionId,
+      });
+      setWalkInChallengeId(res.challengeId);
+      setWalkInOtpVerified(true);
+      setWalkInMobile(res.mobileNumber);
+      if (res.user && isEligibleCreateOrderCustomer(res.user)) {
+        setSelectedCustomer(res.user);
+        setCustomerMode("search");
+      }
+    } catch (err) {
+      setWalkInError(
+        err instanceof AdminApiError ? err.message : "Failed to verify OTP."
+      );
+    } finally {
+      setWalkInBusy(false);
+    }
+  }
+
+  async function handleWalkInCreate() {
+    if (!walkInChallengeId) {
+      setWalkInError("Verify mobile OTP first.");
+      return;
+    }
+    setWalkInError(null);
+    setWalkInBusy(true);
+    try {
+      const customer = await createWalkInCustomer({
+        mobileNumber: walkInMobile.trim(),
+        challengeId: walkInChallengeId,
+        name: walkInName.trim() || undefined,
+        shopName: walkInShop.trim() || undefined,
+      });
+      setSelectedCustomer(customer);
+      setCustomerMode("search");
+      setCustomerPage(1);
+      void refetchCustomers();
+    } catch (err) {
+      setWalkInError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Failed to create walk-in customer."
+      );
+    } finally {
+      setWalkInBusy(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -439,69 +531,181 @@ export function AdminCreateOrderPanel() {
                 Select customer
               </h2>
               <p className="mt-1 text-sm text-(--brand-text-muted)">
-                Approved and active customers only. The order will belong to this
-                account.
+                Approved customers, or pending walk-ins created by staff. The
+                order will belong to this account.
               </p>
             </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-(--brand-text-muted)" />
-              <Input
-                value={customerQuery}
-                onChange={(e) => setCustomerQuery(e.target.value)}
-                placeholder="Search name, business, email, mobile…"
-                className="h-11 rounded-xl pl-10"
-              />
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={customerMode === "search" ? "default" : "outline"}
+                onClick={() => setCustomerMode("search")}
+                className="h-9 rounded-xl font-bold"
+              >
+                Search
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={customerMode === "walkin" ? "default" : "outline"}
+                onClick={() => setCustomerMode("walkin")}
+                className="h-9 rounded-xl font-bold"
+              >
+                Walk-in
+              </Button>
             </div>
-            {customersLoading && customerPage === 1 && customers.length === 0 ? (
-              <p className="flex items-center gap-2 text-sm text-(--brand-text-muted)">
-                <Loader2 className="size-4 animate-spin" /> Loading customers…
-              </p>
-            ) : customersError ? (
-              <QueryErrorState
-                message={customersError}
-                onRetry={() => {
-                  setCustomerPage(1);
-                  void refetchCustomers();
-                }}
-              />
-            ) : customers.length === 0 ? (
-              <QueryEmptyState message="No matching eligible customers." />
-            ) : (
-              <div className="space-y-2">
-                <ul className="max-h-80 space-y-2 overflow-y-auto">
-                  {customers.map((c) => {
-                    const selected = selectedCustomer?.id === c.id;
-                    return (
-                      <li key={c.id}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedCustomer(c)}
-                          className={cn(
-                            "w-full rounded-xl border px-4 py-3 text-left transition",
-                            selected
-                              ? "border-(--brand-primary) bg-(--brand-primary)/10"
-                              : "border-(--brand-card-border) hover:bg-(--brand-primary)/5"
-                          )}
-                        >
-                          <div className="font-semibold text-(--brand-text)">
-                            {formatCustomerPickerLabel(c)}
-                          </div>
-                          <div className="mt-0.5 text-xs text-(--brand-text-muted)">
-                            {[c.name, c.email, c.mobileNumber]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <QueryLoadMoreButton
-                  hasMore={customersHasMore}
-                  loading={customersLoading || customersRefreshing}
-                  onLoadMore={() => setCustomerPage((p) => p + 1)}
-                />
+
+            {customerMode === "walkin" ? (
+              <div className="space-y-3 rounded-xl border border-(--brand-card-border) p-4">
+                <p className="text-sm text-(--brand-text-muted)">
+                  Verify mobile OTP, then create a pending customer and place the
+                  order immediately.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <Input
+                    value={walkInMobile}
+                    onChange={(e) => setWalkInMobile(e.target.value)}
+                    placeholder="10-digit mobile"
+                    className="h-11 rounded-xl"
+                    inputMode="tel"
+                    disabled={walkInBusy || walkInOtpVerified}
+                  />
+                  <Button
+                    type="button"
+                    disabled={walkInBusy || !walkInMobile.trim()}
+                    onClick={() => void handleWalkInSendOtp()}
+                    className="h-11 rounded-xl font-bold"
+                  >
+                    {walkInBusy ? "…" : "Send OTP"}
+                  </Button>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <Input
+                    value={walkInCode}
+                    onChange={(e) => setWalkInCode(e.target.value)}
+                    placeholder="OTP code"
+                    className="h-11 rounded-xl"
+                    inputMode="numeric"
+                    disabled={walkInBusy || walkInOtpVerified}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={
+                      walkInBusy || !walkInCode.trim() || walkInOtpVerified
+                    }
+                    onClick={() => void handleWalkInVerifyOtp()}
+                    className="h-11 rounded-xl font-bold"
+                  >
+                    {walkInOtpVerified ? "Verified" : "Verify"}
+                  </Button>
+                </div>
+                {walkInOtpVerified ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Input
+                      value={walkInName}
+                      onChange={(e) => setWalkInName(e.target.value)}
+                      placeholder="Contact name (optional)"
+                      className="h-11 rounded-xl"
+                    />
+                    <Input
+                      value={walkInShop}
+                      onChange={(e) => setWalkInShop(e.target.value)}
+                      placeholder="Shop name (optional)"
+                      className="h-11 rounded-xl"
+                    />
+                    <Button
+                      type="button"
+                      disabled={walkInBusy}
+                      onClick={() => void handleWalkInCreate()}
+                      className="h-11 rounded-xl bg-(--brand-primary) font-bold text-black sm:col-span-2"
+                    >
+                      {walkInBusy ? "Creating…" : "Create walk-in & select"}
+                    </Button>
+                  </div>
+                ) : null}
+                {walkInError ? (
+                  <p className="text-sm text-(--brand-danger)" role="alert">
+                    {walkInError}
+                  </p>
+                ) : null}
               </div>
+            ) : (
+              <>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-(--brand-text-muted)" />
+                  <Input
+                    value={customerQuery}
+                    onChange={(e) => setCustomerQuery(e.target.value)}
+                    placeholder="Search name, business, email, mobile…"
+                    className="h-11 rounded-xl pl-10"
+                  />
+                </div>
+                {customersLoading &&
+                customerPage === 1 &&
+                customers.length === 0 ? (
+                  <p className="flex items-center gap-2 text-sm text-(--brand-text-muted)">
+                    <Loader2 className="size-4 animate-spin" /> Loading
+                    customers…
+                  </p>
+                ) : customersError ? (
+                  <QueryErrorState
+                    message={customersError}
+                    onRetry={() => {
+                      setCustomerPage(1);
+                      void refetchCustomers();
+                    }}
+                  />
+                ) : customers.length === 0 ? (
+                  <QueryEmptyState message="No matching eligible customers." />
+                ) : (
+                  <div className="space-y-2">
+                    <ul className="max-h-80 space-y-2 overflow-y-auto">
+                      {customers.map((c) => {
+                        const selected = selectedCustomer?.id === c.id;
+                        const pendingWalkIn =
+                          c.approvalStatus === "PENDING_REVIEW" &&
+                          Boolean(c.createdByStaffId);
+                        return (
+                          <li key={c.id}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCustomer(c)}
+                              className={cn(
+                                "w-full rounded-xl border px-4 py-3 text-left transition",
+                                selected
+                                  ? "border-(--brand-primary) bg-(--brand-primary)/10"
+                                  : "border-(--brand-card-border) hover:bg-(--brand-primary)/5"
+                              )}
+                            >
+                              <div className="flex flex-wrap items-center gap-2 font-semibold text-(--brand-text)">
+                                {formatCustomerPickerLabel(c)}
+                                {pendingWalkIn ? (
+                                  <span className="rounded-md border border-amber-400/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-100">
+                                    Pending walk-in
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-0.5 text-xs text-(--brand-text-muted)">
+                                {[c.name, c.email, c.mobileNumber]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <QueryLoadMoreButton
+                      hasMore={customersHasMore}
+                      loading={customersLoading || customersRefreshing}
+                      onLoadMore={() => setCustomerPage((p) => p + 1)}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : null}

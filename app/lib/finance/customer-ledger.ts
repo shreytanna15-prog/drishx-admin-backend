@@ -140,6 +140,36 @@ export async function postCustomerLedgerAdjustment(input: {
 }
 
 /**
+ * Phase F — refund payout clears customer credit from voided paid invoice.
+ * Debit AR (or reduce credit balance) by the cash returned to the customer.
+ */
+export async function postCustomerLedgerRefundPayout(input: {
+  customerId: string;
+  amount: number;
+  description: string;
+  invoiceId?: string | null;
+  tx?: Prisma.TransactionClient;
+}) {
+  const amount = roundMoney(input.amount);
+  if (amount <= 0) return;
+  await withLedgerLock(input.customerId, input.tx, async (db) => {
+    const prev = await currentBalance(input.customerId, db);
+    const balanceAfter = roundMoney(prev + amount);
+    await db.customerLedgerEntry.create({
+      data: {
+        customerId: input.customerId,
+        entryType: PartyLedgerEntryType.ADJUSTMENT,
+        debitAmount: amount,
+        creditAmount: 0,
+        balanceAfter,
+        description: input.description,
+        invoiceId: input.invoiceId ?? undefined,
+      },
+    });
+  });
+}
+
+/**
  * Apply the financial delta from an unpaid invoice pricing correction.
  * Positive delta increases AR (debit); negative decreases AR (credit).
  * No-ops when |delta| is negligible (idempotent re-sync).

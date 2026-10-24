@@ -1,7 +1,18 @@
-import type { Prisma } from "@prisma/client";
+import { InvoiceStatus, type Prisma } from "@prisma/client";
 
 export const INVOICES_LIST_DEFAULT_LIMIT = 30;
 export const INVOICES_LIST_MAX_LIMIT = 100;
+
+const INVOICE_STATUS_VALUES = new Set<string>(Object.values(InvoiceStatus));
+
+/** True when `q` (case-insensitive) is exactly a Prisma InvoiceStatus value. */
+export function invoiceStatusFromSearchQuery(
+  q: string
+): InvoiceStatus | undefined {
+  const upper = q.trim().toUpperCase();
+  if (!upper || !INVOICE_STATUS_VALUES.has(upper)) return undefined;
+  return upper as InvoiceStatus;
+}
 
 export const invoicesListInclude = {
   user: {
@@ -87,22 +98,25 @@ export function buildInvoicesListWhere(
 
   const q = params.q?.trim();
   if (q) {
-    parts.push({
-      OR: [
-        { invoiceNumber: { contains: q, mode: "insensitive" } },
-        { status: { equals: q.toUpperCase() as never } },
-        {
-          user: {
-            OR: [
-              { name: { contains: q, mode: "insensitive" } },
-              { email: { contains: q, mode: "insensitive" } },
-              { businessName: { contains: q, mode: "insensitive" } },
-              { gstNumber: { contains: q, mode: "insensitive" } },
-            ],
-          },
+    const statusMatch = invoiceStatusFromSearchQuery(q);
+    const or: Prisma.InvoiceWhereInput[] = [
+      { invoiceNumber: { contains: q, mode: "insensitive" } },
+      {
+        user: {
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { email: { contains: q, mode: "insensitive" } },
+            { businessName: { contains: q, mode: "insensitive" } },
+            { gstNumber: { contains: q, mode: "insensitive" } },
+          ],
         },
-      ],
-    });
+      },
+    ];
+    // Only equality-filter status when q is a valid enum — otherwise Prisma throws.
+    if (statusMatch) {
+      or.push({ status: { equals: statusMatch } });
+    }
+    parts.push({ OR: or });
   }
 
   if (params.dateFrom || params.dateTo) {

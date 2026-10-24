@@ -210,24 +210,28 @@ export async function createSupplier(
   if (!result.ok) throw validationError(result.errors);
   const data = result.data;
 
-  const created = await prisma.$transaction(async (tx) => {
-    if (data.gstin) await assertGstinUnique(tx, data.gstin);
-    const supplier = await tx.supplier.create({
-      data: { ...(toWriteData(data) as Prisma.SupplierCreateInput), name: data.name! },
-    });
-    await recordAuditEvent(tx, {
-      action: AuditAction.SUPPLIER_CREATED,
-      module: AuditModule.INVENTORY,
-      entityType: "Supplier",
-      entityId: supplier.id,
-      actor,
-      request: request ?? null,
-      changes: diffFields({}, auditSnapshot(supplier), [...SUPPLIER_PROFILE_FIELDS]),
-      context: { supplierName: supplier.name, gstin: supplier.gstin },
-      activityMessage: `Supplier created — ${supplier.name}`,
-    });
-    return supplier;
-  });
+  // Interactive txn limits — Supabase pooler often hits Prisma default 5s (P2028).
+  const created = await prisma.$transaction(
+    async (tx) => {
+      if (data.gstin) await assertGstinUnique(tx, data.gstin);
+      const supplier = await tx.supplier.create({
+        data: { ...(toWriteData(data) as Prisma.SupplierCreateInput), name: data.name! },
+      });
+      await recordAuditEvent(tx, {
+        action: AuditAction.SUPPLIER_CREATED,
+        module: AuditModule.INVENTORY,
+        entityType: "Supplier",
+        entityId: supplier.id,
+        actor,
+        request: request ?? null,
+        changes: diffFields({}, auditSnapshot(supplier), [...SUPPLIER_PROFILE_FIELDS]),
+        context: { supplierName: supplier.name, gstin: supplier.gstin },
+        activityMessage: `Supplier created — ${supplier.name}`,
+      });
+      return supplier;
+    },
+    { maxWait: 10_000, timeout: 60_000 }
+  );
 
   return { ...created, openPoCount: 0 };
 }
@@ -246,74 +250,78 @@ export async function updateSupplier(
   if (!result.ok) throw validationError(result.errors);
   const data = result.data;
 
-  const outcome = await prisma.$transaction(async (tx) => {
-    const existing = await tx.supplier.findUnique({ where: { id } });
-    if (!existing) {
-      throw new SupplierError("Supplier not found.", 404, "SUPPLIER_NOT_FOUND");
-    }
+  // Interactive txn limits — Supabase pooler often hits Prisma default 5s (P2028).
+  const outcome = await prisma.$transaction(
+    async (tx) => {
+      const existing = await tx.supplier.findUnique({ where: { id } });
+      if (!existing) {
+        throw new SupplierError("Supplier not found.", 404, "SUPPLIER_NOT_FOUND");
+      }
 
-    // Cross-check tax identity against stored values, only when touched, so
-    // legacy rows with inconsistent data stay editable for unrelated fields.
-    const taxTouched =
-      data.gstin !== undefined || data.pan !== undefined || data.stateCode !== undefined;
-    if (taxTouched) {
-      const merged = {
-        gstin: data.gstin !== undefined ? data.gstin : existing.gstin,
-        pan: data.pan !== undefined ? data.pan : existing.pan,
-        stateCode: data.stateCode !== undefined ? data.stateCode : existing.stateCode,
-      };
-      const errors = checkSupplierConsistency(merged);
-      if (Object.keys(errors).length > 0) throw validationError(errors);
-    }
+      // Cross-check tax identity against stored values, only when touched, so
+      // legacy rows with inconsistent data stay editable for unrelated fields.
+      const taxTouched =
+        data.gstin !== undefined || data.pan !== undefined || data.stateCode !== undefined;
+      if (taxTouched) {
+        const merged = {
+          gstin: data.gstin !== undefined ? data.gstin : existing.gstin,
+          pan: data.pan !== undefined ? data.pan : existing.pan,
+          stateCode: data.stateCode !== undefined ? data.stateCode : existing.stateCode,
+        };
+        const errors = checkSupplierConsistency(merged);
+        if (Object.keys(errors).length > 0) throw validationError(errors);
+      }
 
-    if (data.gstin) await assertGstinUnique(tx, data.gstin, id);
+      if (data.gstin) await assertGstinUnique(tx, data.gstin, id);
 
-    const writeData = toWriteData(data);
-    const changes = diffFields(
-      auditSnapshot(existing),
-      auditSnapshot({ ...existing, ...(data as Partial<Supplier>) }),
-      [...SUPPLIER_PROFILE_FIELDS]
-    );
+      const writeData = toWriteData(data);
+      const changes = diffFields(
+        auditSnapshot(existing),
+        auditSnapshot({ ...existing, ...(data as Partial<Supplier>) }),
+        [...SUPPLIER_PROFILE_FIELDS]
+      );
 
-    const openPoCount = await tx.purchaseOrder.count({
-      where: { supplierId: id, status: { in: OPEN_PO_STATUSES } },
-    });
+      const openPoCount = await tx.purchaseOrder.count({
+        where: { supplierId: id, status: { in: OPEN_PO_STATUSES } },
+      });
 
-    if (changes.length === 0) {
-      return { supplier: { ...existing, openPoCount }, warning: null };
-    }
+      if (changes.length === 0) {
+        return { supplier: { ...existing, openPoCount }, warning: null };
+      }
 
-    const updated = await tx.supplier.update({ where: { id }, data: writeData });
+      const updated = await tx.supplier.update({ where: { id }, data: writeData });
 
-    const deactivated = existing.isActive && data.isActive === false;
-    const reactivated = !existing.isActive && data.isActive === true;
-    const warning =
-      deactivated && openPoCount > 0
-        ? `${updated.name} has ${openPoCount} open purchase order${openPoCount === 1 ? "" : "s"}. They stay open and can still be received.`
-        : null;
+      const deactivated = existing.isActive && data.isActive === false;
+      const reactivated = !existing.isActive && data.isActive === true;
+      const warning =
+        deactivated && openPoCount > 0
+          ? `${updated.name} has ${openPoCount} open purchase order${openPoCount === 1 ? "" : "s"}. They stay open and can still be received.`
+          : null;
 
-    await recordAuditEvent(tx, {
-      action: AuditAction.SUPPLIER_UPDATED,
-      module: AuditModule.INVENTORY,
-      entityType: "Supplier",
-      entityId: id,
-      actor,
-      request: request ?? null,
-      changes,
-      context: {
-        supplierName: updated.name,
-        ...(deactivated ? { deactivated: true, openPoCount } : {}),
-        ...(reactivated ? { reactivated: true } : {}),
-      },
-      activityMessage: deactivated
-        ? `Supplier deactivated — ${updated.name}`
-        : reactivated
-          ? `Supplier reactivated — ${updated.name}`
-          : `Supplier updated — ${updated.name}`,
-    });
+      await recordAuditEvent(tx, {
+        action: AuditAction.SUPPLIER_UPDATED,
+        module: AuditModule.INVENTORY,
+        entityType: "Supplier",
+        entityId: id,
+        actor,
+        request: request ?? null,
+        changes,
+        context: {
+          supplierName: updated.name,
+          ...(deactivated ? { deactivated: true, openPoCount } : {}),
+          ...(reactivated ? { reactivated: true } : {}),
+        },
+        activityMessage: deactivated
+          ? `Supplier deactivated — ${updated.name}`
+          : reactivated
+            ? `Supplier reactivated — ${updated.name}`
+            : `Supplier updated — ${updated.name}`,
+      });
 
-    return { supplier: { ...updated, openPoCount }, warning };
-  });
+      return { supplier: { ...updated, openPoCount }, warning };
+    },
+    { maxWait: 10_000, timeout: 60_000 }
+  );
 
   return outcome;
 }
@@ -354,6 +362,20 @@ export function supplierErrorResponse(error: unknown, route: string) {
         ...(error.fieldErrors ? { fieldErrors: error.fieldErrors } : {}),
       },
       { status: error.status }
+    );
+  }
+  const prismaCode =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
+  if (prismaCode === "P2028") {
+    console.error(`[${route}] supplier transaction timeout:`, error);
+    return NextResponse.json(
+      {
+        error: "Database is busy. Please try saving again.",
+        code: "SUPPLIER_TX_TIMEOUT",
+      },
+      { status: 503 }
     );
   }
   console.error(`[${route}] supplier error:`, error);

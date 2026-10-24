@@ -1,4 +1,7 @@
-import { isCustomerApprovedAndActive } from "./account-access";
+import {
+  isStaffOrderableCustomer,
+  type OrderEligibilityCustomer,
+} from "./customer-order-eligibility";
 
 export type CreateOrderCustomerCandidate = {
   id: string;
@@ -11,19 +14,34 @@ export type CreateOrderCustomerCandidate = {
   isActive: boolean;
   isApproved: boolean;
   approvalStatus: string;
+  accountAction?: string | null;
+  createdByStaffId?: string | null;
 };
+
+function toEligibilityFields(
+  user: CreateOrderCustomerCandidate
+): OrderEligibilityCustomer {
+  return {
+    role: user.role as OrderEligibilityCustomer["role"],
+    isActive: user.isActive,
+    isApproved: user.isApproved,
+    approvalStatus:
+      user.approvalStatus as OrderEligibilityCustomer["approvalStatus"],
+    accountAction: (user.accountAction ??
+      "NONE") as OrderEligibilityCustomer["accountAction"],
+    createdByStaffId: user.createdByStaffId ?? null,
+  };
+}
 
 /**
  * Eligible for admin create-order picker / server acceptance:
- * CUSTOMER + approved + active (RW-04).
+ * approved+active, or pending staff-created (walk-in / Path B).
  */
 export function isEligibleCreateOrderCustomer(
   user: CreateOrderCustomerCandidate
 ): boolean {
   if (user.role !== "CUSTOMER") return false;
-  return isCustomerApprovedAndActive(
-    user as Parameters<typeof isCustomerApprovedAndActive>[0]
-  );
+  return isStaffOrderableCustomer(toEligibilityFields(user));
 }
 
 /** Filter a customers API page to eligible create-order picker rows. */

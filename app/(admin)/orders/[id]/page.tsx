@@ -7,6 +7,7 @@ import { ArrowLeft } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
 import { AdminOrderControlPanel } from "@/components/admin-order-control-panel";
+import { AdminOrderRefundPanel } from "@/components/admin-order-refund-panel";
 import { AdminAlternatePowerPanel } from "@/components/admin-alternate-power-panel";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -211,6 +212,7 @@ function OrderDetailPageContent() {
           </section>
 
           <AdminOrderControlPanel order={order} onUpdated={setOrder} />
+          <AdminOrderRefundPanel orderId={order.id} />
           <AdminAlternatePowerPanel order={order} onUpdated={setOrder} />
 
           {isAdminPanelOrder(order) ? (

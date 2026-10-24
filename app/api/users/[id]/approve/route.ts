@@ -9,6 +9,7 @@ import {
   buildAuditRequestContext,
   recordAuditEvent,
 } from "../../../../lib/audit";
+import { getBasePricingTier } from "../../../../lib/finance/pricing-tier";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -90,6 +91,15 @@ export async function PUT(req: NextRequest, context: RouteContext) {
           { status: 400 }
         );
       }
+      if (user.accountAction === "CLOSED") {
+        return NextResponse.json(
+          {
+            error:
+              "This account is closed. Clear account action before reactivating.",
+          },
+          { status: 400 }
+        );
+      }
     }
 
     if (action === "reopen") {
@@ -105,6 +115,10 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     }
 
     const now = new Date();
+    let defaultTierId: string | null = null;
+    if (action === "approve" && !user.pricingTierId) {
+      defaultTierId = (await getBasePricingTier()).id;
+    }
     const data =
       action === "approve"
         ? {
@@ -114,6 +128,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
             approvedAt: now,
             approvedById: session.userId,
             rejectionReason: null,
+            ...(defaultTierId ? { pricingTierId: defaultTierId } : {}),
           }
         : action === "reject"
           ? {
@@ -138,7 +153,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
                   isActive: false,
                 }
               : {
-                  // activate
+                  // activate — commercial CLOSED is blocked above
                   isActive: true,
                 };
 

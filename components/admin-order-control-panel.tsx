@@ -10,11 +10,12 @@ import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import { invalidateListCache } from "@/app/lib/admin-cache";
 import {
   type AdminOrder,
+  buildAdminStatusSelectOptions,
   formatDate,
   formatMoney,
   formatStatus,
-  getStaffStatusOptions,
   isAdminHeldWarehouseOrder,
+  isAdminStatusChangeSelected,
   isEditableOrderStatus,
   isPrescriptionLabOrder,
 } from "@/app/lib/admin-orders";
@@ -25,6 +26,14 @@ const selectClass =
 const labelClass = "mb-1 block text-xs font-semibold text-(--brand-label)";
 const textareaClass =
   "min-h-20 w-full rounded-lg border border-(--brand-card-border) bg-transparent px-3 py-2 text-sm text-(--brand-text)";
+
+/** Outline action pills under Order control — equal weight, brand amber. */
+const orderActionBtnClass =
+  "h-9 max-w-full rounded-xl border-(--brand-card-border) bg-(--brand-card) px-3.5 text-sm font-semibold text-(--brand-primary) shadow-none hover:border-(--brand-primary)/45 hover:bg-(--brand-primary)/10 hover:text-(--brand-primary) focus-visible:border-(--brand-primary)/55 focus-visible:ring-(--brand-primary)/35 disabled:border-(--brand-card-border) disabled:bg-(--brand-card) disabled:text-(--brand-text-muted)";
+
+/** Slight emphasis for the invoice document action. */
+const orderActionInvoiceBtnClass =
+  "h-9 max-w-full rounded-xl border-(--brand-primary)/45 bg-(--brand-primary)/14 px-3.5 text-sm font-semibold text-(--brand-primary) shadow-none hover:border-(--brand-primary)/65 hover:bg-(--brand-primary)/22 hover:text-(--brand-primary) focus-visible:border-(--brand-primary)/70 focus-visible:ring-(--brand-primary)/40 disabled:border-(--brand-card-border) disabled:bg-(--brand-card) disabled:text-(--brand-text-muted)";
 
 type AdminOrderControlPanelProps = {
   order: AdminOrder;
@@ -37,11 +46,11 @@ export function AdminOrderControlPanel({
 }: AdminOrderControlPanelProps) {
   const router = useRouter();
   const statusOptions = useMemo(
-    () => getStaffStatusOptions(order.status),
+    () => buildAdminStatusSelectOptions(order.status),
     [order.status]
   );
 
-  const [nextStatus, setNextStatus] = useState(statusOptions[0] ?? "");
+  const [nextStatus, setNextStatus] = useState(order.status);
   const [pickedQuantity, setPickedQuantity] = useState(
     String(order.pickedQuantity ?? 0)
   );
@@ -80,7 +89,7 @@ export function AdminOrderControlPanel({
 
   /* eslint-disable react-hooks/set-state-in-effect -- standard prop-to-state sync for admin form panel */
   useEffect(() => {
-    setNextStatus(getStaffStatusOptions(order.status)[0] ?? "");
+    setNextStatus(order.status);
     setPickedQuantity(String(order.pickedQuantity ?? 0));
     setCancelReason(order.cancelReason ?? "");
     setInternalNotes(order.internalNotes ?? "");
@@ -153,7 +162,9 @@ export function AdminOrderControlPanel({
   }
 
   async function handleStatusSave() {
-    if (!nextStatus) return;
+    if (!nextStatus || !isAdminStatusChangeSelected(order.status, nextStatus)) {
+      return;
+    }
     // Dispatching must go through the dedicated dispatch API so courier +
     // tracking are validated (no silent dispatch without them).
     if (nextStatus === "DISPATCHED") {
@@ -404,54 +415,100 @@ export function AdminOrderControlPanel({
         </div>
       ) : null}
 
-      <div className="mb-5 flex flex-wrap gap-2 text-sm">
+      <div
+        className="mb-5 flex flex-wrap gap-2"
+        role="group"
+        aria-label="Order control actions"
+      >
         {order.user?.id ? (
-          <Link
-            href={`/clients/${order.user.id}`}
-            className="font-semibold text-(--brand-link) hover:underline"
+          <Button asChild variant="outline" size="sm" className={orderActionBtnClass}>
+            <Link href={`/clients/${order.user.id}`} aria-label="View client profile">
+              Client
+            </Link>
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={orderActionBtnClass}
+            disabled
+            aria-label="Client unavailable — no customer linked"
           >
             Client
-          </Link>
-        ) : null}
-        {order.invoice?.id ? (
-          <Link
-            href="/finance/invoices"
-            className="font-semibold text-(--brand-link) hover:underline"
-          >
-            Invoice {order.invoice.invoiceNumber}
-          </Link>
-        ) : (
-          <Link
-            href="/finance/invoices"
-            className="font-semibold text-(--brand-link) hover:underline"
-          >
-            Invoices
-          </Link>
+          </Button>
         )}
-        <Link
-          href="/returns"
-          className="font-semibold text-(--brand-link) hover:underline"
+
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className={orderActionInvoiceBtnClass}
         >
-          Returns
-        </Link>
-        {order.status === "AWAITING_PROCUREMENT" ? (
           <Link
-            href="/orders/procurement"
-            className="font-semibold text-(--brand-link) hover:underline"
+            href="/finance/invoices"
+            aria-label={
+              order.invoice?.invoiceNumber
+                ? `Open invoices — ${order.invoice.invoiceNumber}`
+                : "Open invoices"
+            }
+          >
+            <span className="truncate">
+              {order.invoice?.invoiceNumber
+                ? `Invoice ${order.invoice.invoiceNumber}`
+                : "Invoice"}
+            </span>
+          </Link>
+        </Button>
+
+        <Button asChild variant="outline" size="sm" className={orderActionBtnClass}>
+          <Link href="/returns" aria-label="Open returns">
+            Returns
+          </Link>
+        </Button>
+
+        {order.status === "AWAITING_PROCUREMENT" ? (
+          <Button asChild variant="outline" size="sm" className={orderActionBtnClass}>
+            <Link href="/orders/procurement" aria-label="Open procurement queue">
+              Procurement
+            </Link>
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={orderActionBtnClass}
+            disabled
+            aria-label="Procurement unavailable — order is not awaiting procurement"
           >
             Procurement
-          </Link>
-        ) : null}
+          </Button>
+        )}
+
         {order.orderImageUrl ? (
-          <a
-            href={order.orderImageUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="font-semibold text-(--brand-link) hover:underline"
+          <Button asChild variant="outline" size="sm" className={orderActionBtnClass}>
+            <a
+              href={order.orderImageUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open prescription image in a new tab"
+            >
+              Rx image
+            </a>
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={orderActionBtnClass}
+            disabled
+            aria-label="Prescription image unavailable"
           >
             Rx image
-          </a>
-        ) : null}
+          </Button>
+        )}
       </div>
 
       {!terminal ? (
@@ -486,7 +543,11 @@ export function AdminOrderControlPanel({
             <Button
               type="button"
               onClick={() => void handleStatusSave()}
-              disabled={!nextStatus || busy === "status"}
+              disabled={
+                !nextStatus ||
+                !isAdminStatusChangeSelected(order.status, nextStatus) ||
+                busy === "status"
+              }
             >
               {busy === "status" ? "Saving…" : "Update status"}
             </Button>

@@ -23,6 +23,8 @@ import {
   type AdminInvoice,
   formatInvoiceDate,
   formatInvoiceMoney,
+  formatInvoiceStatusLabel,
+  invoiceContributesToUnpaidTotal,
   invoiceCustomerLabel,
   invoiceStatusClass,
 } from "@/app/lib/admin-invoices";
@@ -87,7 +89,7 @@ export default function SalesInvoicesPage() {
       .filter((invoice) => invoice.status === "PAID")
       .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
     const unpaid = items
-      .filter((invoice) => invoice.status !== "PAID")
+      .filter((invoice) => invoiceContributesToUnpaidTotal(invoice.status))
       .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
     return { paid, unpaid };
   }, [items]);
@@ -204,7 +206,7 @@ export default function SalesInvoicesPage() {
                             invoiceStatusClass(invoice.status)
                           )}
                         >
-                          {invoice.status === "PAID" ? "Paid" : "Unpaid"}
+                          {formatInvoiceStatusLabel(invoice.status)}
                         </Badge>
                       </TableCell>
                       <TableCell className="align-top whitespace-nowrap text-sm text-(--brand-text-muted)">

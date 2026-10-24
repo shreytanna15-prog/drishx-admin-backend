@@ -23,6 +23,7 @@ export function resolveActiveTitle(
   ) {
     return "Reports";
   }
+  if (pathMatchesRoute(pathname, "/finance/pricing-tiers")) return "Pricing tiers";
   if (pathMatchesRoute(pathname, "/finance/settings")) return "Finance Settings";
   if (pathMatchesRoute(pathname, "/finance/expenses")) return "Expenses";
   if (pathMatchesRoute(pathname, "/finance/invoices")) return "Sales & Invoices";

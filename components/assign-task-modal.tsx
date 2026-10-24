@@ -1,24 +1,17 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { ClipboardList, Loader2, Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import {
   type AdminTask,
   toDatetimeLocalValue,
 } from "@/app/lib/admin-tasks";
+import { AdminModal } from "@/components/admin-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 
-type AssignTaskSheetProps = {
+type AssignTaskModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   employeeId: string;
@@ -26,13 +19,13 @@ type AssignTaskSheetProps = {
   onCreated: (task: AdminTask) => void;
 };
 
-export function AssignTaskSheet({
+export function AssignTaskModal({
   open,
   onOpenChange,
   employeeId,
   employeeName,
   onCreated,
-}: AssignTaskSheetProps) {
+}: AssignTaskModalProps) {
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
   const [dueDate, setDueDate] = useState(() => toDatetimeLocalValue());
@@ -106,30 +99,16 @@ export function AssignTaskSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-full border-(--brand-card-border) bg-(--brand-card) sm:max-w-md"
-      >
-        <SheetHeader className="border-b border-(--brand-card-border)">
-          <div className="flex items-center gap-2">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-(--brand-primary)/14 text-(--brand-primary)">
-              <ClipboardList className="size-4" />
-            </span>
-            <div>
-              <SheetTitle className="text-lg font-extrabold text-(--brand-text)">
-                Assign task
-              </SheetTitle>
-              <SheetDescription className="text-(--brand-text-muted)">
-                Assign a task to {employeeName}. They will get a notification.
-              </SheetDescription>
-            </div>
-          </div>
-        </SheetHeader>
-
+    <AdminModal
+      open={open}
+      onOpenChange={handleOpenChange}
+      title="Assign task"
+      description={`Assign a task to ${employeeName}. They will get a notification.`}
+      size="md"
+    >
         <form
           onSubmit={(e) => void handleSubmit(e)}
-          className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4"
+          className="flex flex-col gap-4"
         >
           {error ? (
             <div className="auth-alert-error" role="alert">
@@ -181,7 +160,7 @@ export function AssignTaskSheet({
             />
           </label>
 
-          <SheetFooter className="mt-auto gap-2 border-t border-(--brand-card-border) px-0 pt-4 sm:flex-row">
+          <div className="mt-2 flex gap-2 border-t border-(--brand-card-border) pt-4">
             <Button
               type="button"
               variant="outline"
@@ -205,9 +184,8 @@ export function AssignTaskSheet({
                 </>
               )}
             </Button>
-          </SheetFooter>
+          </div>
         </form>
-      </SheetContent>
-    </Sheet>
+    </AdminModal>
   );
 }

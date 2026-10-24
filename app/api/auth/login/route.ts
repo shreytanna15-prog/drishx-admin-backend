@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma, withDbRetry } from "../../../lib/prisma";
 import { verifyPassword } from "../../../lib/auth";
 import { issueAuthTokens, inactiveStaffLoginError } from "../../../lib/auth-session";
-import { toSafeUser } from "../../../lib/user-public";
 import {
   SecurityAction,
   buildAuditRequestContext,
@@ -56,20 +55,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // RW-04: blocks inactive staff, suspended customers, and rejected customers.
+    // Blocks inactive staff and suspended customers. Rejected customers may log in.
     const inactiveError = inactiveStaffLoginError(user);
     if (inactiveError) {
-      if (user.role === "CUSTOMER" && user.approvalStatus === "REJECTED") {
-        return NextResponse.json(
-          {
-            error: "Your account was rejected by admin.",
-            code: "FORBIDDEN",
-            rejectionReason: user.rejectionReason,
-            user: toSafeUser(user),
-          },
-          { status: 403 }
-        );
-      }
       return inactiveError;
     }
 

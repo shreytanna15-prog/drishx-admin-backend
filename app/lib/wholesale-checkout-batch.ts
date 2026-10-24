@@ -20,7 +20,12 @@ import {
   resolveOrderAssigneeId,
 } from "./assign-order-to-employee";
 import type { WholesaleExpandedLine } from "./wholesale-cart";
+import { assertHardCreditAtCheckout } from "./finance/credit-limit";
 import { createInvoiceFromOrder } from "./finance/create-invoice-from-order";
+import {
+  buildOrderTierSnapshot,
+  resolveCustomerPricingTier,
+} from "./finance/pricing-tier";
 import { wholesaleHeaderPairUnitPrice } from "./finance/invoice-order-pricing";
 import {
   applyOrderRedemption,
@@ -243,6 +248,35 @@ export async function placeWholesaleCheckoutBatches(
     };
   }
 
+  const tier = await resolveCustomerPricingTier(context.resolvedUserId);
+  const tieredBatches = preparedBatches.map((batch) => {
+    const snap = buildOrderTierSnapshot(tier, batch.totalAmount);
+    return { batch, snap };
+  });
+  const creditTotal = tieredBatches.reduce(
+    (sum, row) => sum + row.snap.totalAfterTier,
+    0
+  );
+  const creditCustomer = await prisma.user.findUnique({
+    where: { id: context.resolvedUserId },
+    select: {
+      id: true,
+      accountAction: true,
+      creditAllowed: true,
+      creditLimit: true,
+    },
+  });
+  if (!creditCustomer) {
+    throw new Error("Customer not found.");
+  }
+  const creditGate = await assertHardCreditAtCheckout(
+    creditCustomer,
+    creditTotal
+  );
+  if (!creditGate.ok) {
+    throw new Error(creditGate.message);
+  }
+
   const orderNumbers = await generateUniqueOrderNumbers(preparedBatches.length);
   const batchReference = `ORD-BATCH-${Date.now()}`;
   let firstOrderId: string | null = null;
@@ -256,8 +290,8 @@ export async function placeWholesaleCheckoutBatches(
 
   await prisma.$transaction(
     async (tx) => {
-      for (let index = 0; index < preparedBatches.length; index += 1) {
-        const batch = preparedBatches[index]!;
+      for (let index = 0; index < tieredBatches.length; index += 1) {
+        const { batch, snap } = tieredBatches[index]!;
         const orderNumber = orderNumbers[index]!;
         const orderReference = `${batchReference}-${index + 1}`;
         const primaryRow = batch.cartRows[0]!;
@@ -266,7 +300,7 @@ export async function placeWholesaleCheckoutBatches(
         const newTransaction = await tx.transaction.create({
           data: {
             reference: orderReference,
-            amount: batch.totalAmount,
+            amount: snap.totalAfterTier,
             currency: "INR",
             type: TransactionType.CREDIT,
             status: TransactionStatus.COMPLETED,
@@ -279,7 +313,7 @@ export async function placeWholesaleCheckoutBatches(
           data: {
             transactionId: newTransaction.id,
             entryType: LedgerEntryType.CREDIT,
-            amount: batch.totalAmount,
+            amount: snap.totalAfterTier,
             description: `Sale for order: ${orderReference}`,
           },
         });
@@ -310,7 +344,10 @@ export async function placeWholesaleCheckoutBatches(
           pickedQuantity: 0,
           // Authoritative catalog pair price from prepared lines — never cart.unitPrice.
           unitPrice: wholesaleHeaderPairUnitPrice(batch.lines),
-          totalAmount: batch.totalAmount,
+          totalAmount: snap.totalAfterTier,
+          tierCode: snap.tierCode,
+          tierDiscountPercent: snap.tierDiscountPercent,
+          tierDiscountAmount: snap.tierDiscountAmount,
           sph: null,
           cyl: null,
           axis: null,
@@ -350,7 +387,7 @@ export async function placeWholesaleCheckoutBatches(
           ? await resolveCheckoutRedemption({
               customerId: context.resolvedUserId,
               redeemPoints: context.redeemPoints,
-              orderGross: batch.totalAmount,
+              orderGross: snap.totalAfterTier,
               db: tx,
             })
           : { loyaltyDiscount: 0 };

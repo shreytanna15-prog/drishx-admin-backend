@@ -9,6 +9,14 @@ export type AdminCustomer = {
   isActive: boolean;
   isApproved: boolean;
   approvalStatus: string;
+  accountAction?: string;
+  creditLimit?: string | null;
+  creditAllowed?: boolean;
+  pricingTierId?: string | null;
+  pricingTierCode?: string | null;
+  createdByStaffId?: string | null;
+  gstinVerifyStatus?: string;
+  gstinVerifiedAt?: string | null;
   gstNumber: string | null;
   businessName: string | null;
   businessAddress: string | null;
@@ -44,6 +52,51 @@ export type AdminCustomer = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type CreateAdminCustomerPayload = {
+  mobileNumber: string;
+  name?: string;
+  email?: string;
+  alternateMobileNumber?: string;
+  whatsappNumber?: string;
+  businessName?: string;
+  shopName?: string;
+  businessType?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  businessEmail?: string;
+  shopPhoneNumber?: string;
+  gstNumber?: string;
+  panNumber?: string;
+  legalBusinessName?: string;
+  tradeName?: string;
+  gstRegistrationState?: string;
+  billingLegalName?: string;
+  billingAddress?: string;
+  billingCity?: string;
+  billingState?: string;
+  billingPincode?: string;
+  billingGstState?: string;
+  shippingLegalName?: string;
+  shippingAddress?: string;
+  shippingCity?: string;
+  shippingState?: string;
+  shippingPincode?: string;
+  creditLimit?: number | null;
+  creditAllowed?: boolean;
+  pricingTierId?: string | null;
+};
+
+export type UpdateAdminCustomerPayload = Partial<CreateAdminCustomerPayload>;
+
+export type AccountActionValue =
+  | "NONE"
+  | "BLOCKED"
+  | "CREDIT_SUSPENDED"
+  | "CLOSED";
 
 export function customerDisplayName(customer: AdminCustomer) {
   return (
@@ -125,6 +178,8 @@ export type ListAdminCustomersParams = {
   status?: string;
   activeOnly?: boolean;
   q?: string;
+  accountAction?: string;
+  tierCode?: string;
 };
 
 export type PaginatedAdminCustomers = Paginated<AdminCustomer>;
@@ -139,6 +194,12 @@ export function buildCustomersQueryString(
   if (params.status?.trim()) qs.set("status", params.status.trim());
   if (params.activeOnly) qs.set("activeOnly", "1");
   if (params.q?.trim()) qs.set("q", params.q.trim());
+  if (params.accountAction?.trim()) {
+    qs.set("accountAction", params.accountAction.trim());
+  }
+  if (params.tierCode?.trim()) {
+    qs.set("tierCode", params.tierCode.trim());
+  }
   const s = qs.toString();
   return s ? `?${s}` : "";
 }
@@ -179,4 +240,140 @@ export async function listAdminCustomers(
     `/api/users/customers${buildCustomersQueryString(params)}`
   );
   return normalizeCustomersListResponse(data);
+}
+
+export type CustomerFinanceSummary = {
+  outstanding: number;
+  creditLimit: number | null;
+  availableCredit: number | null;
+  creditAllowed: boolean;
+  accountAction: string;
+};
+
+export async function getAdminCustomer(id: string): Promise<{
+  customer: AdminCustomer;
+  finance: CustomerFinanceSummary | null;
+}> {
+  const data = await adminFetch<{
+    customer: AdminCustomer;
+    finance?: CustomerFinanceSummary;
+  }>(`/api/users/customers/${id}`);
+  return {
+    customer: data.customer,
+    finance: data.finance ?? null,
+  };
+}
+
+export async function createAdminCustomer(
+  payload: CreateAdminCustomerPayload
+): Promise<AdminCustomer> {
+  const data = await adminFetch<{ customer: AdminCustomer }>(
+    "/api/users/customers",
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+  return data.customer;
+}
+
+export async function updateAdminCustomer(
+  id: string,
+  payload: UpdateAdminCustomerPayload
+): Promise<AdminCustomer> {
+  const data = await adminFetch<{ customer: AdminCustomer }>(
+    `/api/users/customers/${id}`,
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+  return data.customer;
+}
+
+export async function setCustomerAccountAction(
+  id: string,
+  action: AccountActionValue
+): Promise<AdminCustomer> {
+  const data = await adminFetch<{ customer: AdminCustomer }>(
+    `/api/users/${id}/account-action`,
+    { method: "POST", body: JSON.stringify({ action }) }
+  );
+  return data.customer;
+}
+
+export type VerifyGstResult = {
+  customer: AdminCustomer;
+  verify: {
+    status: string;
+    legalName: string | null;
+    tradeName: string | null;
+    state: string | null;
+  };
+};
+
+export async function verifyCustomerGst(id: string): Promise<VerifyGstResult> {
+  return adminFetch<VerifyGstResult>(`/api/users/${id}/verify-gst`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export type CreateWalkInCustomerPayload = {
+  mobileNumber: string;
+  challengeId: string;
+  name?: string;
+  shopName?: string;
+  businessName?: string;
+  email?: string;
+};
+
+export async function createWalkInCustomer(
+  payload: CreateWalkInCustomerPayload
+): Promise<AdminCustomer> {
+  const data = await adminFetch<{ customer: AdminCustomer }>(
+    "/api/users/customers/walk-in",
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+  return data.customer;
+}
+
+export async function sendWalkInMobileOtp(mobileNumber: string): Promise<{
+  challengeId: string;
+  providerSessionId: string | null;
+  mobileNumber: string;
+}> {
+  return adminFetch("/api/auth/otp/mobile/send", {
+    method: "POST",
+    body: JSON.stringify({ mobileNumber, purpose: "WALK_IN" }),
+  });
+}
+
+export async function verifyWalkInMobileOtp(input: {
+  mobileNumber: string;
+  code: string;
+  sessionId?: string | null;
+}): Promise<{
+  ok: boolean;
+  challengeId: string;
+  mobileNumber: string;
+  user: AdminCustomer | null;
+}> {
+  return adminFetch("/api/auth/otp/mobile/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      mobileNumber: input.mobileNumber,
+      code: input.code,
+      purpose: "WALK_IN",
+      sessionId: input.sessionId ?? undefined,
+    }),
+  });
+}
+
+export function formatAccountAction(action: string | undefined | null) {
+  if (!action || action === "NONE") return "None";
+  return action
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function formatGstinVerifyStatus(status: string | undefined | null) {
+  if (!status || status === "UNKNOWN") return "Not verified";
+  return status.charAt(0) + status.slice(1).toLowerCase();
 }

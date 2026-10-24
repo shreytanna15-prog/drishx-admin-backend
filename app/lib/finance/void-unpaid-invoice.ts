@@ -1,6 +1,7 @@
 /**
- * Phase 1: void unpaid order invoices on cancel/archive.
- * Does not invent refunds for paid/partial invoices — those must be rejected upstream.
+ * Phase 1 + F: void order invoices on cancel/archive.
+ * Paid invoices create OrderRefund (amountDue = amountPaid) then void AR.
+ * Credit notes still block (double-refund guard).
  *
  * Pure policy helpers live in void-unpaid-invoice-policy.ts so unit tests
  * do not load prisma / DATABASE_URL.
@@ -9,6 +10,7 @@
 import { InvoiceStatus, type Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "@/app/lib/prisma";
 import { postCustomerLedgerAdjustment } from "./customer-ledger";
+import { ensureOrderRefundOnCancel } from "./order-refund";
 import { postSalesInvoiceVoidJournal } from "./journal";
 import { roundMoney } from "./tax-calc";
 import {
@@ -97,7 +99,16 @@ export async function voidUnpaidInvoiceOnOrderCancel(input: {
     return { voided: false, reason: "already_closed" };
   }
 
-  // Reverse the original AR debit (amountPaid is ~0 by policy above).
+  // Phase F: paid money becomes OrderRefund DUE before AR void.
+  await ensureOrderRefundOnCancel({
+    orderId: input.orderId,
+    customerId: invoice.userId,
+    invoiceAmountPaid: Number(invoice.amountPaid),
+    tx: input.tx,
+  });
+
+  // Reverse the original AR debit. For paid invoices this creates customer credit
+  // equal to amountPaid (payments already credited); payout clears that credit.
   const reversedAmount = roundMoney(Number(invoice.amount));
 
   await input.tx.invoice.update({

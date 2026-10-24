@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildInvoicesListWhere,
+  invoiceStatusFromSearchQuery,
   parseInvoicesListParams,
 } from "./invoices-list";
 
@@ -52,5 +53,47 @@ describe("buildInvoicesListWhere", () => {
     });
     assert.ok(where.AND);
     assert.equal(Array.isArray(where.AND) && where.AND.length, 4);
+  });
+
+  it("omits status OR branch when q is not a valid InvoiceStatus", () => {
+    const where = buildInvoicesListWhere(undefined, {
+      page: 1,
+      limit: 20,
+      q: "INV/26-27/000012",
+    });
+    assert.ok(where.OR);
+    const or = where.OR as Array<Record<string, unknown>>;
+    assert.equal(
+      or.some((clause) => Object.prototype.hasOwnProperty.call(clause, "status")),
+      false
+    );
+    assert.ok(or.some((clause) => "invoiceNumber" in clause));
+    assert.ok(or.some((clause) => "user" in clause));
+  });
+
+  it("includes status equals when q matches a valid InvoiceStatus", () => {
+    const where = buildInvoicesListWhere(undefined, {
+      page: 1,
+      limit: 20,
+      q: "void",
+    });
+    assert.ok(where.OR);
+    const or = where.OR as Array<{ status?: { equals?: string } }>;
+    const statusClause = or.find((clause) => clause.status?.equals != null);
+    assert.deepEqual(statusClause?.status, { equals: "VOID" });
+  });
+});
+
+describe("invoiceStatusFromSearchQuery", () => {
+  it("accepts exact enum values case-insensitively", () => {
+    assert.equal(invoiceStatusFromSearchQuery("void"), "VOID");
+    assert.equal(invoiceStatusFromSearchQuery("PAID"), "PAID");
+    assert.equal(invoiceStatusFromSearchQuery(" partially_paid "), "PARTIALLY_PAID");
+  });
+
+  it("rejects invoice numbers and free text", () => {
+    assert.equal(invoiceStatusFromSearchQuery("INV/26-27/000012"), undefined);
+    assert.equal(invoiceStatusFromSearchQuery("unpaid"), undefined);
+    assert.equal(invoiceStatusFromSearchQuery(""), undefined);
   });
 });

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
   ArrowLeft,
@@ -20,14 +21,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
   Table,
   TableBody,
   TableCell,
@@ -37,14 +30,12 @@ import {
 } from "@/components/ui/table";
 import { AdminApiError } from "@/app/lib/admin-api";
 import {
-  createCatalogProductRequest,
   familyLabel,
   fetchCatalogProduct,
   fetchCatalogProducts,
   previewOrAddCatalogRangeRequest,
   setCatalogProductStatusRequest,
   statusTone,
-  type CatalogLensFamily,
   type CatalogMatrixPreview,
   type CatalogProduct,
   type CatalogProductStatus,
@@ -66,32 +57,6 @@ const errorBannerClass =
   "rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200";
 const successBannerClass =
   "rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100";
-
-type CreateForm = {
-  lensFamily: CatalogLensFamily;
-  category: string;
-  brand: string;
-  item: string;
-  index: string;
-  coating: string;
-  progressiveType: string;
-  defaultPrice: string;
-  defaultCostPrice: string;
-  notes: string;
-};
-
-const EMPTY_CREATE: CreateForm = {
-  lensFamily: "SINGLE_VISION",
-  category: "",
-  brand: "",
-  item: "",
-  index: "1.56",
-  coating: "",
-  progressiveType: "",
-  defaultPrice: "",
-  defaultCostPrice: "",
-  notes: "",
-};
 
 type RangeForm = {
   sphStart: string;
@@ -123,10 +88,14 @@ function errorMessage(err: unknown, fallback: string) {
 
 function productTitle(p: CatalogProduct) {
   const parts = [p.brand, p.item, p.coating].filter(Boolean);
-  return parts.join(" · ") || p.identityKey;
+  return parts.join(" ? ") || p.identityKey;
 }
 
-export default function ProductsCatalogPage() {
+function ProductsCatalogContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedParam = searchParams.get("selected");
+
   const [q, setQ] = useState("");
   const [qDebounced, setQDebounced] = useState("");
   const [lensFamily, setLensFamily] = useState("");
@@ -137,16 +106,11 @@ export default function ProductsCatalogPage() {
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(selectedParam);
   const [detail, setDetail] = useState<CatalogProduct | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [statusBusy, setStatusBusy] = useState(false);
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateForm>(EMPTY_CREATE);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState("");
 
   const [rangeForm, setRangeForm] = useState<RangeForm>(EMPTY_RANGE);
   const [preview, setPreview] = useState<CatalogMatrixPreview | null>(null);
@@ -154,6 +118,11 @@ export default function ProductsCatalogPage() {
   const [rangeError, setRangeError] = useState("");
   const [rangeSuccess, setRangeSuccess] = useState("");
   const [overlapHint, setOverlapHint] = useState<string | null>(null);
+
+  // `?selected=<id>` (set after create) is consumed once; drop it from the URL.
+  useEffect(() => {
+    if (selectedParam) router.replace("/inventory/products-catalog");
+  }, [selectedParam, router]);
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q.trim()), 300);
@@ -219,92 +188,6 @@ export default function ProductsCatalogPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  async function handleCreate() {
-    setCreateBusy(true);
-    setCreateError("");
-    try {
-      const price = Number(createForm.defaultPrice);
-      if (!(price > 0)) {
-        setCreateError("Default selling price must be a positive number.");
-        return;
-      }
-      const indexNum =
-        createForm.index.trim() === "" ? null : Number(createForm.index);
-      if (
-        (createForm.lensFamily === "SINGLE_VISION" ||
-          createForm.lensFamily === "PROGRESSIVE") &&
-        (indexNum == null || !Number.isFinite(indexNum))
-      ) {
-        setCreateError("Index is required for this lens family.");
-        return;
-      }
-      const res = await createCatalogProductRequest({
-        lensFamily: createForm.lensFamily,
-        category: createForm.category.trim() || null,
-        brand: createForm.brand.trim(),
-        item: createForm.item.trim() || null,
-        index: indexNum,
-        coating: createForm.coating.trim(),
-        progressiveType: createForm.progressiveType.trim() || null,
-        defaultPrice: price,
-        defaultCostPrice:
-          createForm.defaultCostPrice.trim() === ""
-            ? null
-            : Number(createForm.defaultCostPrice),
-        notes: createForm.notes.trim() || null,
-      });
-      setCreateOpen(false);
-      setCreateForm(EMPTY_CREATE);
-      setSelectedId(res.product.id);
-      await loadList();
-    } catch (err) {
-      if (
-        err instanceof AdminApiError &&
-        err.code === "LEGACY_IDENTITY_EXISTS"
-      ) {
-        const link = window.confirm(
-          `${errorMessage(err, "Legacy inventory exists for this identity.")}\n\nLink existing legacy bands into a catalog facade without changing stock? (Does not split band quantities.)`
-        );
-        if (link) {
-          try {
-            const res = await createCatalogProductRequest({
-              lensFamily: createForm.lensFamily,
-              category: createForm.category.trim() || null,
-              brand: createForm.brand.trim(),
-              item: createForm.item.trim() || null,
-              index:
-                createForm.index.trim() === ""
-                  ? null
-                  : Number(createForm.index),
-              coating: createForm.coating.trim(),
-              progressiveType: createForm.progressiveType.trim() || null,
-              defaultPrice: Number(createForm.defaultPrice),
-              defaultCostPrice:
-                createForm.defaultCostPrice.trim() === ""
-                  ? null
-                  : Number(createForm.defaultCostPrice),
-              notes: createForm.notes.trim() || null,
-              linkLegacy: true,
-            });
-            setCreateOpen(false);
-            setCreateForm(EMPTY_CREATE);
-            setSelectedId(res.product.id);
-            await loadList();
-            return;
-          } catch (linkErr) {
-            setCreateError(
-              errorMessage(linkErr, "Could not link legacy product.")
-            );
-            return;
-          }
-        }
-      }
-      setCreateError(errorMessage(err, "Could not create product."));
-    } finally {
-      setCreateBusy(false);
-    }
-  }
-
   async function handleStatus(next: CatalogProductStatus) {
     if (!detail) return;
     const verb =
@@ -317,7 +200,7 @@ export default function ProductsCatalogPage() {
             : "unarchive";
     if (
       !window.confirm(
-        `Confirm ${verb} for “${productTitle(detail)}”? Customer catalog and wholesale will update accordingly.`
+        `Confirm ${verb} for ?${productTitle(detail)}?? Customer catalog and wholesale will update accordingly.`
       )
     ) {
       return;
@@ -395,7 +278,7 @@ export default function ProductsCatalogPage() {
     }
     if (
       !window.confirm(
-        `Generate range “${preview.label}” with ${preview.powerCount} independent power SKUs? Each SPH×CYL cell gets its own inventory row (stock starts at 0).`
+        `Generate range ?${preview.label}? with ${preview.powerCount} independent power SKUs? Each SPH?CYL cell gets its own inventory row (stock starts at 0).`
       )
     ) {
       return;
@@ -411,7 +294,7 @@ export default function ProductsCatalogPage() {
       if (res.range) {
         const n = res.powerCount ?? res.range.powerCount;
         setRangeSuccess(
-          `Range ${res.range.label} created — ${n} power-wise inventory SKU(s).`
+          `Range ${res.range.label} created ? ${n} power-wise inventory SKU(s).`
         );
         setPreview(null);
         await loadDetail(detail.id);
@@ -483,15 +366,15 @@ export default function ProductsCatalogPage() {
               <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <dt className={labelClass}>Index</dt>
-                  <dd>{detail.index ?? "—"}</dd>
+                  <dd>{detail.index ?? "?"}</dd>
                 </div>
                 <div>
                   <dt className={labelClass}>Category</dt>
-                  <dd>{detail.category || "—"}</dd>
+                  <dd>{detail.category || "?"}</dd>
                 </div>
                 <div>
                   <dt className={labelClass}>Default price</dt>
-                  <dd>₹{detail.defaultPrice}</dd>
+                  <dd>?{detail.defaultPrice}</dd>
                 </div>
                 <div>
                   <dt className={labelClass}>Power SKUs</dt>
@@ -579,12 +462,12 @@ export default function ProductsCatalogPage() {
                       <TableRow key={r.id}>
                         <TableCell className="font-medium">{r.label}</TableCell>
                         <TableCell className="font-mono text-xs">
-                          {r.sphStart}…{r.sphEnd}
+                          {r.sphStart}?{r.sphEnd}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           {r.cylStart != null && r.cylEnd != null
-                            ? `${r.cylStart}…${r.cylEnd}`
-                            : "—"}
+                            ? `${r.cylStart}?${r.cylEnd}`
+                            : "?"}
                         </TableCell>
                         <TableCell className="text-xs">
                           {r.leafStorage === "LEGACY_BAND"
@@ -598,12 +481,12 @@ export default function ProductsCatalogPage() {
                             r.eye,
                           ]
                             .filter(Boolean)
-                            .join(" · ") || "—"}
+                            .join(" ? ") || "?"}
                         </TableCell>
                         <TableCell className="text-right">
                           {r.leafCount ?? r.powerCount}
                         </TableCell>
-                        <TableCell className="text-right">₹{r.price}</TableCell>
+                        <TableCell className="text-right">?{r.price}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -717,7 +600,7 @@ export default function ProductsCatalogPage() {
                     <label className={labelClass}>Label (optional)</label>
                     <Input
                       className={inputClass}
-                      placeholder="e.g. -6×2"
+                      placeholder="e.g. -6?2"
                       value={rangeForm.label}
                       onChange={(e) =>
                         setRangeForm((f) => ({ ...f, label: e.target.value }))
@@ -739,12 +622,12 @@ export default function ProductsCatalogPage() {
                 {preview ? (
                   <div className="rounded-xl border border-(--brand-card-border) p-3 text-sm">
                     <p className="font-medium text-(--brand-text)">
-                      Preview: {preview.label} · {preview.powerCount} powers
+                      Preview: {preview.label} ? {preview.powerCount} powers
                     </p>
                     <p className="mt-1 text-(--brand-text-muted)">
                       SPH steps: {preview.sphOptions.length}
                       {preview.cylOptions.length
-                        ? ` · CYL steps: ${preview.cylOptions.length}`
+                        ? ` ? CYL steps: ${preview.cylOptions.length}`
                         : ""}
                     </p>
                     <p className="mt-2 font-mono text-xs text-(--brand-text-muted)">
@@ -755,7 +638,7 @@ export default function ProductsCatalogPage() {
                           c.cyl == null ? `${c.sph}` : `${c.sph}/${c.cyl}`
                         )
                         .join(", ")}
-                      {preview.sampleCells.length > 6 ? "…" : ""}
+                      {preview.sampleCells.length > 6 ? "?" : ""}
                     </p>
                   </div>
                 ) : null}
@@ -806,7 +689,7 @@ export default function ProductsCatalogPage() {
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-(--brand-text-muted)" />
             <Input
               className={cn(inputClass, "pl-9")}
-              placeholder="Search brand, coating, item…"
+              placeholder="Search brand, coating, item?"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -832,17 +715,11 @@ export default function ProductsCatalogPage() {
             <option value="ARCHIVED">Archived</option>
           </select>
         </div>
-        <Button
-          type="button"
-          className="rounded-xl"
-          onClick={() => {
-            setCreateForm(EMPTY_CREATE);
-            setCreateError("");
-            setCreateOpen(true);
-          }}
-        >
-          <Plus className="size-4" />
-          Create product
+        <Button asChild className="rounded-xl">
+          <Link href="/inventory/products-catalog/new">
+            <Plus className="size-4" />
+            Create product
+          </Link>
         </Button>
       </div>
 
@@ -890,7 +767,7 @@ export default function ProductsCatalogPage() {
                       </div>
                     </TableCell>
                     <TableCell>{familyLabel(p.lensFamily)}</TableCell>
-                    <TableCell>{p.index ?? "—"}</TableCell>
+                    <TableCell>{p.index ?? "?"}</TableCell>
                     <TableCell>
                       <Badge variant={statusTone(p.status)}>{p.status}</Badge>
                     </TableCell>
@@ -935,167 +812,20 @@ export default function ProductsCatalogPage() {
         </>
       )}
 
-      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent className="flex w-full flex-col sm:max-w-lg">
-          <SheetHeader>
-            <SheetTitle>Create product</SheetTitle>
-            <SheetDescription>
-              Define product identity first. Ranges and power bands are added on
-              the detail screen.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 space-y-3 overflow-y-auto px-1 py-4">
-            {createError ? <p className={errorBannerClass}>{createError}</p> : null}
-            <div>
-              <label className={labelClass}>Lens type</label>
-              <select
-                className={selectClass}
-                value={createForm.lensFamily}
-                onChange={(e) =>
-                  setCreateForm((f) => ({
-                    ...f,
-                    lensFamily: e.target.value as CatalogLensFamily,
-                  }))
-                }
-              >
-                <option value="SINGLE_VISION">Single Vision</option>
-                <option value="KRYPTOK">Kryptok</option>
-                <option value="PROGRESSIVE">Progressive</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelClass}>Brand</label>
-              <Input
-                className={inputClass}
-                value={createForm.brand}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, brand: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Coating</label>
-              <Input
-                className={inputClass}
-                value={createForm.coating}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, coating: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Item / product line</label>
-              <Input
-                className={inputClass}
-                value={createForm.item}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, item: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Category / kind</label>
-              <Input
-                className={inputClass}
-                value={createForm.category}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, category: e.target.value }))
-                }
-              />
-            </div>
-            {(createForm.lensFamily === "SINGLE_VISION" ||
-              createForm.lensFamily === "PROGRESSIVE") && (
-              <div>
-                <label className={labelClass}>Index</label>
-                <Input
-                  className={inputClass}
-                  value={createForm.index}
-                  onChange={(e) =>
-                    setCreateForm((f) => ({ ...f, index: e.target.value }))
-                  }
-                />
-              </div>
-            )}
-            {createForm.lensFamily === "PROGRESSIVE" ? (
-              <div>
-                <label className={labelClass}>Progressive type</label>
-                <Input
-                  className={inputClass}
-                  value={createForm.progressiveType}
-                  onChange={(e) =>
-                    setCreateForm((f) => ({
-                      ...f,
-                      progressiveType: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-            ) : null}
-            <div>
-              <label className={labelClass}>Default selling price</label>
-              <Input
-                className={inputClass}
-                type="number"
-                min={0}
-                step="0.01"
-                value={createForm.defaultPrice}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, defaultPrice: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Cost price (optional)</label>
-              <Input
-                className={inputClass}
-                type="number"
-                min={0}
-                step="0.01"
-                value={createForm.defaultCostPrice}
-                onChange={(e) =>
-                  setCreateForm((f) => ({
-                    ...f,
-                    defaultCostPrice: e.target.value,
-                  }))
-                }
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Notes</label>
-              <Input
-                className={inputClass}
-                value={createForm.notes}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, notes: e.target.value }))
-                }
-              />
-            </div>
-          </div>
-          <SheetFooter className="gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => setCreateOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              className="rounded-xl"
-              disabled={createBusy}
-              onClick={() => void handleCreate()}
-            >
-              {createBusy ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Plus className="size-4" />
-              )}
-              Create
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
     </AdminPage>
+  );
+}
+
+export default function ProductsCatalogPage() {
+  return (
+    <Suspense
+      fallback={
+        <AdminPage title="Products & catalog" subtitle="Inventory">
+          <TableSkeleton rows={8} />
+        </AdminPage>
+      }
+    >
+      <ProductsCatalogContent />
+    </Suspense>
   );
 }

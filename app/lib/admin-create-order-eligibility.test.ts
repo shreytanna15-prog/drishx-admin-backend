@@ -22,6 +22,8 @@ const approved: CreateOrderCustomerCandidate = {
   isActive: true,
   isApproved: true,
   approvalStatus: "APPROVED",
+  accountAction: "NONE",
+  createdByStaffId: null,
 };
 
 describe("admin create-order customer eligibility (RW-10 / RW-04)", () => {
@@ -29,7 +31,20 @@ describe("admin create-order customer eligibility (RW-10 / RW-04)", () => {
     assert.equal(isEligibleCreateOrderCustomer(approved), true);
   });
 
-  it("blocks suspended, rejected, and pending customers", () => {
+  it("allows pending staff-created walk-ins", () => {
+    assert.equal(
+      isEligibleCreateOrderCustomer({
+        ...approved,
+        isActive: false,
+        isApproved: false,
+        approvalStatus: "PENDING_REVIEW",
+        createdByStaffId: "staff-1",
+      }),
+      true
+    );
+  });
+
+  it("blocks suspended, rejected, and self-signup pending", () => {
     assert.equal(
       isEligibleCreateOrderCustomer({ ...approved, isActive: false }),
       false
@@ -48,6 +63,7 @@ describe("admin create-order customer eligibility (RW-10 / RW-04)", () => {
         ...approved,
         isApproved: false,
         approvalStatus: "PENDING_REVIEW",
+        createdByStaffId: null,
       }),
       false
     );
@@ -104,6 +120,7 @@ describe("admin-create-order-panel state patterns", () => {
     );
     assert.match(src, /usePaginatedListState/);
     assert.match(src, /filterEligibleCreateOrderCustomers/);
+    assert.match(src, /isEligibleCreateOrderCustomer/);
     assert.match(src, /resolveCatalogLensSearchUi/);
     assert.match(src, /orderTotalFromPairPrice/);
     assert.equal(

@@ -1,9 +1,21 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/app/lib/prisma";
 
 type TxClient = Prisma.TransactionClient | typeof prisma;
 
-/** Get (or lazily create) a customer's wallet. */
+/** True when Prisma reports a unique constraint violation (e.g. concurrent create). */
+export function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  );
+}
+
+/**
+ * Get (or lazily create) a customer's wallet.
+ * Concurrency-safe: concurrent first-touch creates recover from P2002 via refetch
+ * so callers never see a 500 when the winner already inserted the row.
+ */
 export async function getOrCreateWallet(
   customerId: string,
   db: TxClient = prisma
@@ -12,7 +24,19 @@ export async function getOrCreateWallet(
     where: { customerId },
   });
   if (existing) return existing;
-  return db.loyaltyWallet.create({ data: { customerId } });
+
+  try {
+    return await db.loyaltyWallet.create({ data: { customerId } });
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error;
+    }
+    const raced = await db.loyaltyWallet.findUnique({
+      where: { customerId },
+    });
+    if (raced) return raced;
+    throw error;
+  }
 }
 
 /**

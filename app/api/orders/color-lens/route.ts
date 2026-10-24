@@ -16,7 +16,10 @@ import {
   resolveOrderAssigneeId,
 } from "../../../lib/assign-order-to-employee";
 import { getSignedOrderImageUrl } from "../../../lib/supabase-storage";
-import { isCustomerApproved } from "../../../lib/user-public";
+import {
+  assessSelfServeOrderEligibility,
+  assessStaffOnBehalfOrderEligibility,
+} from "../../../lib/customer-order-eligibility";
 import { resolveCheckoutDeliveryServiceId } from "../../../lib/delivery-pack";
 import { dispatchSlotForNow } from "../../../lib/dispatch-cutoff";
 import {
@@ -48,11 +51,15 @@ export async function POST(req: NextRequest) {
     let targetUserId = session.userId;
     if (session.role === "CUSTOMER") {
       const customer = await prisma.user.findUnique({ where: { id: session.userId } });
-      if (!customer || !isCustomerApproved(customer)) {
-        return NextResponse.json(
-          { error: "Your account is pending admin approval. You cannot place orders yet." },
-          { status: 403 }
-        );
+      const selfGate = customer
+        ? assessSelfServeOrderEligibility(customer)
+        : ({
+            ok: false as const,
+            message:
+              "Your account is pending admin approval. You cannot place orders yet.",
+          });
+      if (!selfGate.ok) {
+        return NextResponse.json({ error: selfGate.message }, { status: 403 });
       }
     } else {
       const onBehalfUserId =
@@ -67,9 +74,10 @@ export async function POST(req: NextRequest) {
       if (!customer || customer.role !== "CUSTOMER") {
         return NextResponse.json({ error: "Customer not found." }, { status: 404 });
       }
-      if (!isCustomerApproved(customer)) {
+      const onBehalfGate = assessStaffOnBehalfOrderEligibility(customer);
+      if (!onBehalfGate.ok) {
         return NextResponse.json(
-          { error: "This customer account is pending approval." },
+          { error: onBehalfGate.message },
           { status: 403 }
         );
       }

@@ -69,40 +69,37 @@ describe("invoiceBlocksOrderCancellation", () => {
     );
   });
 
-  it("blocks real paid / partial invoices", () => {
-    // amountPaid > 0 with no allocation rows — exercises the paid-money guard
-    // (allocation-only cases are covered separately below).
-    const paid = invoiceBlocksOrderCancellation({
-      status: "PAID",
-      amountPaid: 540,
-      amountOutstanding: 0,
-      paymentAllocationCount: 0,
-      creditNoteCount: 0,
-    });
-    assert.ok(paid);
-    assert.match(paid!, /paid or partially paid/i);
-
-    const partial = invoiceBlocksOrderCancellation({
-      status: "PARTIALLY_PAID",
-      amountPaid: 200,
-      amountOutstanding: 340,
-      paymentAllocationCount: 0,
-      creditNoteCount: 0,
-    });
-    assert.ok(partial);
-    assert.match(partial!, /paid or partially paid/i);
-  });
-
-  it("blocks invoices with payment allocations even if amountPaid is zero", () => {
-    const msg = invoiceBlocksOrderCancellation({
-      status: "ISSUED",
-      amountPaid: 0,
-      amountOutstanding: 540,
-      paymentAllocationCount: 1,
-      creditNoteCount: 0,
-    });
-    assert.ok(msg);
-    assert.match(msg!, /payment allocations/i);
+  it("allows paid / partial / allocated invoices (Phase F refund path)", () => {
+    assert.equal(
+      invoiceBlocksOrderCancellation({
+        status: "PAID",
+        amountPaid: 540,
+        amountOutstanding: 0,
+        paymentAllocationCount: 0,
+        creditNoteCount: 0,
+      }),
+      null
+    );
+    assert.equal(
+      invoiceBlocksOrderCancellation({
+        status: "PARTIALLY_PAID",
+        amountPaid: 200,
+        amountOutstanding: 340,
+        paymentAllocationCount: 0,
+        creditNoteCount: 0,
+      }),
+      null
+    );
+    assert.equal(
+      invoiceBlocksOrderCancellation({
+        status: "ISSUED",
+        amountPaid: 0,
+        amountOutstanding: 540,
+        paymentAllocationCount: 1,
+        creditNoteCount: 0,
+      }),
+      null
+    );
   });
 
   it("blocks invoices with credit notes", () => {
