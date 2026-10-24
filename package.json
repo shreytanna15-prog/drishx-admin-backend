@@ -31,6 +31,7 @@
     "db:backfill-order-assignments": "tsx prisma/backfill-order-assignments.ts",
     "upload:lens-catalog-images": "tsx scripts/upload-lens-catalog-images.ts",
     "audit:catalog": "node scripts/audit-lens-catalog.mjs",
+    "analyze:catalog-hierarchy": "node scripts/analyze-catalog-hierarchy.mjs",
     "deploy:trigger": "node scripts/trigger-vercel-deploy.mjs",
     "db:seed-kryptok-brc-kt-blue-sph": "tsx prisma/seed-kryptok-brc-kt-blue-sph-products.ts",
     "db:seed-kryptok-brc-kt-blue-cyl": "tsx prisma/seed-kryptok-brc-kt-blue-cyl-products.ts",
