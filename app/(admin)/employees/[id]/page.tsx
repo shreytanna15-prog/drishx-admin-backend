@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, ClipboardList, Plus } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton, ListSkeleton } from "@/components/admin-skeletons";
-import { AssignTaskSheet } from "@/components/assign-task-sheet";
+import { AssignTaskModal } from "@/components/assign-task-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
@@ -390,7 +390,7 @@ export default function EmployeeDetailPage() {
             )}
           </section>
 
-          <AssignTaskSheet
+          <AssignTaskModal
             open={assignOpen}
             onOpenChange={setAssignOpen}
             employeeId={employee.id}

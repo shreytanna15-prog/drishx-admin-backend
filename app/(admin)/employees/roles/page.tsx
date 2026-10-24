@@ -1,23 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
-import { ChevronRight, Loader2, Plus, Shield } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronRight, Plus } from "lucide-react";
 import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
-import { STAFF_PERMISSION_GROUPS } from "@/app/lib/staff-permissions";
 import { AdminPage } from "@/components/admin-shell";
 import { ListSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type StaffRoleRow = {
   id: string;
@@ -33,12 +24,6 @@ export default function StaffRolesPage() {
   const [roles, setRoles] = useState<StaffRoleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [addOpen, setAddOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-
   async function loadRoles() {
     setLoading(true);
     setError("");
@@ -60,41 +45,6 @@ export default function StaffRolesPage() {
     void loadRoles();
   }, []);
 
-  function toggleKey(key: string) {
-    setSelected((current) =>
-      current.includes(key)
-        ? current.filter((item) => item !== key)
-        : [...current, key]
-    );
-  }
-
-  async function handleCreate(event: FormEvent) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError("");
-    try {
-      await adminFetch("/api/admin/staff-roles", {
-        method: "POST",
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || null,
-          permissions: selected,
-        }),
-      });
-      setAddOpen(false);
-      setName("");
-      setDescription("");
-      setSelected([]);
-      await loadRoles();
-    } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.message : "Failed to create role."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   const adminCountLabel = "All admins";
 
   return (
@@ -108,14 +58,16 @@ export default function StaffRolesPage() {
             Who can do what in operations. Admin is a locked account type.
           </p>
         </div>
-        <Button
-          type="button"
-          onClick={() => setAddOpen(true)}
-          className="h-10 shrink-0 rounded-xl bg-(--brand-primary) px-4 font-extrabold text-(--brand-primary-text) hover:opacity-95"
+        <Link
+          href="/employees/roles/new"
+          className={cn(
+            buttonVariants(),
+            "h-10 shrink-0 rounded-xl bg-(--brand-primary) px-4 font-extrabold text-(--brand-primary-text) hover:opacity-95"
+          )}
         >
           <Plus className="size-4" />
           New role
-        </Button>
+        </Link>
       </div>
 
       {error ? (
@@ -180,97 +132,6 @@ export default function StaffRolesPage() {
           </ul>
         </div>
       )}
-
-      <Sheet open={addOpen} onOpenChange={setAddOpen}>
-        <SheetContent
-          side="right"
-          className="w-full border-(--brand-card-border) bg-(--brand-card) sm:max-w-lg"
-        >
-          <SheetHeader className="border-b border-(--brand-card-border)">
-            <div className="flex items-center gap-2">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-(--brand-primary)/14 text-(--brand-primary)">
-                <Shield className="size-4" />
-              </span>
-              <div>
-                <SheetTitle className="text-lg font-extrabold text-(--brand-text)">
-                  New role
-                </SheetTitle>
-                <SheetDescription className="text-(--brand-text-muted)">
-                  Pick modules this job role can use in the operations portal.
-                </SheetDescription>
-              </div>
-            </div>
-          </SheetHeader>
-          <form
-            onSubmit={(event) => void handleCreate(event)}
-            className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4"
-          >
-            <label className="block space-y-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
-                Name
-              </span>
-              <Input
-                required
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                className="h-11 border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text)"
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
-                Description
-              </span>
-              <Input
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                className="h-11 border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text)"
-              />
-            </label>
-            {STAFF_PERMISSION_GROUPS.map((group) => (
-              <section key={group.id}>
-                <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-(--brand-primary)">
-                  {group.label}
-                </p>
-                {group.items.map((item) => (
-                  <label key={item.key} className="admin-perm-row">
-                    <span>
-                      <span className="block text-sm font-semibold text-(--brand-text)">
-                        {item.label}
-                      </span>
-                      <span className="block text-xs text-(--brand-text-muted)">
-                        {item.description}
-                      </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="admin-perm-toggle"
-                      checked={selected.includes(item.key)}
-                      onChange={() => toggleKey(item.key)}
-                    />
-                  </label>
-                ))}
-              </section>
-            ))}
-            <SheetFooter className="mt-auto gap-2 border-t border-(--brand-card-border) px-0 pt-4 sm:flex-row">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setAddOpen(false)}
-                className="h-11 flex-1 rounded-xl"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={submitting}
-                className="h-11 flex-1 rounded-xl bg-(--brand-primary) font-extrabold text-(--brand-primary-text)"
-              >
-                {submitting ? <Loader2 className="size-4 animate-spin" /> : "Create role"}
-              </Button>
-            </SheetFooter>
-          </form>
-        </SheetContent>
-      </Sheet>
     </AdminPage>
   );
 }

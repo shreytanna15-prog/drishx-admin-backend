@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronRight,
   GitMerge,
@@ -13,9 +14,8 @@ import {
 } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { ListSkeleton, TableSkeleton } from "@/components/admin-skeletons";
-import { CatalogProductLineSheet } from "@/components/catalog-product-line-sheet";
-import { CoatingFilterLabelSheet } from "@/components/coating-filter-label-sheet";
-import { AdminAddLensSheet } from "@/components/admin-add-lens-sheet";
+import { CatalogProductLineModal } from "@/components/catalog-product-line-modal";
+import { CoatingFilterLabelModal } from "@/components/coating-filter-label-modal";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,10 +74,31 @@ type DisplayProductLine =
       productCount: number;
     };
 
-export default function StockOverviewPage() {
-  const [view, setView] = useState<ViewLevel>("categories");
-  const [category, setCategory] = useState<LensCategory | null>(null);
-  const [catalogItem, setCatalogItem] = useState<LensCatalogItem | null>(null);
+function StockOverviewContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // `?type=...&item=...` restores the view after returning from /new.
+  const [initialCategory] = useState<LensCategory | null>(() => {
+    const type = searchParams.get("type");
+    return LENS_CATEGORIES.find((cat) => cat.type === type) ?? null;
+  });
+  const [initialItemName] = useState<string | null>(() => {
+    const item = searchParams.get("item")?.trim();
+    return item ? item : null;
+  });
+
+  const [view, setView] = useState<ViewLevel>(() =>
+    initialCategory ? (initialItemName ? "products" : "items") : "categories"
+  );
+  const [category, setCategory] = useState<LensCategory | null>(
+    initialCategory
+  );
+  const [catalogItem, setCatalogItem] = useState<LensCatalogItem | null>(() =>
+    initialCategory && initialItemName
+      ? { name: initialItemName, productCount: 0 }
+      : null
+  );
 
   const [managedLines, setManagedLines] = useState<AdminCatalogProductLine[]>(
     []
@@ -86,7 +107,7 @@ export default function StockOverviewPage() {
   const [itemsLoading, setItemsLoading] = useState(false);
   const [itemsError, setItemsError] = useState("");
   const [itemQuery, setItemQuery] = useState("");
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [lineModalOpen, setLineModalOpen] = useState(false);
   const [editingLine, setEditingLine] =
     useState<AdminCatalogProductLine | null>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
@@ -98,18 +119,10 @@ export default function StockOverviewPage() {
   const [coatingsLoading, setCoatingsLoading] = useState(false);
   const [coatingsError, setCoatingsError] = useState("");
   const [coatingQuery, setCoatingQuery] = useState("");
-  const [coatingSheetOpen, setCoatingSheetOpen] = useState(false);
+  const [coatingModalOpen, setCoatingModalOpen] = useState(false);
   const [editingCoating, setEditingCoating] =
     useState<AdminCoatingFilterLabel | null>(null);
   const [coatingBusyId, setCoatingBusyId] = useState<string | null>(null);
-
-  const [addProductOpen, setAddProductOpen] = useState(false);
-  const [addProductLensType, setAddProductLensType] = useState<LensCategoryType>(
-    "single-vision"
-  );
-  const [addProductDefaultItem, setAddProductDefaultItem] = useState<string | null>(
-    null
-  );
 
   const [products, setProducts] = useState<StockLens[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
@@ -353,33 +366,33 @@ export default function StockOverviewPage() {
     setProducts([]);
   }
 
-  function openCreateSheet() {
+  function openCreateLineModal() {
     setEditingLine(null);
-    setSheetOpen(true);
+    setLineModalOpen(true);
   }
 
-  function openCreateCoatingSheet() {
+  function openCreateCoatingModal() {
     setEditingCoating(null);
-    setCoatingSheetOpen(true);
+    setCoatingModalOpen(true);
   }
 
-  function openAddProductSheet(params: {
+  function openAddProductPage(params: {
     lensType: LensCategoryType;
     defaultItem?: string | null;
   }) {
-    setAddProductLensType(params.lensType);
-    setAddProductDefaultItem(params.defaultItem ?? null);
-    setAddProductOpen(true);
+    const query = new URLSearchParams({ type: params.lensType });
+    if (params.defaultItem) query.set("item", params.defaultItem);
+    router.push(`/inventory/stock-overview/new?${query.toString()}`);
   }
 
-  function openEditSheet(line: AdminCatalogProductLine) {
+  function openEditLineModal(line: AdminCatalogProductLine) {
     setEditingLine(line);
-    setSheetOpen(true);
+    setLineModalOpen(true);
   }
 
-  function openEditCoatingSheet(label: AdminCoatingFilterLabel) {
+  function openEditCoatingModal(label: AdminCoatingFilterLabel) {
     setEditingCoating(label);
-    setCoatingSheetOpen(true);
+    setCoatingModalOpen(true);
   }
 
   async function handleToggleActive(line: AdminCatalogProductLine) {
@@ -585,29 +598,6 @@ export default function StockOverviewPage() {
     }
   }
 
-  const handleAddProductSuccess = useCallback(() => {
-    // Refresh the currently visible list.
-    if (view === "products" && category && catalogItem) {
-      void loadProducts(category.type, catalogItem.name, 1, false, productQuery);
-      return;
-    }
-    if (view === "items" && category) {
-      void loadItems(category.type);
-      if (itemsTab === "coatings") {
-        void loadCoatingFilters(category.type);
-      }
-    }
-  }, [
-    view,
-    category,
-    catalogItem,
-    productQuery,
-    itemsTab,
-    loadProducts,
-    loadItems,
-    loadCoatingFilters,
-  ]);
-
   return (
     <AdminPage title="Stock Overview" subtitle="Category-wise product stock">
       <div className="mb-5 flex flex-col gap-3">
@@ -723,19 +713,19 @@ export default function StockOverviewPage() {
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <p className="text-sm text-(--brand-text-muted)">
                   {itemsLoading
-                    ? "Loading product lines…"
+                    ? "Loading product lines\u2026"
                     : `${filteredItems.length} product line${filteredItems.length === 1 ? "" : "s"}`}
                 </p>
                 <div className="flex w-full flex-col gap-2 sm:max-w-xl sm:flex-row sm:items-center">
                   <Input
                     value={itemQuery}
                     onChange={(e) => setItemQuery(e.target.value)}
-                    placeholder="Search product lines…"
+                    placeholder={"Search product lines\u2026"}
                     className="h-10 border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text) placeholder:text-(--brand-placeholder)"
                   />
                   <Button
                     type="button"
-                    onClick={openCreateSheet}
+                    onClick={openCreateLineModal}
                     className="h-10 shrink-0 bg-(--brand-primary) font-bold text-(--brand-primary-text)"
                   >
                     <Plus className="size-4" />
@@ -744,7 +734,7 @@ export default function StockOverviewPage() {
                   <Button
                     type="button"
                     onClick={() =>
-                      openAddProductSheet({
+                      openAddProductPage({
                         lensType: category.type,
                         defaultItem: null,
                       })
@@ -802,9 +792,11 @@ export default function StockOverviewPage() {
                               <p className="mt-1 text-xs text-(--brand-text-muted)">
                                 {item.productCount} SKU
                                 {item.productCount === 1 ? "" : "s"}
-                                {item.kind === "dynamic" ? " · dynamic" : ""}
-                                {managed?.isSystem ? " · system" : ""}
-                                {inactive ? " · inactive" : ""}
+                                {item.kind === "dynamic"
+                                  ? " \u00b7 dynamic"
+                                  : ""}
+                                {managed?.isSystem ? " \u00b7 system" : ""}
+                                {inactive ? " \u00b7 inactive" : ""}
                               </p>
                               {managed?.description ? (
                                 <p className="mt-1 line-clamp-2 text-xs text-(--brand-text-muted)">
@@ -822,7 +814,7 @@ export default function StockOverviewPage() {
                                 variant="outline"
                                 size="sm"
                                 disabled={actionBusyId === managed.id}
-                                onClick={() => openEditSheet(managed)}
+                                onClick={() => openEditLineModal(managed)}
                                 className="h-8 rounded-lg text-xs font-semibold"
                               >
                                 <Pencil className="size-3.5" />
@@ -880,9 +872,9 @@ export default function StockOverviewPage() {
                 </>
               )}
 
-              <CatalogProductLineSheet
-                open={sheetOpen}
-                onOpenChange={setSheetOpen}
+              <CatalogProductLineModal
+                open={lineModalOpen}
+                onOpenChange={setLineModalOpen}
                 lensType={category.type}
                 editing={editingLine}
                 onSaved={() => {
@@ -895,14 +887,14 @@ export default function StockOverviewPage() {
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <p className="text-sm text-(--brand-text-muted)">
                   {coatingsLoading
-                    ? "Loading coating filters…"
+                    ? "Loading coating filters\u2026"
                     : `${filteredCoatings.length} coating filter${filteredCoatings.length === 1 ? "" : "s"}`}
                 </p>
                 <div className="flex w-full flex-col gap-2 sm:max-w-2xl sm:flex-row sm:items-center">
                   <Input
                     value={coatingQuery}
                     onChange={(e) => setCoatingQuery(e.target.value)}
-                    placeholder="Search coating filters…"
+                    placeholder={"Search coating filters\u2026"}
                     className="h-10 border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text) placeholder:text-(--brand-placeholder)"
                   />
                   <Button
@@ -917,7 +909,7 @@ export default function StockOverviewPage() {
                   </Button>
                   <Button
                     type="button"
-                    onClick={openCreateCoatingSheet}
+                    onClick={openCreateCoatingModal}
                     className="h-10 shrink-0 bg-(--brand-primary) font-bold text-(--brand-primary-text)"
                   >
                     <Plus className="size-4" />
@@ -979,7 +971,7 @@ export default function StockOverviewPage() {
                               <p className="text-xs text-(--brand-text-muted)">
                                 {label.isSystem ? "system" : "custom"}
                                 {label.description
-                                  ? ` · ${label.description}`
+                                  ? ` \u00b7 ${label.description}`
                                   : ""}
                               </p>
                             </div>
@@ -1010,7 +1002,7 @@ export default function StockOverviewPage() {
                                 variant="outline"
                                 size="sm"
                                 disabled={coatingBusyId === label.id}
-                                onClick={() => openEditCoatingSheet(label)}
+                                onClick={() => openEditCoatingModal(label)}
                                 className="h-8 rounded-lg text-xs font-semibold"
                               >
                                 <Pencil className="size-3.5" />
@@ -1062,9 +1054,9 @@ export default function StockOverviewPage() {
                 </div>
               )}
 
-              <CoatingFilterLabelSheet
-                open={coatingSheetOpen}
-                onOpenChange={setCoatingSheetOpen}
+              <CoatingFilterLabelModal
+                open={coatingModalOpen}
+                onOpenChange={setCoatingModalOpen}
                 lensType={category.type}
                 editing={editingCoating}
                 onSaved={() => {
@@ -1081,14 +1073,14 @@ export default function StockOverviewPage() {
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="text-sm text-(--brand-text-muted)">
               {productsLoading ? (
-                "Loading products…"
+                "Loading products\u2026"
               ) : (
                 <>
                   {totalSkus} SKU{totalSkus === 1 ? "" : "s"}
                   {products.length > 0 ? (
                     <>
                       {" "}
-                      · loaded qty sum{" "}
+                      {"\u00b7"} loaded qty sum{" "}
                       <span className="font-semibold text-(--brand-text)">
                         {totalQuantity}
                       </span>
@@ -1101,13 +1093,13 @@ export default function StockOverviewPage() {
               <Input
                 value={productQuery}
                 onChange={(e) => setProductQuery(e.target.value)}
-                placeholder="Search power, brand, coating…"
+                placeholder={"Search power, brand, coating\u2026"}
                 className="h-10 flex-1 border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text) placeholder:text-(--brand-placeholder)"
               />
               <Button
                 type="button"
                 onClick={() =>
-                  openAddProductSheet({
+                  openAddProductPage({
                     lensType: category.type,
                     defaultItem: catalogItem.name,
                   })
@@ -1170,7 +1162,7 @@ export default function StockOverviewPage() {
                             <div className="mt-0.5 text-xs text-(--brand-text-muted)">
                               {[product.coating, product.category, product.item]
                                 .filter(Boolean)
-                                .join(" · ") || "—"}
+                                .join(" \u00b7 ") || "\u2014"}
                             </div>
                             {index === productSentinelIndex && hasMore ? (
                               <InfiniteScrollSentinel
@@ -1189,10 +1181,11 @@ export default function StockOverviewPage() {
                             {formatPower(product.add)}
                           </TableCell>
                           <TableCell className="align-top text-(--brand-text)">
-                            {product.axis ?? "—"}
+                            {product.axis ?? "\u2014"}
                           </TableCell>
                           <TableCell className="align-top text-(--brand-text)">
-                            ₹{Number(product.price).toLocaleString("en-IN")}
+                            {"\u20b9"}
+                            {Number(product.price).toLocaleString("en-IN")}
                           </TableCell>
                           <TableCell className="align-top">
                             <Badge
@@ -1222,14 +1215,20 @@ export default function StockOverviewPage() {
           )}
         </>
       ) : null}
-
-      <AdminAddLensSheet
-        open={addProductOpen}
-        onOpenChange={setAddProductOpen}
-        lensType={addProductLensType}
-        defaultItem={addProductDefaultItem}
-        onSuccess={handleAddProductSuccess}
-      />
     </AdminPage>
+  );
+}
+
+export default function StockOverviewPage() {
+  return (
+    <Suspense
+      fallback={
+        <AdminPage title="Stock Overview" subtitle="Category-wise product stock">
+          <ListSkeleton compact rows={6} />
+        </AdminPage>
+      }
+    >
+      <StockOverviewContent />
+    </Suspense>
   );
 }

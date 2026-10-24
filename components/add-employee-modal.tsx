@@ -1,21 +1,14 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Loader2, Plus, UserPlus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import type { AdminEmployee } from "@/app/lib/admin-employees";
+import { AdminModal } from "@/components/admin-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 
-type AddEmployeeSheetProps = {
+type AddEmployeeModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (employee: AdminEmployee) => void;
@@ -23,11 +16,11 @@ type AddEmployeeSheetProps = {
 
 const MIN_PASSWORD_LENGTH = 6;
 
-export function AddEmployeeSheet({
+export function AddEmployeeModal({
   open,
   onOpenChange,
   onCreated,
-}: AddEmployeeSheetProps) {
+}: AddEmployeeModalProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -112,31 +105,16 @@ export function AddEmployeeSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-full border-(--brand-card-border) bg-(--brand-card) sm:max-w-md"
-      >
-        <SheetHeader className="border-b border-(--brand-card-border)">
-          <div className="flex items-center gap-2">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-(--brand-primary)/14 text-(--brand-primary)">
-              <UserPlus className="size-4" />
-            </span>
-            <div>
-              <SheetTitle className="text-lg font-extrabold text-(--brand-text)">
-                Add employee
-              </SheetTitle>
-              <SheetDescription className="text-(--brand-text-muted)">
-                Create a staff account. They can sign in with this email and
-                password.
-              </SheetDescription>
-            </div>
-          </div>
-        </SheetHeader>
-
+    <AdminModal
+      open={open}
+      onOpenChange={handleOpenChange}
+      title="Add employee"
+      description="Create a staff account. They can sign in with this email and password."
+      size="md"
+    >
         <form
           onSubmit={(e) => void handleSubmit(e)}
-          className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4"
+          className="flex flex-col gap-4"
         >
           {error ? (
             <div className="auth-alert-error" role="alert">
@@ -220,7 +198,7 @@ export function AddEmployeeSheet({
             </select>
           </label>
 
-          <SheetFooter className="mt-auto gap-2 border-t border-(--brand-card-border) px-0 pt-4 sm:flex-row">
+          <div className="mt-2 flex gap-2 border-t border-(--brand-card-border) pt-4">
             <Button
               type="button"
               variant="outline"
@@ -244,9 +222,8 @@ export function AddEmployeeSheet({
                 </>
               )}
             </Button>
-          </SheetFooter>
+          </div>
         </form>
-      </SheetContent>
-    </Sheet>
+    </AdminModal>
   );
 }

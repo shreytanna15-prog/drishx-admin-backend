@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, Plus } from "lucide-react";
-import { AddEmployeeSheet } from "@/components/add-employee-sheet";
+import { AddEmployeeModal } from "@/components/add-employee-modal";
 import { AdminPage } from "@/components/admin-shell";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import { ListSkeleton } from "@/components/admin-skeletons";
@@ -226,7 +226,7 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      <AddEmployeeSheet
+      <AddEmployeeModal
         open={addOpen}
         onOpenChange={setAddOpen}
         onCreated={handleCreated}
