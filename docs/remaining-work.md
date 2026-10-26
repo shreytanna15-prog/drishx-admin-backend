@@ -2,13 +2,13 @@
 
 **Document type:** End-phase backlog (bugs, changes, new modules)  
 **Audience:** Developers picking up assigned work  
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-26
 
 ## How to use
 
 - Each item has a stable ID (`RW-01`, `RW-02`, …).
 - Default sections: **Type**, **Goal**, **Current state**, **Scope (in)**, **Out of scope**.
-- Larger items (e.g. RW-06, RW-08) add extra sections: catalog, architecture, phases, data sources, open questions, PDF UI references.
+- Larger items (e.g. RW-06, RW-08, RW-09, RW-11, RW-12) add extra sections: catalog, architecture, phases, data sources, open questions, PDF UI references.
 - Cross-repo work is listed under **Repos** in the index.
 
 ---
@@ -28,6 +28,7 @@
 | RW-09 | Products & catalog: admin product master + ranges → powers | backend (admin panel) |
 | RW-10 | Admin panel: create order on behalf of customer | backend (admin panel) |
 | RW-11 | Client API calling pattern + list/table performance | backend, website, mobile, admin panel |
+| RW-12 | Customer account config — OTP clients, reject/resubmit, Path C (web + mobile) | backend, website, mobile, admin panel |
 
 ---
 
@@ -1194,3 +1195,280 @@ For **each** of admin / website / mobile `drishx-client-api`:
 2. **Foundation PR (Phase A)** — hooks + registry + one gold example per repo.  
 3. **Orders PR (Phase B)** — backend summary pagination + admin/web/mobile cutover.  
 4. **Follow-ups (Phase C)** — customers, returns, invoices, hard-cap honesty.
+
+---
+
+## RW-12 — Customer account configuration: OTP clients + reject/resubmit + Path C (web / mobile)
+
+### Type
+
+Change / completion — **customer identity & account flows** across website + mobile (backend/admin mostly done; wire clients + finish gaps)
+
+### Audience note (for humans + AI)
+
+This is the **remaining implementation work** for the Oct 2026 customer onboarding / account configuration slice. Product contract and engineer detail live in:
+
+| Doc | Role |
+|-----|------|
+| [`docs/customer-account-configuration/CLIENT-PLAN.md`](./customer-account-configuration/CLIENT-PLAN.md) | Agreed behavior (paths A/B/C, OTP, tiers, credit, reject/resubmit, GST button) |
+| [`docs/customer-account-configuration/DEVELOPER-GUIDE.md`](./customer-account-configuration/DEVELOPER-GUIDE.md) | Schema, routes, phases, code map |
+| [`docs/customer-account-configuration/README.md`](./customer-account-configuration/README.md) | Index + providers |
+
+**Do not re-plan the product** in this RW — implement against those docs. This RW exists because **backend + admin are largely shipped**, while **website and mobile still run the old email+password identity model**, so end-to-end acceptance cannot pass.
+
+**Credentials reality (important):** Client has **not** delivered live **2factor**, **email OTP**, or **GSTIN.cloud** credentials yet. Until then:
+
+- Keep **`OTP_DEV_MODE=1`** (and known `OTP_DEV_CODE`, default `123456`) so web + mobile can complete full OTP flows against existing APIs.
+- OTP codes are **generated / accepted in the API** (logged server-side in DEV) — clients **never** expect the API response body to return the OTP.
+- Live provider wiring is a **separate final phase** once credentials arrive — not a reason to delay Path A/B/C UX.
+
+**Web vs mobile parity:** Gaps below apply to **both** clients equally unless noted. Do not ship OTP signup on mobile only (or web only) and call the slice done.
+
+**Relation to other RWs:** Independent of RW-08/09/10. Prefer RW-11 hooks when touching new screens. Overlaps RW-07 (optional registration fields) — keep fields optional per RW-07; this RW owns **identity / OTP / approval loops**, not “make GSTIN optional” by itself. Live / Non-live stock order views stay **out of scope** (separate module).
+
+### Goal
+
+After this RW:
+
+1. **Path A (self-signup)** on website and mobile starts with **mobile OTP** (DEV code OK) → optional email OTP → rest of registration wizard; email+password is no longer the primary signup path.
+2. **OTP login** works on website and mobile so Path B (admin-created) and Path C (walk-in) customers can enter the app without a random password.
+3. **Reject → edit & resubmit** works while authenticated (both clients); profile material edits call `PATCH /api/users/me/profile` and return to `PENDING_REVIEW`.
+4. **Path C walk-in create** (phone + OTP → create customer → on-behalf order) exists on **employee** website + mobile surfaces (admin create-order already has it).
+5. Checkout UIs surface **tier discount** (when %) and clear **credit / blocked / suspended** errors from the API.
+6. When credentials arrive: flip off DEV for mobile SMS (2factor), wire email OTP vendor, enable live GSTIN.cloud — **without redesigning flows**.
+
+### Current state (what already exists — reuse)
+
+| Exists today | Where | Keep / extend? |
+|--------------|--------|----------------|
+| Product + eng plans | `docs/customer-account-configuration/*` | **Yes** — source of truth for behavior |
+| Schema: verified timestamps, `accountAction`, `pricingTierId`, `creditAllowed`, GST verify fields, `createdByStaffId` | `prisma/schema.prisma` → `User` | Keep |
+| `PricingTier`, `OtpChallenge`, `OrderRefund` / `OrderRefundPayout` | Prisma | Keep |
+| Mobile OTP APIs (2factor client + DEV) | `app/api/auth/otp/mobile/{send,verify}`, `app/lib/otp/twofactor-sms.ts` | **Reuse** — clients must call these |
+| Email OTP APIs (DEV only until vendor) | `app/api/auth/otp/email/{send,verify}`, `app/lib/otp/email-otp.ts` | **Reuse** with DEV; wire vendor later |
+| Path A create-from-OTP (backend) | mobile verify `purpose=SIGNUP` → `createCustomerFromMobileOtp` | Keep — web/mobile must use it |
+| Legacy email+password signup (still used by clients) | `POST /api/auth/signup`; website `app/signup`; mobile `app/signup.tsx` | **Replace as primary Path A** after OTP clients ship; may keep briefly for dual-login |
+| Path B Admin create | `POST /api/users/customers`, `app/(admin)/clients/new` | Keep; add invite / first-login OTP UX as needed |
+| Path C walk-in API + **admin** UI | `POST …/walk-in`; OTP + create inside `admin-create-order-panel.tsx` | Keep admin; **port to employee web + mobile** |
+| Profile → pending (API) | `PATCH /api/users/me/profile`, `customer-profile-update.ts` | Keep — clients must call it |
+| Pricing tiers admin + checkout math | `/finance/pricing-tiers`, `pricing-tier-math`, place-order tier discount | Keep — expose in client checkout UI |
+| Hard credit at checkout | `assertHardCreditAtCheckout` on place-order / wholesale | Keep — map errors in client UI |
+| Account actions + Verify GST (stub/DEV) | clients `[id]`, `verify-gst`, `gstin-cloud.ts` | Keep button; live key later |
+| Refunds admin payout | `AdminOrderRefundPanel`, refund APIs | Keep; customer-visible status optional |
+| Website / mobile registration | email+password → business → GST → addresses → pending | **Rewrite identity steps** to OTP |
+| Website / mobile login | email+password only | **Add mobile OTP login** |
+| Company profile UI | read-only on web + mobile | **Make editable** → profile PATCH |
+| Reject UX | pending-approval logs out / “Sign up again”; no edit CTA | **Must fix** both clients |
+
+**Missing today (this RW):** zero `otp/mobile` / `otp/email` calls from website or mobile; OTP login UI; reject→resubmit loop; editable profile; Path C on employee apps; checkout tier/credit messaging; live providers when creds arrive.
+
+### Hard rules (do / do not)
+
+**Do**
+
+1. Implement against **CLIENT-PLAN** behavior; update CLIENT-PLAN + DEVELOPER-GUIDE together if product intent changes.
+2. Ship **website and mobile in lockstep** for Path A OTP, OTP login, reject/resubmit, and profile edit — same acceptance criteria on both.
+3. Use existing OTP APIs with **`OTP_DEV_MODE`** until credentials arrive. Document the fixed DEV code in `.env.example` / internal runbook only — never show OTP in API JSON responses.
+4. Path A: **mobile verified required** before continuing registration; email optional — if entered, run email OTP (DEV OK) → `emailVerifiedAt`.
+5. Path B create may still create without verified mobile at save time (match current admin API); customer **must** verify via invite / first OTP login before self-serve ordering.
+6. Path C: employee creates with phone + OTP; walk-in on-behalf order allowed while `PENDING_REVIEW` when `createdByStaffId` is set (existing eligibility rules).
+7. Rejected customers stay able to **edit and resubmit** (authenticated); do not force “sign up again” as the only path.
+8. Material profile changes → `PENDING_REVIEW`; freeze self-serve orders until Admin approves (existing backend gates).
+9. Prefer RW-11 `useApiQuery` / `useApiMutation` for new client API wiring when that foundation exists; otherwise pure api files + existing auth fetch — do not invent a third pattern.
+10. Audit security-relevant OTP / account-action / GST verify events via existing audit / security helpers.
+
+**Do not**
+
+1. Do **not** block Path A/B/C client UX waiting on 2factor / email / GSTIN.cloud production keys — DEV OTP is intentional.
+2. Do **not** return OTP codes in API response bodies (even in DEV).
+3. Do **not** auto-call GSTIN.cloud on every signup — Admin **Verify GST** button only.
+4. Do **not** build Live / Non-live stock order views in this RW.
+5. Do **not** add credit **period** (15/30 days) — credit **limit** only.
+6. Do **not** ship OTP on mobile and leave website on password signup (or the reverse).
+7. Do **not** treat admin walk-in UI as Path C done for employees — employee web + mobile still need it.
+8. Do **not** rewrite finance / loyalty modules; document tier × loyalty stacking only if you touch checkout totals (keep existing backend stacking unless product says otherwise).
+
+### Target flows (summary)
+
+```
+Path A (web + mobile):
+  Enter mobile → Send OTP → Verify (DEV code OK)
+  → optional email → email OTP verify
+  → business / GST / addresses (optional fields per RW-07)
+  → PENDING_REVIEW → Admin approve (+ tier / credit)
+
+Path B:
+  Admin /clients/new → create (commercial optional)
+  → Customer first login via mobile OTP (LOGIN purpose)
+  → if still pending commercial, Admin finishes on client detail
+
+Path C (employee web + mobile — not only admin):
+  Staff login → Create customer (mobile OTP WALK_IN)
+  → optional live on-behalf order now
+  → Admin commercial setup later
+
+Reject / profile:
+  REJECTED → stay able to open Edit profile → save → PENDING_REVIEW
+  APPROVED + material edit → PENDING_REVIEW again → orders frozen until approve
+```
+
+### Phases (implement in order)
+
+#### Phase A — OTP signup + OTP login on website and mobile (DEV OTP)
+
+**Build**
+
+- **Website + mobile Path A:** replace primary signup entry with mobile number → `POST /api/auth/otp/mobile/send` (`SIGNUP`) → verify → continue wizard. Stop requiring password as the identity for new customers.
+- Optional email step: `POST /api/auth/otp/email/send|verify` when email provided (works under `OTP_DEV_MODE`).
+- **OTP login** screen (or login mode) on both clients: mobile → send/verify `purpose=LOGIN` → session (same as backend already supports).
+- Keep dual-login briefly if needed for existing email+password customers; new Path B/C users must be able to enter via OTP.
+- Env / runbook: `OTP_DEV_MODE=1`, `OTP_DEV_CODE=123456` (or agreed code) for local/staging until 2factor keys exist.
+- Loading/error UX: rate-limit and invalid-code messages from API; no fake “OTP sent” if send failed.
+
+**Done when:** A new customer can complete Path A on **both** website and mobile using DEV OTP only; an admin-created customer can log in with mobile OTP on both clients.
+
+#### Phase B — Reject → edit & resubmit + editable profile (both clients)
+
+**Build**
+
+- Pending / rejected screens: if `REJECTED`, show **Edit details & resubmit** (stay signed in or re-auth via OTP — prefer stay signed in when session valid).
+- Editable **My Business / company profile** on website + mobile → `PATCH /api/users/me/profile` (or documented equivalent).
+- After save: UI reflects `PENDING_REVIEW`; self-serve order entry blocked with a clear message until Admin approves.
+- Stop “Sign up again” as the only rejected CTA (may keep as secondary if product wants).
+- Align error messaging with eligibility codes the API returns (`CUSTOMER_NOT_ORDERABLE` / account-action codes — map to plain language).
+
+**Done when:** Rejected customer on web and on mobile can fix fields and land back in pending review without creating a second account; approved customer material edit re-triggers pending on both.
+
+#### Phase C — Path C walk-in on employee website + mobile
+
+**Build**
+
+- Employee surfaces (website employee area + mobile staff): **Create customer** = phone → OTP (`WALK_IN`) → `POST /api/users/customers/walk-in` → continue on-behalf order (reuse existing on-behalf order UI).
+- Mirror the capability already in `admin-create-order-panel` (OTP + create), adapted to employee chrome and permissions.
+- Admin panel Path C remains valid; do not remove it.
+- Ensure pending walk-in customers created by staff can order via on-behalf exception; self-serve still gated until Admin approves + commercial setup.
+
+**Done when:** An employee (not only Admin) can create a walk-in customer with OTP and place a live order on **both** employee web and mobile.
+
+#### Phase D — Checkout messaging + Path B invite polish
+
+**Build**
+
+- Website + mobile checkout / order summary: show **tier discount** line when `tierDiscountPercent` / amount > 0 (use fields already returned or extend summary payload if missing — prefer existing order quote fields).
+- Map hard-fail codes to UI: `CREDIT_LIMIT_EXCEEDED`, `ACCOUNT_BLOCKED`, `CREDIT_SUSPENDED`, closed/pending messaging — do not show a generic “Something went wrong” for these.
+- Path B: after Admin create, clear first-login path (OTP invite messaging or “log in with this mobile” copy). Random password must not be the only access story.
+- Optional: customer-visible refund status on cancelled orders (admin payout already exists) — only if cheap; otherwise leave admin-only.
+
+**Done when:** Customer sees why checkout blocked for credit/action reasons; tier discount visible when applicable; admin-created clients have a documented OTP login path.
+
+#### Phase E — Live providers (blocked on client credentials)
+
+**Build only when keys are available**
+
+| Provider | Work |
+|----------|------|
+| **2factor** SMS | Set `TWOFACTOR_API_KEY` (+ template/sender as required); disable `OTP_DEV_MODE` in staging/prod for mobile SMS; smoke send/verify |
+| **Email OTP** | Choose vendor (Resend / SES / SendGrid / Postmark); implement behind existing `email-otp` / `OtpSender` interface; env keys; turn off DEV for email in prod |
+| **GSTIN.cloud** | Set `GSTIN_CLOUD_API_KEY`; disable mock/DEV mode for Admin Verify GST; keep button-only, no auth auto-verify |
+
+**Done when:** Staging/prod can verify real SMS (and email if chosen) and Admin GST button hits live GSTIN.cloud; DEV mode remains for local.
+
+#### Phase F — Schema hardening + cleanup (after OTP clients are live)
+
+**Build**
+
+- Enforce `mobileNumber` required + unique for CUSTOMER (migrate nulls / duplicates first).
+- Decide and document **nullable email vs placeholder** strategy; migrate placeholders if moving to nullable.
+- Deprecate or feature-flag legacy `POST /api/auth/signup` password Path A once both clients are on OTP.
+- Align DEVELOPER-GUIDE / CLIENT-PLAN “today vs after” and acceptance checklists with shipped reality.
+- Optional: consolidate legacy `isActive` “suspended” language vs `accountAction` in admin filters/copy.
+
+**Done when:** Identity model matches CLIENT-PLAN; docs status matches code; password signup is not the default Path A.
+
+### Problems this RW must address (inventory)
+
+| # | Problem | Impact | Primary fix phase |
+|---|---------|--------|-------------------|
+| 1 | Web + mobile still email+password Path A | Docs/acceptance fail; OTP APIs unused | A |
+| 2 | No OTP login on clients | Path B/C users locked out of self-serve apps | A |
+| 3 | Reject = dead end / sign up again | CLIENT-PLAN § reject→resubmit unmet | B |
+| 4 | Company profile read-only | Profile→pending API unused | B |
+| 5 | Path C only in admin create-order | Employees cannot walk-in create on their apps | C |
+| 6 | Checkout silent on tier / credit errors | Bad UX; support load | D |
+| 7 | Live 2factor / email / GSTIN waiting on creds | Prod SMS/GST not real yet | E (blocked) |
+| 8 | Email required + placeholder; mobile not DB-unique | Identity hardening incomplete | F |
+| 9 | Docs still read as greenfield | Misleading for next assignee | F (and light touch when shipping A–D) |
+
+### Scope (in)
+
+- Website + mobile: Path A OTP signup, OTP login, reject/resubmit, editable profile
+- Employee website + mobile: Path C walk-in create + order continuation
+- Checkout: tier discount visibility + credit/account-action error mapping (both clients)
+- Path B first-login / invite clarity
+- Phase E provider wiring when credentials arrive
+- Phase F schema + doc sync after clients are OTP-first
+- Small backend fixes only as needed to support the above (error codes, invite helpers) — not a second admin rebuild
+
+### Out of scope
+
+- Rebuilding admin Clients / pricing tiers / refund payout / Verify GST button (already present)
+- Live / Non-live stock order module
+- Credit period (days)
+- Full KYC document vault
+- Automatic GST verification on signup
+- Loyalty program redesign (tier × loyalty stacking stays as backend does today unless product opens it)
+- RW-09 product catalog hierarchy implementation
+- Pixel redesign of admin chrome
+
+### Key code pointers
+
+| Area | Path |
+|------|------|
+| Client plan | `docs/customer-account-configuration/CLIENT-PLAN.md` |
+| Developer guide | `docs/customer-account-configuration/DEVELOPER-GUIDE.md` |
+| Mobile OTP API | `app/api/auth/otp/mobile/send/route.ts`, `…/verify/route.ts` |
+| Email OTP API | `app/api/auth/otp/email/send/route.ts`, `…/verify/route.ts` |
+| 2factor / DEV SMS | `app/lib/otp/twofactor-sms.ts` |
+| Email OTP (DEV / TBD) | `app/lib/otp/email-otp.ts` |
+| Path A create from OTP | signup-from-mobile helper used by mobile OTP verify `SIGNUP` |
+| Legacy signup | `app/api/auth/signup/route.ts` |
+| Path B create | `app/api/users/customers/route.ts`, `app/(admin)/clients/new/page.tsx` |
+| Path C walk-in | `app/api/users/customers/walk-in/route.ts`, `components/admin-create-order-panel.tsx` |
+| Profile → pending | `app/api/users/me/profile/route.ts` |
+| Order eligibility / credit | `app/lib/customer-order-eligibility.ts`, `assertHardCreditAtCheckout` |
+| GST stub | `app/lib/gst/gstin-cloud.ts`, clients verify-gst route |
+| Website signup / login / pending | `drishx-website/app/signup`, `app/login`, pending-approval / company-profile screens |
+| Mobile signup / login / profile | `drishx-mobile-app/app/signup.tsx`, `app/login.tsx`, company-profile |
+| Employee on-behalf (no walk-in create yet) | website + mobile `employee-order-on-behalf*` |
+
+### Open questions (do not block Phase A)
+
+1. Dual-login duration: how long keep email+password signup/login after OTP Path A ships?
+2. Rejected session: require OTP re-login before edit, or keep existing session?
+3. Email OTP vendor preference when client is ready (Resend vs SES vs other)?
+4. Should customer apps show refund payout status in v1, or admin-only forever?
+5. Exact Path B invite channel (SMS deep link vs “open app → login with this mobile” copy only)?
+6. Nullable email migration now vs after OTP clients stabilize?
+
+### Acceptance
+
+- [ ] Website Path A: mobile OTP (DEV) → optional email OTP → registration → pending
+- [ ] Mobile Path A: same as website (parity)
+- [ ] Website + mobile: OTP login works for admin-created / walk-in mobiles
+- [ ] Rejected customer can edit & resubmit on website **and** mobile without “sign up again” as only path
+- [ ] Material profile edit → `PENDING_REVIEW` on both clients; self-serve ordering blocked with clear copy
+- [ ] Employee website + mobile: Path C walk-in OTP create + continue on-behalf order
+- [ ] Checkout shows tier discount when applicable; credit/blocked/suspended errors are explicit
+- [ ] No dependency on live 2factor/email/GSTIN keys to pass Phases A–D (DEV OTP sufficient)
+- [ ] Phase E: with credentials, staging/prod SMS (and email if chosen) + live GST button work; DEV off outside local
+- [ ] Phase F: mobile uniqueness / email strategy documented and migrated; CLIENT-PLAN / DEVELOPER-GUIDE status matches code
+- [ ] Admin Clients / tiers / GST button / refunds remain working (no regressions)
+
+### Suggested first PR
+
+1. **Phase A (website + mobile together):** OTP signup + OTP login against DEV OTP APIs.  
+2. **Phase B:** reject/resubmit + editable profile on both clients.  
+3. **Phase C:** employee walk-in create on website + mobile.  
+4. **Phase D:** checkout tier/credit messaging + Path B login copy.  
+5. **Phase E** when client credentials arrive.  
+6. **Phase F** schema/doc cleanup after OTP is the default Path A.
