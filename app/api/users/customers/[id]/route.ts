@@ -35,7 +35,9 @@ export async function GET(req: NextRequest, context: RouteContext) {
         id,
         role: "CUSTOMER",
       },
-      include: { pricingTier: { select: { code: true } } },
+      include: {
+        pricingTier: { select: { code: true, discountPercent: true } },
+      },
     });
 
     if (!customer) {
@@ -191,7 +193,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const updated = await prisma.user.update({
       where: { id },
       data,
-      include: { pricingTier: { select: { code: true } } },
+      include: {
+        pricingTier: { select: { code: true, discountPercent: true } },
+      },
     });
 
     await recordAuditEvent(prisma, {

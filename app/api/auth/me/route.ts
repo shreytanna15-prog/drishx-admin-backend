@@ -10,7 +10,10 @@ export async function GET(req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
-    include: { staffRole: true },
+    include: {
+      staffRole: true,
+      pricingTier: { select: { code: true, discountPercent: true } },
+    },
   });
   if (!user) {
     return NextResponse.json({ error: "User not found." }, { status: 404 });

@@ -50,7 +50,9 @@ export async function GET(req: NextRequest) {
         orderBy: [{ businessName: "asc" }, { email: "asc" }],
         skip,
         take: params.limit,
-        include: { pricingTier: { select: { code: true } } },
+        include: {
+          pricingTier: { select: { code: true, discountPercent: true } },
+        },
       }),
     ]);
 
@@ -179,7 +181,9 @@ export async function POST(req: NextRequest) {
         createdByStaffId: session.userId,
         accountAction: "NONE",
       },
-      include: { pricingTier: { select: { code: true } } },
+      include: {
+        pricingTier: { select: { code: true, discountPercent: true } },
+      },
     });
 
     await recordAuditEvent(prisma, {

@@ -21,6 +21,7 @@ export type SafeUser = {
   creditAllowed: boolean;
   pricingTierId: string | null;
   pricingTierCode: string | null;
+  pricingTierDiscountPercent: number | null;
   createdByStaffId: string | null;
   gstinVerifyStatus: User["gstinVerifyStatus"];
   gstinVerifiedAt: Date | null;
@@ -67,7 +68,7 @@ export type SafeUser = {
 export function toSafeUser(
   user: User & {
     staffRole?: StaffRole | null;
-    pricingTier?: { code: string } | null;
+    pricingTier?: { code: string; discountPercent?: unknown } | null;
   }
 ): SafeUser {
   const staffRole = user.staffRole ? serializeStaffRole(user.staffRole) : null;
@@ -92,6 +93,10 @@ export function toSafeUser(
     creditAllowed: user.creditAllowed ?? true,
     pricingTierId: user.pricingTierId ?? null,
     pricingTierCode: user.pricingTier?.code ?? null,
+    pricingTierDiscountPercent:
+      user.pricingTier?.discountPercent != null
+        ? Number(user.pricingTier.discountPercent)
+        : null,
     createdByStaffId: user.createdByStaffId ?? null,
     gstinVerifyStatus: user.gstinVerifyStatus ?? "UNKNOWN",
     gstinVerifiedAt: user.gstinVerifiedAt ?? null,

@@ -68,10 +68,15 @@ export async function POST(req: NextRequest) {
       return jsonError(verified.code, verified.message, status);
     }
 
+    const userInclude = {
+      staffRole: true,
+      pricingTier: { select: { code: true, discountPercent: true } },
+    } as const;
+
     let user = await withDbRetry(() =>
       prisma.user.findFirst({
         where: { mobileNumber, role: "CUSTOMER" },
-        include: { staffRole: true },
+        include: userInclude,
       })
     );
 
@@ -105,7 +110,7 @@ export async function POST(req: NextRequest) {
         });
         user = await prisma.user.findUniqueOrThrow({
           where: { id: created.id },
-          include: { staffRole: true },
+          include: userInclude,
         });
       } catch (err) {
         if (err instanceof Error && err.message === "EMAIL_IN_USE") {
@@ -153,7 +158,7 @@ export async function POST(req: NextRequest) {
       });
       user = await prisma.user.findUniqueOrThrow({
         where: { id: user.id },
-        include: { staffRole: true },
+        include: userInclude,
       });
     }
 

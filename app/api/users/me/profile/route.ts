@@ -32,7 +32,10 @@ export async function PATCH(req: NextRequest) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
-      include: { staffRole: true, pricingTier: { select: { code: true } } },
+      include: {
+        staffRole: true,
+        pricingTier: { select: { code: true, discountPercent: true } },
+      },
     });
     if (!user || user.role !== "CUSTOMER") {
       return NextResponse.json({ error: "Customer not found." }, { status: 404 });
@@ -68,7 +71,10 @@ export async function PATCH(req: NextRequest) {
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: parsed.data,
-      include: { staffRole: true, pricingTier: { select: { code: true } } },
+      include: {
+        staffRole: true,
+        pricingTier: { select: { code: true, discountPercent: true } },
+      },
     });
 
     await recordAuditEvent(prisma, {

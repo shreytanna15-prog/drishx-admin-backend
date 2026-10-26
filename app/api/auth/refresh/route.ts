@@ -56,7 +56,10 @@ export async function POST(req: NextRequest) {
     const user = await withDbRetry(() =>
       prisma.user.findUnique({
         where: { id: rotated.userId },
-        include: { staffRole: true },
+        include: {
+          staffRole: true,
+          pricingTier: { select: { code: true, discountPercent: true } },
+        },
       })
     );
 

@@ -22,7 +22,10 @@ export async function POST(req: NextRequest) {
     const user = await withDbRetry(() =>
       prisma.user.findUnique({
         where: { email },
-        include: { staffRole: true },
+        include: {
+          staffRole: true,
+          pricingTier: { select: { code: true, discountPercent: true } },
+        },
       })
     );
     if (!user) {
