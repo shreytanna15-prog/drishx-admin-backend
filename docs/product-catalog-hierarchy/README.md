@@ -11,6 +11,7 @@ Target model for the **new power-wise product catalog** (core module). Derived f
 |----------|---------|
 | [CLIENT-HIERARCHY-CONFIRMATION.md](./CLIENT-HIERARCHY-CONFIRMATION.md) | **Client-facing** — hierarchy + how products are added (plain language) |
 | [ATTRIBUTE-TABLES-AND-HIERARCHY.md](./ATTRIBUTE-TABLES-AND-HIERARCHY.md) | Full technical tables, live audit notes, legacy mapping |
+| [../product-catalog/](../product-catalog/) | **Implementation plan** — Attributes + catalog create/list/grid + matrix UI (client + developer) |
 
 **Re-run analysis**
 
