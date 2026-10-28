@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Pencil, Plus } from "lucide-react";
+import { AdminModal } from "@/components/admin-modal";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
@@ -151,6 +152,8 @@ export default function InventoryAttributesPage() {
     }
   }
 
+  const tabLabel = TABS.find((t) => t.id === tab)?.label ?? "attribute";
+
   return (
     <AdminPage
       title="Attributes"
@@ -184,20 +187,31 @@ export default function InventoryAttributesPage() {
             className="h-10 rounded-xl bg-(--brand-primary) px-4 font-bold text-black hover:bg-(--brand-primary)/90"
           >
             <Plus className="mr-1 size-4" />
-            Add {TABS.find((t) => t.id === tab)?.label}
+            Add {tabLabel}
           </Button>
         </div>
 
         {error ? <div className={errorBannerClass}>{error}</div> : null}
 
-        {showForm ? (
-          <div className="space-y-3 rounded-2xl border border-(--brand-card-border) bg-(--brand-input-bg)/40 p-4">
-            <p className="text-sm font-bold text-(--brand-text)">
-              {editing ? "Edit attribute" : "Add attribute"}
-            </p>
-            {formError ? <div className={errorBannerClass}>{formError}</div> : null}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="space-y-1">
+        <AdminModal
+          open={showForm}
+          onOpenChange={setShowForm}
+          size="md"
+          title={editing ? `Edit ${tabLabel}` : `Add ${tabLabel}`}
+          description={
+            editing
+              ? `Update this ${tabLabel.toLowerCase()} value. Inactive values stay hidden from Create product.`
+              : `Create a new ${tabLabel.toLowerCase()} master value for the product catalog.`
+          }
+        >
+          <div className="flex flex-col gap-4">
+            {formError ? (
+              <div className={errorBannerClass} role="alert">
+                {formError}
+              </div>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1.5">
                 <span className={labelClass}>Code</span>
                 <Input
                   className={inputClass}
@@ -208,7 +222,7 @@ export default function InventoryAttributesPage() {
                   placeholder="e.g. TINTABLE"
                 />
               </label>
-              <label className="space-y-1">
+              <label className="space-y-1.5">
                 <span className={labelClass}>Name</span>
                 <Input
                   className={inputClass}
@@ -219,7 +233,7 @@ export default function InventoryAttributesPage() {
                   placeholder="Display name"
                 />
               </label>
-              <label className="space-y-1">
+              <label className="space-y-1.5">
                 <span className={labelClass}>Sort order</span>
                 <Input
                   className={inputClass}
@@ -230,7 +244,7 @@ export default function InventoryAttributesPage() {
                 />
               </label>
               {tab === "index" ? (
-                <label className="space-y-1">
+                <label className="space-y-1.5">
                   <span className={labelClass}>Numeric value</span>
                   <Input
                     className={inputClass}
@@ -243,30 +257,30 @@ export default function InventoryAttributesPage() {
                 </label>
               ) : null}
             </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                disabled={formBusy}
-                onClick={() => void handleSave()}
-                className="h-10 rounded-xl bg-(--brand-primary) px-4 font-bold text-black"
-              >
-                {formBusy ? (
-                  <Loader2 className="mr-1 size-4 animate-spin" />
-                ) : null}
-                Save
-              </Button>
+            <div className="flex flex-col gap-2 border-t border-(--brand-card-border) pt-4 sm:flex-row">
               <Button
                 type="button"
                 variant="outline"
                 disabled={formBusy}
                 onClick={() => setShowForm(false)}
-                className="h-10 rounded-xl"
+                className="h-11 flex-1 rounded-xl border-(--brand-input-border)"
               >
                 Cancel
               </Button>
+              <Button
+                type="button"
+                disabled={formBusy}
+                onClick={() => void handleSave()}
+                className="h-11 flex-1 rounded-xl bg-(--brand-primary) font-extrabold text-black hover:bg-(--brand-primary)/90"
+              >
+                {formBusy ? (
+                  <Loader2 className="mr-1 size-4 animate-spin" />
+                ) : null}
+                {editing ? "Save changes" : "Create"}
+              </Button>
             </div>
           </div>
-        ) : null}
+        </AdminModal>
 
         {loading ? (
           <TableSkeleton rows={6} />
