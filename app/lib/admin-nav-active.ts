@@ -41,6 +41,9 @@ export function resolveActiveTitle(
   }
   if (pathMatchesRoute(pathname, "/inventory/stock-matrix")) return "Stock Matrix";
   if (pathMatchesRoute(pathname, "/procurement/suppliers")) return "Suppliers";
+  if (pathMatchesRoute(pathname, "/inventory/attributes")) {
+    return "Attributes";
+  }
   if (pathMatchesRoute(pathname, "/inventory/products-catalog")) {
     return "Products & catalog";
   }

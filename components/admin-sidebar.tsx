@@ -30,6 +30,7 @@ import {
   ShoppingCart,
   Sparkles,
   Store,
+  Tags,
   TrendingUp,
   Truck,
   User,
@@ -155,6 +156,11 @@ const NAV_SECTIONS: NavSection[] = [
         title: "Suppliers",
         icon: Store,
         href: "/procurement/suppliers",
+      },
+      {
+        title: "Attributes",
+        icon: Tags,
+        href: "/inventory/attributes",
       },
       {
         title: "Products & catalog",

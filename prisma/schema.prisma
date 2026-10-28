@@ -1283,6 +1283,140 @@ model CoatingFilterLabel {
   @@index([lensType, isActive, sortOrder])
 }
 
+// --- Product catalog attribute masters + LensProduct (RW-09 / docs/product-catalog) ---
+// Display-only SKU master; does not replace CatalogProduct leaf generation or legacy lens tables.
+
+model LensFamily {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  name      String
+  isActive  Boolean       @default(true)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  products  LensProduct[]
+
+  @@index([isActive, sortOrder])
+}
+
+model LensBase {
+  id               String                 @id @default(cuid())
+  code             String                 @unique
+  name             String
+  isActive         Boolean                @default(true)
+  sortOrder        Int                    @default(0)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  materialLinks    LensBaseMaterialLink[]
+  products         LensProduct[]
+
+  @@index([isActive, sortOrder])
+}
+
+model LensMaterial {
+  id        String                 @id @default(cuid())
+  code      String                 @unique
+  name      String
+  isActive  Boolean                @default(true)
+  sortOrder Int                    @default(0)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  baseLinks LensBaseMaterialLink[]
+  products  LensProduct[]
+
+  @@index([isActive, sortOrder])
+}
+
+model LensIndex {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  name      String
+  /// Numeric refractive index when parseable (e.g. 1.56).
+  value     Decimal?
+  isActive  Boolean       @default(true)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  products  LensProduct[]
+
+  @@index([isActive, sortOrder])
+}
+
+model LensCoating {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  name      String
+  isActive  Boolean       @default(true)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  products  LensProduct[]
+
+  @@index([isActive, sortOrder])
+}
+
+model LensColor {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  name      String
+  isActive  Boolean       @default(true)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  products  LensProduct[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// Which materials are allowed under a given base (create-product cascade).
+model LensBaseMaterialLink {
+  id         String       @id @default(cuid())
+  baseId     String
+  materialId String
+  base       LensBase     @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  material   LensMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([baseId, materialId])
+  @@index([materialId])
+}
+
+/// Catalog SKU master: attributes + power range. Matrix cells are UI-only in this slice.
+model LensProduct {
+  id           String        @id @default(cuid())
+  skuCode      String        @unique
+  name         String
+  familyId     String
+  baseId       String
+  materialId   String
+  indexId      String?
+  coatingId    String?
+  colorId      String?
+  rangeType    String        @default("NORMAL")
+  sphMin       Decimal
+  sphMax       Decimal
+  cylMin       Decimal
+  cylMax       Decimal
+  addMin       Decimal?
+  addMax       Decimal?
+  axis         Int?
+  eye          String?
+  defaultPrice Decimal?
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  family       LensFamily    @relation(fields: [familyId], references: [id])
+  base         LensBase      @relation(fields: [baseId], references: [id])
+  material     LensMaterial  @relation(fields: [materialId], references: [id])
+  index        LensIndex?    @relation(fields: [indexId], references: [id])
+  coating      LensCoating?  @relation(fields: [coatingId], references: [id])
+  color        LensColor?    @relation(fields: [colorId], references: [id])
+
+  @@index([familyId, isActive])
+  @@index([baseId])
+  @@index([materialId])
+  @@index([isActive, updatedAt])
+}
+
 // --- Audit & Logs (immutable; no FK cascade from business entities) ---
 
 enum AuditActorType {

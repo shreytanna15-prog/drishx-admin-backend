@@ -83,3 +83,17 @@ describe("RW-08 Phase C nav entries", () => {
     assert.equal(resolveActiveTitle("/inventory/power-wise-stock"), "Reorder Rules");
   });
 });
+
+describe("RW-09 product catalog nav", () => {
+  it("activates Attributes and Products & catalog", () => {
+    assert.equal(resolveActiveTitle("/inventory/attributes"), "Attributes");
+    assert.equal(
+      resolveActiveTitle("/inventory/products-catalog"),
+      "Products & catalog"
+    );
+    assert.equal(
+      resolveActiveTitle("/inventory/products-catalog/new"),
+      "Products & catalog"
+    );
+  });
+});
