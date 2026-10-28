@@ -1,4 +1,4 @@
-# DrishX ‚Äî Remaining Work
+# DrishX ó Remaining Work
 
 **Document type:** End-phase backlog (bugs, changes, new modules)  
 **Audience:** Developers picking up assigned work  
@@ -6,7 +6,7 @@
 
 ## How to use
 
-- Each item has a stable ID (`RW-01`, `RW-02`, ‚Ä¶).
+- Each item has a stable ID (`RW-01`, `RW-02`, Ö).
 - Default sections: **Type**, **Goal**, **Current state**, **Scope (in)**, **Out of scope**.
 - Larger items (e.g. RW-06, RW-08, RW-09, RW-11, RW-12) add extra sections: catalog, architecture, phases, data sources, open questions, PDF UI references.
 - Cross-repo work is listed under **Repos** in the index.
@@ -17,26 +17,26 @@
 
 | ID | Task | Repos |
 |----|------|-------|
-| RW-01 | Auth session drops mid-use ‚Äî Unauthorized / forced re-login | backend, website, mobile, admin panel |
+| RW-01 | Auth session drops mid-use ó Unauthorized / forced re-login | backend, website, mobile, admin panel |
 | RW-02 | Admin grouped orders overview (card UI) | backend (admin panel) |
 | RW-03 | Returns: show fuller order details (list + detail) | backend (admin panel) |
 | RW-04 | Customer status: abandoned signups + admin status changes | backend (admin panel; loyalty filters) |
-| RW-05 | RX + photo order visibility (admin hold ‚Üí warehouse) | backend, website, mobile, admin panel |
+| RW-05 | RX + photo order visibility (admin hold ? warehouse) | backend, website, mobile, admin panel |
 | RW-06 | Reports module (client report catalog, phased) | backend (admin panel) |
-| RW-07 | Client registration form ‚Äî most fields optional | backend, website, mobile |
-| RW-08 | Procurement: Purchase Order ‚Üí receive ‚Üí close (power-wise) | backend (admin panel) |
-| RW-09 | Products & catalog: admin product master + ranges ‚Üí powers | backend (admin panel) |
+| RW-07 | Client registration form ó most fields optional | backend, website, mobile |
+| RW-08 | Procurement: Purchase Order ? receive ? close (power-wise) | backend (admin panel) |
+| RW-09 | Products & catalog: admin product master + ranges ? powers | backend (admin panel) |
 | RW-10 | Admin panel: create order on behalf of customer | backend (admin panel) |
 | RW-11 | Client API calling pattern + list/table performance | backend, website, mobile, admin panel |
 | RW-12 | Customer account config ‚Äî OTP clients, reject/resubmit, Path C (web + mobile) | backend, website, mobile, admin panel |
 
 ---
 
-## RW-01 ‚Äî Auth session drops mid-use (Unauthorized)
+## RW-01 ó Auth session drops mid-use (Unauthorized)
 
 ### Type
 
-Bug ‚Äî session / refresh reliability (all clients)
+Bug ó session / refresh reliability (all clients)
 
 ### Goal
 
@@ -44,7 +44,7 @@ Users stay signed in for the life of a valid refresh session. Across **admin pan
 
 ### Current state
 
-Access JWT is **15 minutes**; refresh is **30 days** (cookie on web/admin, secure store + body on mobile). Website/admin/mobile already have auth-fetch wrappers with refresh-on-401, but clients still see Unauthorized mid-session ‚Äî likely incomplete use of those wrappers, proxy/cookie gaps, or races. Fix spans backend refresh behavior plus all three frontends.
+Access JWT is **15 minutes**; refresh is **30 days** (cookie on web/admin, secure store + body on mobile). Website/admin/mobile already have auth-fetch wrappers with refresh-on-401, but clients still see Unauthorized mid-session ó likely incomplete use of those wrappers, proxy/cookie gaps, or races. Fix spans backend refresh behavior plus all three frontends.
 
 ### Scope (in)
 
@@ -56,16 +56,16 @@ Access JWT is **15 minutes**; refresh is **30 days** (cookie on web/admin, secur
 ### Out of scope
 
 - New auth providers or role-model changes
-- ‚ÄúFix‚Äù by only lengthening access-token TTL without making refresh reliable
+- ìFixî by only lengthening access-token TTL without making refresh reliable
 - Permission / inactive / pending-account errors (those should still surface, not silent-refresh)
 
 ---
 
-## RW-02 ‚Äî Admin grouped orders overview (card UI)
+## RW-02 ó Admin grouped orders overview (card UI)
 
 ### Type
 
-New feature ‚Äî admin order overview page
+New feature ó admin order overview page
 
 ### Goal
 
@@ -87,15 +87,15 @@ Order Management has flat table pages (`/orders`, Rx, Dispatch, Procurement). Ea
 
 - Replacing or redesigning the existing `/orders` table
 - Employee web / mobile versions of this view
-- Changing order lifecycle, assignment, or fulfillment APIs beyond what‚Äôs needed to list/group for this page
+- Changing order lifecycle, assignment, or fulfillment APIs beyond whatís needed to list/group for this page
 
 ---
 
-## RW-03 ‚Äî Returns: show fuller order details (list + detail)
+## RW-03 ó Returns: show fuller order details (list + detail)
 
 ### Type
 
-Change / UX ‚Äî admin Returns & Replacements
+Change / UX ó admin Returns & Replacements
 
 ### Goal
 
@@ -103,7 +103,7 @@ On admin **returns list** and **return detail**, the linked order(s) currently s
 
 ### Current state
 
-`/returns` and `/returns/[id]` focus on return workflow (status, items, photos, admin decision). Returned items expose `lensLabel`, qty, reason, original/requested powers, and remarks ‚Äî not the fuller order context used on `/orders` and `/orders/[id]`.
+`/returns` and `/returns/[id]` focus on return workflow (status, items, photos, admin decision). Returned items expose `lensLabel`, qty, reason, original/requested powers, and remarks ó not the fuller order context used on `/orders` and `/orders/[id]`.
 
 ### Scope (in)
 
@@ -120,25 +120,25 @@ On admin **returns list** and **return detail**, the linked order(s) currently s
 
 ---
 
-## RW-04 ‚Äî Customer status: abandoned signups + admin status changes
+## RW-04 ó Customer status: abandoned signups + admin status changes
 
 ### Type
 
-Bug / change ‚Äî admin Clients & customer approval lifecycle
+Bug / change ó admin Clients & customer approval lifecycle
 
 ### Goal
 
-Fix two related gaps: (1) Users who start customer signup and abandon mid-wizard are already saved in the DB (`PENDING_REVIEW`, often without GST) but do **not** appear on Clients pending/approved ‚Äî so admin cannot manage them ‚Äî yet they **do** appear on Loyalty. (2) Admin cannot change status of an approved (or other) client back to pending or otherwise move statuses; approve/reject is only offered for pending+GST applications. Admin must be able to see incomplete/abandoned customers and change customer approval status as needed (including after approve).
+Fix two related gaps: (1) Users who start customer signup and abandon mid-wizard are already saved in the DB (`PENDING_REVIEW`, often without GST) but do **not** appear on Clients pending/approved ó so admin cannot manage them ó yet they **do** appear on Loyalty. (2) Admin cannot change status of an approved (or other) client back to pending or otherwise move statuses; approve/reject is only offered for pending+GST applications. Admin must be able to see incomplete/abandoned customers and change customer approval status as needed (including after approve).
 
 ### Current state
 
-Signup creates the customer immediately with `approvalStatus: PENDING_REVIEW`, `isApproved: false`. Pending Clients API requires `gstNumber != null`; approved list requires `isApproved: true` ‚Äî incomplete rows are invisible. Loyalty customers API lists all `role: CUSTOMER` with no approval filter. Approve API/UI only supports `approve` | `reject`, and detail actions show only when status is pending with GST ‚Äî no reopen-to-pending or general status change for approved clients.
+Signup creates the customer immediately with `approvalStatus: PENDING_REVIEW`, `isApproved: false`. Pending Clients API requires `gstNumber != null`; approved list requires `isApproved: true` ó incomplete rows are invisible. Loyalty customers API lists all `role: CUSTOMER` with no approval filter. Approve API/UI only supports `approve` | `reject`, and detail actions show only when status is pending with GST ó no reopen-to-pending or general status change for approved clients.
 
 ### Scope (in)
 
 - Surface incomplete/abandoned signups on admin Clients (e.g. incomplete tab/filter or include in pending with clear labeling) so admin can act on them
-- Align Loyalty (and any similar ‚Äúall customers‚Äù lists) so incomplete/unapproved accounts do not appear as normal loyalty customers unless product says otherwise
-- Allow admin to change customer approval status beyond one-way pending‚Üíapprove/reject (at least: manage approved clients ‚Äî e.g. reject/suspend/reopen to pending ‚Äî with clear rules and UI on list/detail)
+- Align Loyalty (and any similar ìall customersî lists) so incomplete/unapproved accounts do not appear as normal loyalty customers unless product says otherwise
+- Allow admin to change customer approval status beyond one-way pending?approve/reject (at least: manage approved clients ó e.g. reject/suspend/reopen to pending ó with clear rules and UI on list/detail)
 - Keep existing statuses: `PENDING_REVIEW`, `APPROVED`, `REJECTED` (+ `isActive` / `isApproved` consistency)
 
 ### Out of scope
@@ -149,11 +149,11 @@ Signup creates the customer immediately with `approvalStatus: PENDING_REVIEW`, `
 
 ---
 
-## RW-05 ‚Äî RX + photo order visibility (admin hold ‚Üí warehouse)
+## RW-05 ó RX + photo order visibility (admin hold ? warehouse)
 
 ### Type
 
-Change ‚Äî order visibility / roles (RX + photo prescription orders)
+Change ó order visibility / roles (RX + photo prescription orders)
 
 ### Goal
 
@@ -161,7 +161,7 @@ Custom prescription jobs (**RX form orders** and **photo prescription orders**) 
 
 ### Current state
 
-RX is detected via `notes` containing `[RX Order]`; photo via image + not RX/Color. Create paths set `PENDING`, auto-`resolveOrderAssigneeId`, and notify staff. Admin has `/orders/rx-lab`; employees with `orders.rx` see assigned RX on web/mobile. There is no admin-hold / ‚Äúat warehouse‚Äù / release flag ‚Äî assignment happens at create for both RX and photo.
+RX is detected via `notes` containing `[RX Order]`; photo via image + not RX/Color. Create paths set `PENDING`, auto-`resolveOrderAssigneeId`, and notify staff. Admin has `/orders/rx-lab`; employees with `orders.rx` see assigned RX on web/mobile. There is no admin-hold / ìat warehouseî / release flag ó assignment happens at create for both RX and photo.
 
 ### Scope (in)
 
@@ -175,29 +175,29 @@ RX is detected via `notes` containing `[RX Order]`; photo via image + not RX/Col
 
 - Redesigning the customer RX form or photo-upload UX (beyond visibility/lifecycle)
 - Catalog / wholesale / color order queues
-- Full RX pricing/lab workflow redesign beyond hold ‚Üí mark warehouse ‚Üí assign ‚Üí staff see
+- Full RX pricing/lab workflow redesign beyond hold ? mark warehouse ? assign ? staff see
 
 ---
 
-## RW-06 ‚Äî Reports module (client report catalog, phased)
+## RW-06 ó Reports module (client report catalog, phased)
 
 ### Type
 
-New feature ‚Äî Admin **Reports hub** (financial, inventory, power, order, sales)
+New feature ó Admin **Reports hub** (financial, inventory, power, order, sales)
 
 ### Goal
 
-Deliver the client‚Äôs full report list as a structured **Reports** area in the admin panel (not 30 one-off pages). Reuse existing finance/inventory/order data; add shared query layer + consistent UI (filters, tables, later export). Build in **phases** so P1 can ship without waiting on SKU redesign or perfect stock-history.
+Deliver the clientís full report list as a structured **Reports** area in the admin panel (not 30 one-off pages). Reuse existing finance/inventory/order data; add shared query layer + consistent UI (filters, tables, later export). Build in **phases** so P1 can ship without waiting on SKU redesign or perfect stock-history.
 
 ### Current state
 
-- **Exists today:** Admin **Finance ‚Üí GST & Reports** (`/finance/reports`) with API `GET /api/finance/reports`:
-  - `gst-summary` ‚Äî output / input / net GST by financial year
-  - `hsn` ‚Äî HSN-wise sales
-  - `power-wise` ‚Äî power-wise **sales** (invoice lines), not warehouse stock analytics
-- **Related UIs (not formal ‚Äúreports‚Äù):** receivables + aging (`/finance/receivables`, `/api/finance/receivables`), payments/claims, invoices, purchases/payables, order lists by status, lens `quantity` + reserved/available helpers in `app/lib/order-inventory.ts`, reorder `minStock` on `ReorderRule`, stock movements / intake for some history.
+- **Exists today:** Admin **Finance ? GST & Reports** (`/finance/reports`) with API `GET /api/finance/reports`:
+  - `gst-summary` ó output / input / net GST by financial year
+  - `hsn` ó HSN-wise sales
+  - `power-wise` ó power-wise **sales** (invoice lines), not warehouse stock analytics
+- **Related UIs (not formal ìreportsî):** receivables + aging (`/finance/receivables`, `/api/finance/receivables`), payments/claims, invoices, purchases/payables, order lists by status, lens `quantity` + reserved/available helpers in `app/lib/order-inventory.ts`, reorder `minStock` on `ReorderRule`, stock movements / intake for some history.
 - **Missing:** Reports hub navigation, most named reports below, shared report framework, CSV/Excel export, power fast/slow/dead rules, stock aging/valuation as report products.
-- Older ops-spec text that said ‚ÄúReports stubbed‚Äù is **out of date** for GST/HSN/power-wise sales.
+- Older ops-spec text that said ìReports stubbedî is **out of date** for GST/HSN/power-wise sales.
 
 ### Client report catalog (required set)
 
@@ -205,12 +205,12 @@ Deliver the client‚Äôs full report list as a structured **Reports** area in the 
 
 | Report | Notes for implementer |
 |--------|------------------------|
-| Sales Summary | Aggregate sales (prefer invoice lines / paid or issued invoices ‚Äî confirm status filter) |
+| Sales Summary | Aggregate sales (prefer invoice lines / paid or issued invoices ó confirm status filter) |
 | Purchase Summary | Aggregate purchases (`PurchaseBill` and related) |
-| Profit & Margin Report | Needs client formula (sales ‚àí COGS ‚àí ?expenses) |
+| Profit & Margin Report | Needs client formula (sales - COGS - ?expenses) |
 | Outstanding Customers Report | Largely wrap receivables / unpaid invoices + aging |
 | Payment Collection Report | Payments + confirmed payment claims in period |
-| GST Summary Report | **Already implemented** ‚Äî move/link into Reports hub |
+| GST Summary Report | **Already implemented** ó move/link into Reports hub |
 
 #### Inventory Reports
 
@@ -219,8 +219,8 @@ Deliver the client‚Äôs full report list as a structured **Reports** area in the 
 | Current Stock Report | On-hand `quantity` per catalog row (`lensType` + `lensId`) |
 | Power-wise Stock Report | Group/filter stock by power fields on rows / order powers |
 | Product-wise Stock Report | Group by category/brand/item/coating (product key) |
-| Reserved Stock Report | Open-order committed qty (`reservedQuantity ‚àí pickedQuantity`) |
-| Available Stock Report | `onHand ‚àí committed` (`getAvailableQuantity`) |
+| Reserved Stock Report | Open-order committed qty (`reservedQuantity - pickedQuantity`) |
+| Available Stock Report | `onHand - committed` (`getAvailableQuantity`) |
 | Stock Aging Report | Needs receipt/movement dates; may be incomplete if history thin |
 
 #### Power Reports (product-wise and overall)
@@ -240,7 +240,7 @@ Deliver the client‚Äôs full report list as a structured **Reports** area in the 
 
 | Report | Notes for implementer |
 |--------|------------------------|
-| Pending Orders Report | Status filter (clarify which statuses count as ‚Äúpending‚Äù) |
+| Pending Orders Report | Status filter (clarify which statuses count as ìpendingî) |
 | Completed Orders Report | `COMPLETED` |
 | Cancelled Orders Report | `CANCELLED` |
 | RX Orders Report | `notes` contains `[RX Order]` (and decide photo orders: `orderImageUrl` / not Color) |
@@ -250,7 +250,7 @@ Deliver the client‚Äôs full report list as a structured **Reports** area in the 
 
 | Report | Notes for implementer |
 |--------|------------------------|
-| Daily Sales Report | Bucket by day (invoice or order date ‚Äî confirm) |
+| Daily Sales Report | Bucket by day (invoice or order date ó confirm) |
 | Monthly Sales Report | Calendar month / FY month |
 | Quarterly Sales Report | Quarters |
 | Yearly Sales Report | Calendar year and/or Indian FY (project already has FY helpers) |
@@ -260,21 +260,21 @@ Deliver the client‚Äôs full report list as a structured **Reports** area in the 
 Do **not** create one unrelated page per report with duplicated Prisma queries.
 
 ```
-Admin UI: Reports hub (categories ‚Üí report ‚Üí filters ‚Üí table [‚Üí export])
-        ‚îÇ
-        ‚ñº
+Admin UI: Reports hub (categories ? report ? filters ? table [? export])
+        ¶
+        ?
 GET /api/reports?report=<key>&from=&to=&fy=&...   (or /api/reports/[key])
-        ‚îÇ
-        ‚ñº
+        ¶
+        ?
 app/lib/reports/*
   - registry: key, title, category, filters, columns
   - queries: one function per report (or shared aggregators)
   - reuse: finance FY helpers, receivables aging, order-inventory available/reserved
 ```
 
-**SKU note:** Inventory/power reports should key off **today‚Äôs catalog row** (`lensType` + `lensId`). Do not block this module on a full SKU rewrite. A future SKU facade can improve labels only.
+**SKU note:** Inventory/power reports should key off **todayís catalog row** (`lensType` + `lensId`). Do not block this module on a full SKU rewrite. A future SKU facade can improve labels only.
 
-**Not the same as:** warehouse power-matrix / verify-sheet procurement UI (meeting ‚Äúpower-wise stock‚Äù operations). Those are operational screens; this RW is **reporting**.
+**Not the same as:** warehouse power-matrix / verify-sheet procurement UI (meeting ìpower-wise stockî operations). Those are operational screens; this RW is **reporting**.
 
 ### Delivery phases
 
@@ -323,15 +323,15 @@ Ship P1 even if open questions for P4 are unanswered.
 
 ### Open questions (ask client before P2/P4; do not invent)
 
-1. **Profit & margin** ‚Äî exact formula (sales ‚àí purchase cost only? include procurement expenses, credit notes, returns)?
-2. **Sales date basis** ‚Äî invoice `issuedAt` vs order `createdAt` vs payment date?
-3. **Fast / slow / dead / unsold** ‚Äî time window and unit thresholds?
-4. **Low stock** ‚Äî always `ReorderRule.minStock`, or global default when no rule?
-5. **Stock valuation** ‚Äî `costPrice`, `price`, or weighted average?
-6. **Stock aging** ‚Äî age from last receipt only; what if no movement history?
-7. **Ready stock orders** ‚Äî definition?
-8. **RX report** ‚Äî include photo prescription orders?
-9. **Export** ‚Äî CSV only, or Excel too, for v1?
+1. **Profit & margin** ó exact formula (sales - purchase cost only? include procurement expenses, credit notes, returns)?
+2. **Sales date basis** ó invoice `issuedAt` vs order `createdAt` vs payment date?
+3. **Fast / slow / dead / unsold** ó time window and unit thresholds?
+4. **Low stock** ó always `ReorderRule.minStock`, or global default when no rule?
+5. **Stock valuation** ó `costPrice`, `price`, or weighted average?
+6. **Stock aging** ó age from last receipt only; what if no movement history?
+7. **Ready stock orders** ó definition?
+8. **RX report** ó include photo prescription orders?
+9. **Export** ó CSV only, or Excel too, for v1?
 
 ### Acceptance (module-level)
 
@@ -339,31 +339,31 @@ Ship P1 even if open questions for P4 are unanswered.
 - [ ] GST Summary remains available and matches current finance report numbers
 - [ ] Inventory reserved/available reports match order-inventory semantics
 - [ ] Unknown report keys fail cleanly; unauthorized roles blocked
-- [ ] P2‚ÄìP4 either shipped or explicitly blocked on documented open questions (no silent fake thresholds)
+- [ ] P2ñP4 either shipped or explicitly blocked on documented open questions (no silent fake thresholds)
 
 ### Suggested first PR
 
-Reports hub + registry + migrate GST + 2‚Äì3 P1 reports (e.g. outstanding customers, pending orders, daily sales) to prove the pattern; then fill the catalog phase by phase.
+Reports hub + registry + migrate GST + 2ñ3 P1 reports (e.g. outstanding customers, pending orders, daily sales) to prove the pattern; then fill the catalog phase by phase.
 
 ---
 
-## RW-07 ‚Äî Client registration form: most fields optional
+## RW-07 ó Client registration form: most fields optional
 
 ### Type
 
-Change ‚Äî customer signup / onboarding (web + mobile + API)
+Change ó customer signup / onboarding (web + mobile + API)
 
 ### Depends on
 
-**Start only after RW-04 is finished.** RW-04 owns incomplete/abandoned Clients visibility and admin status changes. This task must not redesign that flow ‚Äî it relies on it (sparse signups land in incomplete; GST-complete stay in pending-ready).
+**Start only after RW-04 is finished.** RW-04 owns incomplete/abandoned Clients visibility and admin status changes. This task must not redesign that flow ó it relies on it (sparse signups land in incomplete; GST-complete stay in pending-ready).
 
 ### Goal
 
-Relax customer registration so **only name, email, and contact (mobile)** are required at minimum (password remains required for auth). Shop/business, GST, billing, and shipping fields become optional. Users who skip or leave blanks still exist as customers and are managed through the **RW-04** incomplete / status paths ‚Äî do not invent a parallel approval model.
+Relax customer registration so **only name, email, and contact (mobile)** are required at minimum (password remains required for auth). Shop/business, GST, billing, and shipping fields become optional. Users who skip or leave blanks still exist as customers and are managed through the **RW-04** incomplete / status paths ó do not invent a parallel approval model.
 
 ### Current state
 
-DB `User` columns for business/GST/addresses are already mostly nullable. Signup API still requires **business name** in addition to name/email/mobile/password. Web and mobile wizards (`business-info` ‚Üí `gst-details` ‚Üí `registration-addresses`) mark almost every field required. `POST /api/auth/gst` rejects unless the full business + GST + billing + shipping set is present. Frontend-only loosening is not enough ‚Äî sparse submit gets **400** from the API today.
+DB `User` columns for business/GST/addresses are already mostly nullable. Signup API still requires **business name** in addition to name/email/mobile/password. Web and mobile wizards (`business-info` ? `gst-details` ? `registration-addresses`) mark almost every field required. `POST /api/auth/gst` rejects unless the full business + GST + billing + shipping set is present. Frontend-only loosening is not enough ó sparse submit gets **400** from the API today.
 
 ### Scope (in)
 
@@ -371,41 +371,41 @@ DB `User` columns for business/GST/addresses are already mostly nullable. Signup
 - Make remaining signup/wizard fields optional on **website**, **mobile**, and **backend** (`POST /api/auth/signup`, `POST /api/auth/gst`)
 - Validate GSTIN/PAN format only when those values are provided
 - Preserve existing wizard steps/flow shape where practical (optional/skippable fields, not a greenfield onboarding redesign)
-- Align with RW-04: no GST / mid-wizard abandon ‚Üí **incomplete**; with GST ‚Üí existing **pending-ready** approve path; no change to RW-04 status model
+- Align with RW-04: no GST / mid-wizard abandon ? **incomplete**; with GST ? existing **pending-ready** approve path; no change to RW-04 status model
 
 ### Out of scope
 
-- Changing RW-04 (incomplete tab, loyalty filters, admin status transitions) ‚Äî consume it as-is
+- Changing RW-04 (incomplete tab, loyalty filters, admin status transitions) ó consume it as-is
 - Admin create-customer form (unless a tiny hook is required)
 - Invoice/GST tax-type product rules beyond accepting sparse profiles
 - Forcing profile completion before first order (unless product later requires it)
 
 ---
 
-## RW-08 ‚Äî Procurement: Purchase Order ‚Üí receive ‚Üí close (power-wise)
+## RW-08 ó Procurement: Purchase Order ? receive ? close (power-wise)
 
 ### Type
 
-New module / change ‚Äî admin procurement (Purchase Order lifecycle on top of existing reorder)
+New module / change ó admin procurement (Purchase Order lifecycle on top of existing reorder)
 
 ### Audience note (for humans + AI)
 
-This is the **single procurement PO task**. Implement against **this document + the client procurement PDF** (share the PDF with screenshots). Below, **PDF UI references** describe what each screenshot looks like so you know which mock is for which step ‚Äî match layout/intent; use existing DrishX admin UI components (do not pixel-copy a foreign sidebar).
+This is the **single procurement PO task**. Implement against **this document + the client procurement PDF** (share the PDF with screenshots). Below, **PDF UI references** describe what each screenshot looks like so you know which mock is for which step ó match layout/intent; use existing DrishX admin UI components (do not pixel-copy a foreign sidebar).
 
-**SKU:** treat today‚Äôs catalog leaf as the SKU ‚Äî `lensType` + `lensId` (power row). Do **not** build a new SKU master table as a prerequisite. Product/range labels on screens are display fields derived from the lens row / product tree.
+**SKU:** treat todayís catalog leaf as the SKU ó `lensType` + `lensId` (power row). Do **not** build a new SKU master table as a prerequisite. Product/range labels on screens are display fields derived from the lens row / product tree.
 
 ### Goal
 
-Deliver the full admin **Purchase Order** path the client described: power-wise threshold/target ‚Üí manual **Run reorder** (keep) ‚Üí generate **PO** (draft ‚Üí review ‚Üí approve/open ‚Üí sent) ‚Üí **Receive goods** (supplier bill + power-wise Excel) ‚Üí validate ‚Üí reconcile (power-wise + range-wise) ‚Üí resolve exceptions ‚Üí **Confirm Receipt** (only then stock updates) ‚Üí close outstanding with reasons ‚Üí PO closed. While a PO is open for a given power, **never** create another PO for that same power. Reorder may raise that power again **only after** the PO is closed.
+Deliver the full admin **Purchase Order** path the client described: power-wise threshold/target ? manual **Run reorder** (keep) ? generate **PO** (draft ? review ? approve/open ? sent) ? **Receive goods** (supplier bill + power-wise Excel) ? validate ? reconcile (power-wise + range-wise) ? resolve exceptions ? **Confirm Receipt** (only then stock updates) ? close outstanding with reasons ? PO closed. While a PO is open for a given power, **never** create another PO for that same power. Reorder may raise that power again **only after** the PO is closed.
 
-### Current state (what already exists ‚Äî reuse)
+### Current state (what already exists ó reuse)
 
 | Exists today | Where | Keep? |
 |--------------|--------|--------|
-| Power-wise reorder rules (`minStock` / `targetStock` per lens row) | `ReorderRule`, `/inventory/power-wise-stock` | **Yes** ‚Äî extend UI toward matrix |
-| Manual run reorder (creates demand, not money) | `POST /api/inventory/reorder-check`, Run button | **Yes ‚Äî do not remove / do not auto-PO at EOD** |
-| Demand rows | `ProcurementRequest` + `/procurement/requests` approve/cancel | **Yes** ‚Äî feed ‚ÄúAdd from Reorder Queue‚Äù into PO |
-| Available / reserved / incoming math | `app/lib/procurement-requests.ts`, `procurement-rules.ts` | **Yes** ‚Äî change `incoming` to count **open PO** qty (not only open requests) once POs exist |
+| Power-wise reorder rules (`minStock` / `targetStock` per lens row) | `ReorderRule`, `/inventory/power-wise-stock` | **Yes** ó extend UI toward matrix |
+| Manual run reorder (creates demand, not money) | `POST /api/inventory/reorder-check`, Run button | **Yes ó do not remove / do not auto-PO at EOD** |
+| Demand rows | `ProcurementRequest` + `/procurement/requests` approve/cancel | **Yes** ó feed ìAdd from Reorder Queueî into PO |
+| Available / reserved / incoming math | `app/lib/procurement-requests.ts`, `procurement-rules.ts` | **Yes** ó change `incoming` to count **open PO** qty (not only open requests) once POs exist |
 | Thin suppliers + finance purchase bills | `Supplier`, `PurchaseBill`, `/finance/purchases` | Reuse/enrich; client said current purchases page feels incomplete |
 
 **Missing today:** `PurchaseOrder` entity, create/review/approve/sent UI, receive wizard, bill+Excel validation, reconciliations, Confirm Receipt stock post, close-outstanding reasons, open-PO duplicate guard.
@@ -414,7 +414,7 @@ Deliver the full admin **Purchase Order** path the client described: power-wise 
 
 **Do**
 
-1. Keep **manual Run reorder** ‚Äî admin clicks Run; system raises requirements; humans build/approve POs.
+1. Keep **manual Run reorder** ó admin clicks Run; system raises requirements; humans build/approve POs.
 2. Work **power-wise** everywhere (stock, reorder, PO lines, receive Excel, short/extra). Range is a grouping/display/bill consolidation layer.
 3. Show **current stock non-editable**; threshold + target editable (matrix cells: `Current / Threshold / Target`; red when current &lt; threshold).
 4. On Run / next PO generation: include **available**, **reserved**, and **qty already on open (not closed) POs** for that power.
@@ -429,36 +429,36 @@ Deliver the full admin **Purchase Order** path the client described: power-wise 
 2. Do not treat range-level stock as the source of truth (bills may consolidate by range; software stock is power-wise).
 3. Do not rewrite the lens catalog / new SKU master as part of this RW (separate catalog work later).
 4. Do not block on RW-06 reports; inventory *reports* are separate from this *ops* module.
-5. Do not implement full QC quarantine / put-away / client allocation warehouse WMS from the PDF flowchart end ‚Äî out of scope for v1 (stock becomes available on Confirm Receipt unless product later asks for QC gate).
-6. Do not hardcode a single warehouse forever without an abstraction ‚Äî use a **Main Warehouse** stub + customizable warehouse option for future multi-warehouse.
+5. Do not implement full QC quarantine / put-away / client allocation warehouse WMS from the PDF flowchart end ó out of scope for v1 (stock becomes available on Confirm Receipt unless product later asks for QC gate).
+6. Do not hardcode a single warehouse forever without an abstraction ó use a **Main Warehouse** stub + customizable warehouse option for future multi-warehouse.
 
 ### Target end-to-end flow
 
 ```
 Reorder rules (threshold/target per power)
-  ‚Üí Stock monitoring / Run reorder (manual)
-  ‚Üí Purchase requirements (ProcurementRequest ‚Äî keep)
-  ‚Üí Create PO (add from reorder queue / import / search)
-  ‚Üí Review ‚Üí Approve ‚Üí PO OPEN / Sent to supplier
-  ‚Üí Receive shipment (upload Bill PDF + Power-wise Excel)
-  ‚Üí Validate documents ‚Üí Reconcile (power + range)
-  ‚Üí Resolve exceptions (short/extra/damaged; keep open vs close)
-  ‚Üí Confirm Receipt ‚Üí stock += accepted received
-  ‚Üí Close outstanding (reasons) ‚Üí PO CLOSED
-  ‚Üí Only then can Run reorder raise that power again
+  ? Stock monitoring / Run reorder (manual)
+  ? Purchase requirements (ProcurementRequest ó keep)
+  ? Create PO (add from reorder queue / import / search)
+  ? Review ? Approve ? PO OPEN / Sent to supplier
+  ? Receive shipment (upload Bill PDF + Power-wise Excel)
+  ? Validate documents ? Reconcile (power + range)
+  ? Resolve exceptions (short/extra/damaged; keep open vs close)
+  ? Confirm Receipt ? stock += accepted received
+  ? Close outstanding (reasons) ? PO CLOSED
+  ? Only then can Run reorder raise that power again
 ```
 
 ### Phases (implement in order)
 
-#### Phase A ‚Äî PO core + open-PO guard
+#### Phase A ó PO core + open-PO guard
 
 **Build**
 
 - Data model: `PurchaseOrder`, `PurchaseOrderLine` (power = `lensType`+`lensId`, product/range labels, required qty, PO qty, rate optional, amounts).
-- Statuses at least: `DRAFT` ‚Üí `PENDING_APPROVAL` ‚Üí `OPEN` / `SENT` ‚Üí `PARTIALLY_RECEIVED` ‚Üí `CLOSED` / `CANCELLED` (names can match Prisma enums; intent matters).
-- UI: **Create Purchase Order** wizard (Select Items ‚Üí Review ‚Üí Approve).
+- Statuses at least: `DRAFT` ? `PENDING_APPROVAL` ? `OPEN` / `SENT` ? `PARTIALLY_RECEIVED` ? `CLOSED` / `CANCELLED` (names can match Prisma enums; intent matters).
+- UI: **Create Purchase Order** wizard (Select Items ? Review ? Approve).
 - Header fields: Supplier (dropdown), Expected Delivery (date), Warehouse (Main + extensible).
-- Lines table: Product, Range, Power, Required, PO Qty (editable), Rate (‚Çπ, may be empty), Amount.
+- Lines table: Product, Range, Power, Required, PO Qty (editable), Rate (?, may be empty), Amount.
 - Actions: Add from Reorder Queue, Import Excel (optional in A), Search product/power, Add row, Save Draft, Next Review, Approve.
 - PO detail: status badge, Download PDF / Download Excel, Approve; tabs Details / Items / Documents / History (Documents/History can be thin in A).
 - After approve: acknowledgement **PO Sent to Supplier** (downloads + optional Send via Email can be stub or real SMTP later).
@@ -466,18 +466,18 @@ Reorder rules (threshold/target per power)
 
 **Done when:** Admin can create a draft PO from reorder queue, approve it open, and Run reorder **does not** double-order the same open powers.
 
-#### Phase B ‚Äî Receive, validate, reconcile, confirm, close
+#### Phase B ó Receive, validate, reconcile, confirm, close
 
 **Build**
 
-- From PO (status OPEN/SENT): **Receive Shipment** ‚Üí Receive Goods wizard: Select PO ‚Üí Upload Documents ‚Üí Validate ‚Üí Reconcile ‚Üí Confirm.
-- Uploads (both required for happy path): **Supplier Bill** (PDF/image) + **Power-wise Excel** (client will provide template ‚Äî code to a documented template shape).
+- From PO (status OPEN/SENT): **Receive Shipment** ? Receive Goods wizard: Select PO ? Upload Documents ? Validate ? Reconcile ? Confirm.
+- Uploads (both required for happy path): **Supplier Bill** (PDF/image) + **Power-wise Excel** (client will provide template ó code to a documented template shape).
 - Optional shipment meta: Supplier, PO, Dispatch Date, Courier, AWB/Tracking, Package Count (from PDF receive mock).
-- **Document Validation:** checks (supplier/product/SKU/PO match, duplicates, format, qty ‚â§ ordered warnings); summary Valid / Warnings / Errors; View Exceptions; Next Reconcile.
+- **Document Validation:** checks (supplier/product/SKU/PO match, duplicates, format, qty = ordered warnings); summary Valid / Warnings / Errors; View Exceptions; Next Reconcile.
 - **Receipt Reconciliation (power-wise):** tabs All / Matched / Short / Extra / Invalid; columns Ordered, Received, Accepted, Short, Status, Action (e.g. Keep Pending, Mark Damaged).
 - **Range-wise Reconciliation:** Bill Qty vs Excel Qty per product+range; Matched / Mismatch; resolve mismatch (bill correction / Excel correction / accept Excel & flag invoice / keep pending).
 - Buttons on reconcile screen: **Save as Draft** (nothing posted), **Resolve Exceptions** (only if discrepancies), **Confirm Receipt**, **Cancel** (no changes).
-- **Confirm Receipt** dialog must state e.g. ‚ÄúN units will be added to stock. M units remain outstanding against PO #‚Ä¶. Bill quantity reconciled. Continue?‚Äù ‚Äî only on Confirm post stock + attach bill into purchase management.
+- **Confirm Receipt** dialog must state e.g. ìN units will be added to stock. M units remain outstanding against PO #Ö. Bill quantity reconciled. Continue?î ó only on Confirm post stock + attach bill into purchase management.
 - **Close Outstanding Quantity** with reasons:
   - Supplier unable to supply
   - Supplier discontinued item
@@ -485,18 +485,18 @@ Reorder rules (threshold/target per power)
   - Commercial disagreement
   - Buyer cancellation
   - Other  
-  Then Ordered / Received / Cancelled; PO can close. Exception screen options (Keep Open / Close Shortage / Create Supplier Claim / Request Replacement) ‚Äî claims/replacement may be stubbed; **Keep Open** and **Close Shortage** must work. Options need not be mutually exclusive where PDF says so.
-- Manual PDF bill upload in purchase management (outside PO path) for bills without usable ranges ‚Äî minimum viable.
+  Then Ordered / Received / Cancelled; PO can close. Exception screen options (Keep Open / Close Shortage / Create Supplier Claim / Request Replacement) ó claims/replacement may be stubbed; **Keep Open** and **Close Shortage** must work. Options need not be mutually exclusive where PDF says so.
+- Manual PDF bill upload in purchase management (outside PO path) for bills without usable ranges ó minimum viable.
 
 **Done when:** Partial receive + confirm updates stock correctly; outstanding can be closed with reason; closed PO allows reorder again; open PO still blocks duplicate PO for that power.
 
-#### Phase C ‚Äî Matrix UX + supplier polish
+#### Phase C ó Matrix UX + supplier polish
 
 **Build**
 
-- Power matrix for threshold/target (and/or stock view): product title + range subtitle; SPH√óCYL grid; cell `Current / Threshold / Target`; below-threshold highlighted; current not editable.
-- Navigation/filters so ~800 ranges are usable (product bifurcations ‚Äî type / index / coating / search). Reuse patterns from power-wise stock + catalog filters where possible.
-- Richer **supplier profile** (business entity, GST, addresses, phone, contact person) ‚Äî closer to client profile depth.
+- Power matrix for threshold/target (and/or stock view): product title + range subtitle; SPH◊CYL grid; cell `Current / Threshold / Target`; below-threshold highlighted; current not editable.
+- Navigation/filters so ~800 ranges are usable (product bifurcations ó type / index / coating / search). Reuse patterns from power-wise stock + catalog filters where possible.
+- Richer **supplier profile** (business entity, GST, addresses, phone, contact person) ó closer to client profile depth.
 - Fill gaps: email send PO, full Documents/History tabs, Import Excel on create PO if deferred from A.
 
 **Done when:** Matrix editing is usable for day-to-day reorder setup; suppliers are proper profiles.
@@ -507,25 +507,25 @@ Use the client procurement PDF images as layout/intent references. Finder phrase
 
 | # | What the image shows (find this in the PDF) | Use for |
 |---|---------------------------------------------|---------|
-| 1 | **Title-like product header** e.g. ‚ÄúPrime BRC HC‚Äù, subtitle **Range: -0.25 to -2.00**; **SPH √ó CYL matrix**; each cell three numbers **`Current / Threshold / Target`**; legend; **red/pink cells** when below threshold | Phase C matrix; also explain power-wise thresholds |
-| 2 | Small **example table**: Product, SKU, Power, Current Stock, Threshold, Target Stock (e.g. Air Smart BRC 1.61) ‚Äî some rows below threshold | Reorder calc examples; SKU=power leaf |
-| 3 | Screen **‚ÄúCreate Purchase Order‚Äù**; stepper **Select Items ‚Üí Review & Edit ‚Üí Approve**; fields Supplier / Expected Delivery / Warehouse; buttons **Add from Reorder Queue**, **Import Excel**, search; line table Product/Range/Power/Required/PO Qty/Rate/Amount; totals; **Save Draft** + **Next: Review** | Phase A create wizard |
+| 1 | **Title-like product header** e.g. ìPrime BRC HCî, subtitle **Range: -0.25 to -2.00**; **SPH ◊ CYL matrix**; each cell three numbers **`Current / Threshold / Target`**; legend; **red/pink cells** when below threshold | Phase C matrix; also explain power-wise thresholds |
+| 2 | Small **example table**: Product, SKU, Power, Current Stock, Threshold, Target Stock (e.g. Air Smart BRC 1.61) ó some rows below threshold | Reorder calc examples; SKU=power leaf |
+| 3 | Screen **ìCreate Purchase Orderî**; stepper **Select Items ? Review & Edit ? Approve**; fields Supplier / Expected Delivery / Warehouse; buttons **Add from Reorder Queue**, **Import Excel**, search; line table Product/Range/Power/Required/PO Qty/Rate/Amount; totals; **Save Draft** + **Next: Review** | Phase A create wizard |
 | 4 | Screen **PO number** e.g. `PO-2025-00481` + badge **Pending Approval**; buttons Download PDF / Download Excel / **Approve**; tabs Details / Items / Documents / History; meta supplier/warehouse/dates/totals; items table | Phase A review/approve detail |
-| 5 | Screen **‚ÄúPO Sent to Supplier‚Äù** + green **Sent** badge; text that PO was sent; Download PDF/Excel; **Send via Email**; Supplier Details card (name, email, phone, contact) | Phase A post-approve ack |
-| 6 | Flow mock: PO status **Acknowledged**, Ordered/Received/Outstanding, button **[ Receive Shipment ]** ‚Üí **Shipment Details** with courier/AWB fields + **Upload Stock Excel** + **Upload Supplier Bill** | Phase B entry into receive |
-| 7 | Screen **‚ÄúReceive Goods‚Äù**; stepper **Select PO ‚Üí Upload Documents ‚Üí Validate ‚Üí Reconcile ‚Üí Confirm**; PO dropdown + Ordered/Previously Received/Remaining; two upload tiles **Supplier Bill** + **Power-wise Excel**; **Validate Documents ‚Üí** | Phase B upload step |
-| 8 | Pair of UIs: **‚ÄúDocument Validation‚Äù** checklist (Valid / Warnings) + counts; and **‚ÄúReceipt Reconciliation‚Äù** with tabs All/Matched/**Short**/Extra/Invalid; table Ordered/Received/Accepted/Short/Status/Action (Keep Pending, Mark Damaged) | Phase B validate + power reconcile |
-| 9 | Tables: PO ordered powers ‚Üí Supplier Excel received ‚Üí **DrishX calculates** Ordered/Received/**Short** (e.g. short 6 on one power) | Phase B short math |
-| 10 | **‚ÄúRange-wise Reconciliation‚Äù** table Product/Range/Bill Qty/Excel Qty/Difference/Status Matched\|Mismatch; side panel **Quantity Mismatch** with radio resolutions | Phase B range reconcile |
-| 11 | Spec block **¬ß20 After Upload** summary (PO qty vs Excel vs Bill vs Short) + power-wise table with ‚úì / ‚ö†; **¬ß21 buttons**: Save as Draft, Resolve Exceptions, Confirm Receipt, Cancel | Phase B reconcile actions |
-| 12 | **¬ß22 Exception Screen** ‚Äî ‚ÄúShort Receipt Detected‚Äù; PO/Received/Short box; actions Keep Open / Close Shortage / Create Supplier Claim / Request Replacement; note actions need not be mutually exclusive | Phase B exceptions |
-| 13 | Text NOTE on **Confirm Receipt** dialog copy + **Close Outstanding Quantity** reason list + Ordered/Received/Cancelled ‚Üí PO close ‚Üí reorder only after close; open-PO no duplicate | Phase B hard rules (also in Hard rules above) |
-| 14 | ASCII/flowchart: Reorder rule ‚Üí ‚Ä¶ ‚Üí PO ‚Üí Sent ‚Üí Stock Excel + Bill ‚Üí Receiving/Validation/Reconciliation ‚Üí Match/Short/Excess ‚Üí Confirm Receipt ‚Üí (QC‚Ä¶) ‚Üí Available | Overall architecture; **stop before full WMS/QC** unless later scoped |
+| 5 | Screen **ìPO Sent to Supplierî** + green **Sent** badge; text that PO was sent; Download PDF/Excel; **Send via Email**; Supplier Details card (name, email, phone, contact) | Phase A post-approve ack |
+| 6 | Flow mock: PO status **Acknowledged**, Ordered/Received/Outstanding, button **[ Receive Shipment ]** ? **Shipment Details** with courier/AWB fields + **Upload Stock Excel** + **Upload Supplier Bill** | Phase B entry into receive |
+| 7 | Screen **ìReceive Goodsî**; stepper **Select PO ? Upload Documents ? Validate ? Reconcile ? Confirm**; PO dropdown + Ordered/Previously Received/Remaining; two upload tiles **Supplier Bill** + **Power-wise Excel**; **Validate Documents ?** | Phase B upload step |
+| 8 | Pair of UIs: **ìDocument Validationî** checklist (Valid / Warnings) + counts; and **ìReceipt Reconciliationî** with tabs All/Matched/**Short**/Extra/Invalid; table Ordered/Received/Accepted/Short/Status/Action (Keep Pending, Mark Damaged) | Phase B validate + power reconcile |
+| 9 | Tables: PO ordered powers ? Supplier Excel received ? **DrishX calculates** Ordered/Received/**Short** (e.g. short 6 on one power) | Phase B short math |
+| 10 | **ìRange-wise Reconciliationî** table Product/Range/Bill Qty/Excel Qty/Difference/Status Matched\|Mismatch; side panel **Quantity Mismatch** with radio resolutions | Phase B range reconcile |
+| 11 | Spec block **ß20 After Upload** summary (PO qty vs Excel vs Bill vs Short) + power-wise table with ? / ?; **ß21 buttons**: Save as Draft, Resolve Exceptions, Confirm Receipt, Cancel | Phase B reconcile actions |
+| 12 | **ß22 Exception Screen** ó ìShort Receipt Detectedî; PO/Received/Short box; actions Keep Open / Close Shortage / Create Supplier Claim / Request Replacement; note actions need not be mutually exclusive | Phase B exceptions |
+| 13 | Text NOTE on **Confirm Receipt** dialog copy + **Close Outstanding Quantity** reason list + Ordered/Received/Cancelled ? PO close ? reorder only after close; open-PO no duplicate | Phase B hard rules (also in Hard rules above) |
+| 14 | ASCII/flowchart: Reorder rule ? Ö ? PO ? Sent ? Stock Excel + Bill ? Receiving/Validation/Reconciliation ? Match/Short/Excess ? Confirm Receipt ? (QCÖ) ? Available | Overall architecture; **stop before full WMS/QC** unless later scoped |
 
 ### Scope (in)
 
 - Admin panel only (backend APIs + admin UI)
-- Phases A ‚Üí B ‚Üí C as above
+- Phases A ? B ? C as above
 - Reuse Run reorder + `ProcurementRequest` + lens stock rows
 - Open-PO duplicate suppression; Confirm-only stock post; close outstanding with reasons
 - Warehouse stub with room to grow; supplier dropdown + profile enrichment (C)
@@ -559,14 +559,14 @@ Use the client procurement PDF images as layout/intent references. Finder phrase
 2. Exact Prisma status enum names / whether `SENT` is separate from `OPEN`.
 3. Whether **Send via Email** must be live in v1 or stub.
 4. Whether **Create Supplier Claim / Request Replacement** need full modules or UI stubs in B.
-5. QC step before stock available ‚Äî default for this RW: **stock available on Confirm Receipt**.
+5. QC step before stock available ó default for this RW: **stock available on Confirm Receipt**.
 
 ### Acceptance
 
 - [ ] Run reorder still manual; still creates/updates demand without auto-PO
-- [ ] Admin can create draft PO from reorder queue, review, approve ‚Üí open/sent
+- [ ] Admin can create draft PO from reorder queue, review, approve ? open/sent
 - [ ] Open PO qty for a power blocks a second PO for that power
-- [ ] Receive: bill + Excel ‚Üí validate ‚Üí reconcile ‚Üí Confirm Receipt posts stock once
+- [ ] Receive: bill + Excel ? validate ? reconcile ? Confirm Receipt posts stock once
 - [ ] Partial short: Keep Open vs Close Outstanding with reason; closed PO allows reorder again
 - [ ] Range-wise bill vs Excel mismatch can be reviewed/resolved
 - [ ] Matrix (Phase C) shows Current/Threshold/Target with below-threshold highlight; current not editable
@@ -574,39 +574,39 @@ Use the client procurement PDF images as layout/intent references. Finder phrase
 
 ### Suggested first PR
 
-Phase A only: `PurchaseOrder` schema + create/review/approve UI + reorder `incoming` from open PO lines + ‚ÄúAdd from Reorder Queue‚Äù. Then Phase B receive/confirm/close. Phase C matrix + supplier profile.
+Phase A only: `PurchaseOrder` schema + create/review/approve UI + reorder `incoming` from open PO lines + ìAdd from Reorder Queueî. Then Phase B receive/confirm/close. Phase C matrix + supplier profile.
 
 ---
 
-## RW-09 ‚Äî Products & catalog: admin product master + ranges ‚Üí powers
+## RW-09 ó Products & catalog: admin product master + ranges ? powers
 
 ### Type
 
-New module / change ‚Äî admin **Products & catalog** (product master, ranges, power generation, archive/hold)
+New module / change ó admin **Products & catalog** (product master, ranges, power generation, archive/hold)
 
 ### Audience note (for humans + AI)
 
-This is the **single Products & catalog task**. Implement against **this document + Sep 28 meeting notes** (product tree, range ‚Üí matrix, overlap errors, archive/hold). Client also shared a **Tech / competitor video** as UI inspiration ‚Äî use as **reference only**, do not clone blindly.
+This is the **single Products & catalog task**. Implement against **this document + Sep 28 meeting notes** (product tree, range ? matrix, overlap errors, archive/hold). Client also shared a **Tech / competitor video** as UI inspiration ó use as **reference only**, do not clone blindly.
 
-**SKU:** a sellable unit remains one catalog **power leaf**: `lensType` + `lensId` (row in `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` / ‚Ä¶). This RW builds the **admin way to define products and generate those leaves**. Do **not** invent a second stock system or require a greenfield SKU master table that breaks existing `Order.lensId` FKs.
+**SKU:** a sellable unit remains one catalog **power leaf**: `lensType` + `lensId` (row in `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` / Ö). This RW builds the **admin way to define products and generate those leaves**. Do **not** invent a second stock system or require a greenfield SKU master table that breaks existing `Order.lensId` FKs.
 
 **Relation to RW-08:** Procurement PO/reorder consumes existing power leaves. Catalog makes creating and navigating products/ranges sane. RW-08 Phase A/B can ship without this; RW-08 Phase C matrix UX benefits from catalog filters. Prefer coordinating product identity (brand/category/coating labels) so PO lines and matrices show the same names.
 
 ### Goal
 
-Replace the empty **Products & catalog** admin page with a real product-master workflow: define a product (lens type ‚Üí attributes ‚Üí coatings/index/brand) ‚Üí attach **ranges** (e.g. ‚àí6√ó2, ‚àí6√ó4) ‚Üí system **auto-generates** the power-wise SKU matrix for that range ‚Üí **reject overlapping ranges** on the same product with a clear error and suggested correction ‚Üí **archive / hold** so products can be hidden from shop and ops. Admins must be able to navigate a large tree (hundreds of ranges / tens of thousands of powers) via categorization and search.
+Replace the empty **Products & catalog** admin page with a real product-master workflow: define a product (lens type ? attributes ? coatings/index/brand) ? attach **ranges** (e.g. -6◊2, -6◊4) ? system **auto-generates** the power-wise SKU matrix for that range ? **reject overlapping ranges** on the same product with a clear error and suggested correction ? **archive / hold** so products can be hidden from shop and ops. Admins must be able to navigate a large tree (hundreds of ranges / tens of thousands of powers) via categorization and search.
 
-### Current state (what already exists ‚Äî reuse)
+### Current state (what already exists ó reuse)
 
 | Exists today | Where | Keep / extend? |
 |--------------|--------|----------------|
-| Power-row catalog in DB | `SingleVisionLens`, `KryptokLens`, `ProgressiveLens`, `OriVisionLens`, ‚Ä¶ ‚Äî fields like `category`, `brand`, `item`, `index`, `coating`, `sph`/`cyl`/ranges, `quantity`, `price`, `isDisabled` | **Yes** ‚Äî leaves stay the stock source of truth |
+| Power-row catalog in DB | `SingleVisionLens`, `KryptokLens`, `ProgressiveLens`, `OriVisionLens`, Ö ó fields like `category`, `brand`, `item`, `index`, `coating`, `sph`/`cyl`/ranges, `quantity`, `price`, `isDisabled` | **Yes** ó leaves stay the stock source of truth |
 | Shop / wholesale / mobile already sell these rows | lenses APIs, website, mobile | **Do not break** listing/order resolution |
-| Admin browse stock by category ‚Üí line ‚Üí products | `/inventory/stock-overview` | Reuse patterns; catalog page should own **create/manage**, not only browse |
+| Admin browse stock by category ? line ? products | `/inventory/stock-overview` | Reuse patterns; catalog page should own **create/manage**, not only browse |
 | Product line + coating filter chips | `CatalogProductLine`, `CoatingFilterLabel`; sheets in stock-overview | Reuse for filters/labels; may wire into create wizard |
-| Create **one** lens row via API | `POST /api/lenses/single-vision` (etc.), `app/lib/admin-create-lens.ts` | Keep for edits/edge cases; **not** sufficient for ‚Äúadd ‚àí6√ó2 ‚Üí explode matrix‚Äù |
+| Create **one** lens row via API | `POST /api/lenses/single-vision` (etc.), `app/lib/admin-create-lens.ts` | Keep for edits/edge cases; **not** sufficient for ìadd -6◊2 ? explode matrixî |
 | Selectable-range helpers (shop) | `app/lib/lens-power-range.ts` | Reuse power-step / range math when generating cells |
-| **Products & catalog** nav page | `/inventory/products-catalog` | **Placeholder ‚ÄúComing soon‚Äù** ‚Äî this RW fills it |
+| **Products & catalog** nav page | `/inventory/products-catalog` | **Placeholder ìComing soonî** ó this RW fills it |
 
 **Missing today:** guided product create UI; range attach that **bulk-creates** all powers; overlap validation with suggestions; product-level archive/hold that hides everywhere consistently; full progressive/kryptok attribute wizard parity.
 
@@ -614,13 +614,13 @@ Replace the empty **Products & catalog** admin page with a real product-master w
 
 From **28 Sep** client discussion (summarized):
 
-1. Catalog hierarchy conceptually: **lens type** (Single Vision / Kryptok / Progressive / ‚Ä¶) ‚Üí **kind / material** (e.g. hardcoat, blue cut, poly, tintable, PG, PG poly) ‚Üí **index** (1.49, 1.56, 1.61, 1.67, 1.74, ‚Ä¶) ‚Üí **coatings** (green, blue, magenta, LR, dual, gold, ‚Ä¶) ‚Üí **ranges**.
-2. Creating a product + range (e.g. blue cut SV 1.56 green, range ‚àí6√ó2) should **generate a matrix** of powers for that range.
-3. Ranges are named like ‚àí6√ó2, ‚àí6√ó4, ‚àí8√ó2, ‚àí8√ó4, ‚àí10√ó2, ‚àí12√ó2 (general range helper OK).
+1. Catalog hierarchy conceptually: **lens type** (Single Vision / Kryptok / Progressive / Ö) ? **kind / material** (e.g. hardcoat, blue cut, poly, tintable, PG, PG poly) ? **index** (1.49, 1.56, 1.61, 1.67, 1.74, Ö) ? **coatings** (green, blue, magenta, LR, dual, gold, Ö) ? **ranges**.
+2. Creating a product + range (e.g. blue cut SV 1.56 green, range -6◊2) should **generate a matrix** of powers for that range.
+3. Ranges are named like -6◊2, -6◊4, -8◊2, -8◊4, -10◊2, -12◊2 (general range helper OK).
 4. **SV:** spherical + cylinder (plus/minus); no axis/add. **Kryptok:** additions + axis-style components. **Progressive:** eye / axis / addition extras.
-5. **Overlap forbidden:** if ‚àí6√ó2 already covers ‚àí5‚Ä¶‚àí6 band, creating ‚àí8√ó2 that accidentally includes ‚àí5‚Ä¶‚àí6 must error and **suggest** the correct non-overlapping bounds (price bands differ by range ‚Äî that is why ranges are separate products/slices).
+5. **Overlap forbidden:** if -6◊2 already covers -5Ö-6 band, creating -8◊2 that accidentally includes -5Ö-6 must error and **suggest** the correct non-overlapping bounds (price bands differ by range ó that is why ranges are separate products/slices).
 6. **Archive / Hold:** holding a product makes it **not visible** on relevant screens (shop + admin lists as applicable).
-7. Scale: ~200 products √ó ‚â•4 ranges ‚âà 800+ ranges; 6√ó4 matrix √ó 800 ‚âà ~19k powers minimum ‚Äî UI must filter/bifurcate, not dump one giant page.
+7. Scale: ~200 products ◊ =4 ranges ò 800+ ranges; 6◊4 matrix ◊ 800 ò ~19k powers minimum ó UI must filter/bifurcate, not dump one giant page.
 
 ### Hard rules (do / do not)
 
@@ -629,81 +629,81 @@ From **28 Sep** client discussion (summarized):
 1. Keep **power-wise stock** on existing lens tables; new powers from catalog create are real DB rows with `quantity` (usually 0 until procurement receive).
 2. Generate powers with a **deterministic grid** from SPH/CYL (and ADD/axis/eye where required) start/end + step (align with existing 0.25 optical steps used in shop/wholesale).
 3. Validate **range overlap** within the same product identity (same type + brand/line + index + coating / equivalent key) before insert; return human-readable error + suggested range.
-4. Propagate **Hold / Archive / inactive** so held products do not appear in customer catalog search, wholesale grids, and (ideally) reorder product pickers ‚Äî define exact surfaces in Phase C.
+4. Propagate **Hold / Archive / inactive** so held products do not appear in customer catalog search, wholesale grids, and (ideally) reorder product pickers ó define exact surfaces in Phase C.
 5. Support **edit** of product metadata and **add additional ranges** later without recreating the whole product.
-6. Idempotent-ish create: re-running generate for an existing identical cell should not duplicate SKUs (unique natural key or upsert strategy ‚Äî document chosen approach).
+6. Idempotent-ish create: re-running generate for an existing identical cell should not duplicate SKUs (unique natural key or upsert strategy ó document chosen approach).
 7. Audit important creates/updates (product, range expand, archive) if audit helpers already cover inventory.
 
 **Do not**
 
 1. Do not replace lens tables with a new SKU master that orphans `Order` / cart / reorder FKs.
 2. Do not require finishing RW-08 before starting this (independent module); do not implement PO receive inside this RW.
-3. Do not auto-create reorder rules for every new power unless product asks ‚Äî optional hook later; default: powers exist, rules set on power-wise stock / RW-08 matrix.
+3. Do not auto-create reorder rules for every new power unless product asks ó optional hook later; default: powers exist, rules set on power-wise stock / RW-08 matrix.
 4. Do not pixel-clone the Tech video; match DrishX admin chrome.
-5. Do not delete historical power rows that are on open orders ‚Äî archive/hold instead of hard-delete when in doubt.
-6. Do not treat ‚Äúcategory string soup‚Äù as unchangeable forever ‚Äî you may introduce a clearer Product/Range model **as long as** leaves still map 1:1 to current lens rows (facade OK).
+5. Do not delete historical power rows that are on open orders ó archive/hold instead of hard-delete when in doubt.
+6. Do not treat ìcategory string soupî as unchangeable forever ó you may introduce a clearer Product/Range model **as long as** leaves still map 1:1 to current lens rows (facade OK).
 
 ### Target admin flow
 
 ```
 Products & catalog (admin)
-  ‚Üí List / search / filter products (type, index, coating, brand, active/held)
-  ‚Üí Create product
-        lens type ‚Üí kind/material ‚Üí index ‚Üí coating(s) / brand / line labels ‚Üí price defaults
-  ‚Üí Add range (SPH start/end, CYL start/end ‚Üí display name e.g. ‚àí6√ó2)
-        ‚Üí validate no overlap
-        ‚Üí Generate power matrix ‚Üí bulk insert lens rows (SKU leaves)
-  ‚Üí Preview matrix (optional) before confirm
-  ‚Üí Hold / Archive product (or range) ‚Üí hidden from shop/ops
-  ‚Üí Open product ‚Üí see ranges ‚Üí drill to powers / link to stock-overview or power-wise stock
+  ? List / search / filter products (type, index, coating, brand, active/held)
+  ? Create product
+        lens type ? kind/material ? index ? coating(s) / brand / line labels ? price defaults
+  ? Add range (SPH start/end, CYL start/end ? display name e.g. -6◊2)
+        ? validate no overlap
+        ? Generate power matrix ? bulk insert lens rows (SKU leaves)
+  ? Preview matrix (optional) before confirm
+  ? Hold / Archive product (or range) ? hidden from shop/ops
+  ? Open product ? see ranges ? drill to powers / link to stock-overview or power-wise stock
 ```
 
 ### Phases (implement in order)
 
-#### Phase A ‚Äî Page + product create + SV range ‚Üí bulk powers
+#### Phase A ó Page + product create + SV range ? bulk powers
 
 **Build**
 
 - Replace `/inventory/products-catalog` Coming soon with a real list + create flow.
 - **Product list:** filters by lens type, search by name/brand/coating/index; show active vs held; counts of ranges/powers if cheap.
-- **Create product (Single Vision first):** capture fields that map onto today‚Äôs row shape (`category`, `brand`, `item`, `index`, `coating`, default `price` / optional `costPrice`). Reuse `CatalogProductLine` / `CoatingFilterLabel` where they fit chips/dropdowns.
-- **Add range:** SPH start/end, CYL start/end (or start-range fields consistent with existing schema); derive label (‚àí6√ó2 style) for display.
-- **Generate:** expand grid ‚Üí `createMany` (or batched creates) of `SingleVisionLens` rows for each SPH√óCYL cell; set `sph`/`cyl` and range bookkeeping fields consistently with `admin-create-lens` / `lens-power-range` conventions.
+- **Create product (Single Vision first):** capture fields that map onto todayís row shape (`category`, `brand`, `item`, `index`, `coating`, default `price` / optional `costPrice`). Reuse `CatalogProductLine` / `CoatingFilterLabel` where they fit chips/dropdowns.
+- **Add range:** SPH start/end, CYL start/end (or start-range fields consistent with existing schema); derive label (-6◊2 style) for display.
+- **Generate:** expand grid ? `createMany` (or batched creates) of `SingleVisionLens` rows for each SPH◊CYL cell; set `sph`/`cyl` and range bookkeeping fields consistently with `admin-create-lens` / `lens-power-range` conventions.
 - **API:** prefer dedicated catalog endpoints (e.g. `/api/admin/catalog/products`, `.../ranges`, `.../generate`) rather than only calling single-row `createAdminLens` in a loop from the browser.
 - Keep existing one-row POST APIs working for compatibility.
 
-**Done when:** Admin can create an SV product, add ‚àí6√ó2 (or similar), and see all expected power rows in DB / stock-overview without hand-entering each power.
+**Done when:** Admin can create an SV product, add -6◊2 (or similar), and see all expected power rows in DB / stock-overview without hand-entering each power.
 
-#### Phase B ‚Äî Overlap validation + Kryptok / Progressive
+#### Phase B ó Overlap validation + Kryptok / Progressive
 
 **Build**
 
-- **Overlap engine:** before generate, compute SPH√óCYL coverage (and relevant ADD/axis/eye dimensions for non-SV) for existing ranges of that product; if intersection non-empty ‚Üí **400** with message like ‚Äúoverlaps existing ‚àí6√ó2 (‚àí6.00‚Ä¶‚àí0.25 √ó ‚Ä¶); suggested range: ‚Ä¶‚Äù (suggestion algorithm can be ‚Äútrim to nearest non-overlapping band‚Äù ‚Äî document behavior).
+- **Overlap engine:** before generate, compute SPH◊CYL coverage (and relevant ADD/axis/eye dimensions for non-SV) for existing ranges of that product; if intersection non-empty ? **400** with message like ìoverlaps existing -6◊2 (-6.00Ö-0.25 ◊ Ö); suggested range: Öî (suggestion algorithm can be ìtrim to nearest non-overlapping bandî ó document behavior).
 - **Kryptok create:** include ADD, axis (and cross where applicable) in product/range generate rules per meeting.
 - **Progressive create:** include eye, axis, ADD; respect `Eye` enum and existing progressive row shape.
-- Other families (OriVision / Magnus / Bifocal) ‚Äî include if already sold in admin; otherwise document as follow-on and do not block A/B for SV+KT+PROG.
+- Other families (OriVision / Magnus / Bifocal) ó include if already sold in admin; otherwise document as follow-on and do not block A/B for SV+KT+PROG.
 - Range list on product detail: add range, see power counts, link into stock.
 
 **Done when:** Overlapping range create fails safely with a suggestion; KT + Progressive products can be created with correct extra attributes and bulk powers.
 
-#### Phase C ‚Äî Archive / Hold + navigation + shop visibility
+#### Phase C ó Archive / Hold + navigation + shop visibility
 
 **Build**
 
-- **Hold / Archive** on product (and optionally per-range): sets inactive flags and/or `isDisabled` on member powers; product disappears from customer-facing catalog/wholesale queries and from admin ‚Äúactive‚Äù catalogs.
-- Clarify **Hold** vs **Archive** in UI copy (meeting: hold = not visible; archive may be stronger/permanent ‚Äî pick clear semantics and stick to them).
-- Bifurcation UI: type ‚Üí index ‚Üí coating / brand filters so users are not scrolling 800 matrices.
-- Optional: ‚Äúopen in power-wise stock / stock-overview‚Äù deep links filtered to that product.
+- **Hold / Archive** on product (and optionally per-range): sets inactive flags and/or `isDisabled` on member powers; product disappears from customer-facing catalog/wholesale queries and from admin ìactiveî catalogs.
+- Clarify **Hold** vs **Archive** in UI copy (meeting: hold = not visible; archive may be stronger/permanent ó pick clear semantics and stick to them).
+- Bifurcation UI: type ? index ? coating / brand filters so users are not scrolling 800 matrices.
+- Optional: ìopen in power-wise stock / stock-overviewî deep links filtered to that product.
 - Ensure inactive products do not get new customer orders; existing open orders with that `lensId` still resolve.
 
-**Done when:** Held product is hidden from shop paths used in production; admin can still find it under a ‚ÄúHeld / Archived‚Äù filter and un-hold if allowed.
+**Done when:** Held product is hidden from shop paths used in production; admin can still find it under a ìHeld / Archivedî filter and un-hold if allowed.
 
 ### Data / design notes (important for implementers)
 
-- **Product identity key (suggested):** `lensType` + brand/line + index + coating (+ category/item as needed). Exact unique key must be chosen and documented in code comments so overlap checks and ‚Äúsame product‚Äù grouping stay consistent with how stock-overview groups ‚Äúproducts‚Äù today.
-- **Facade vs new tables:** Acceptable approaches: (1) thin `CatalogProduct` / `CatalogRange` tables that point at generated lens ids, or (2) derive product grouping purely from lens field equality. Prefer (1) if overlap and hold need stable IDs without string matching ‚Äî but migrate carefully.
-- **Price:** meeting notes ranges can have different prices (‚àí6√ó2 vs ‚àí8√ó2). Store price on each leaf (as today) from range default at generate time; allow later bulk price edit as stretch.
-- **Steps:** default 0.25 D unless client specifies otherwise; exclude ‚Äúnon-selling‚Äù bonus powers only if client later asks (meeting mentioned rare compounds ‚Äî do **not** silently skip cells in v1 unless product confirms).
+- **Product identity key (suggested):** `lensType` + brand/line + index + coating (+ category/item as needed). Exact unique key must be chosen and documented in code comments so overlap checks and ìsame productî grouping stay consistent with how stock-overview groups ìproductsî today.
+- **Facade vs new tables:** Acceptable approaches: (1) thin `CatalogProduct` / `CatalogRange` tables that point at generated lens ids, or (2) derive product grouping purely from lens field equality. Prefer (1) if overlap and hold need stable IDs without string matching ó but migrate carefully.
+- **Price:** meeting notes ranges can have different prices (-6◊2 vs -8◊2). Store price on each leaf (as today) from range default at generate time; allow later bulk price edit as stretch.
+- **Steps:** default 0.25 D unless client specifies otherwise; exclude ìnon-sellingî bonus powers only if client later asks (meeting mentioned rare compounds ó do **not** silently skip cells in v1 unless product confirms).
 
 ### Scope (in)
 
@@ -721,7 +721,7 @@ Products & catalog (admin)
 - Automatically emailing suppliers or changing procurement Run button
 - Pixel-perfect clone of external Tech video
 - Hard-deleting powers that appear on historical invoices/orders
-- Customer self-serve ‚Äúrequest new product‚Äù
+- Customer self-serve ìrequest new productî
 
 ### Key code pointers
 
@@ -729,7 +729,7 @@ Products & catalog (admin)
 |------|------|
 | Empty catalog page | `app/(admin)/inventory/products-catalog/page.tsx` |
 | Stock browse / activate lines | `app/(admin)/inventory/stock-overview/page.tsx` |
-| Catalog line + coating admin API helpers | `app/lib/admin-lenses.ts`, components `catalog-product-line-sheet.tsx`, `coating-filter-label-sheet.tsx` |
+| Catalog line + coating admin API helpers | `app/lib/admin-lenses.ts`, components `catalog-product-line-modal.tsx`, `coating-filter-label-modal.tsx` |
 | Create one lens | `app/lib/admin-create-lens.ts`, `app/api/lenses/*/route.ts` |
 | Range / sibling math | `app/lib/lens-power-range.ts` |
 | Prisma leaves + labels | `SingleVisionLens`, `KryptokLens`, `ProgressiveLens`, `CatalogProductLine`, `CoatingFilterLabel` |
@@ -738,7 +738,7 @@ Products & catalog (admin)
 ### Open questions (do not block Phase A)
 
 1. Exact **product unique key** fields (brand vs category vs item) matching how sales sheets name products.
-2. Whether generate should **skip** rare 0.25 compounds (2.25/2.75 etc.) ‚Äî default **include all** until client says otherwise.
+2. Whether generate should **skip** rare 0.25 compounds (2.25/2.75 etc.) ó default **include all** until client says otherwise.
 3. Hold vs Archive: soft-hide only vs hide + block reorder rules.
 4. OriVision / Magnus / Bifocal in v1 or later.
 5. Whether a formal `CatalogProduct` table is required in A or grouping-by-fields is enough for MVP.
@@ -760,32 +760,32 @@ Phase A: real Products & catalog list + SV product create + one range generate (
 
 ---
 
-## RW-10 ‚Äî Admin panel: create order on behalf of customer
+## RW-10 ó Admin panel: create order on behalf of customer
 
 ### Type
 
-New feature ‚Äî admin Order Management (dedicated create-order flow + attribution)
+New feature ó admin Order Management (dedicated create-order flow + attribution)
 
 ### Audience note (for humans + AI)
 
-Client wants admins to **place orders inside the admin panel** with a **dedicated flow/UI** (not ‚Äúgo use the website employee app‚Äù). Orders must remain owned by the **customer** (`Order.userId` = customer) and must be clearly marked as **placed by admin** (who + source), visible on admin list/detail.
+Client wants admins to **place orders inside the admin panel** with a **dedicated flow/UI** (not ìgo use the website employee appî). Orders must remain owned by the **customer** (`Order.userId` = customer) and must be clearly marked as **placed by admin** (who + source), visible on admin list/detail.
 
 Website **employee** on-behalf (`/employee/orders/on-behalf`) already exists and can stay for staff. This RW is the **admin-panel** path.
 
 ### Goal
 
-Add an admin-only **Create order** experience: pick an approved customer ‚Üí choose order type ‚Üí build lines / RX (and later color/wholesale) ‚Üí place via existing checkout APIs ‚Üí persist attribution (`placed by admin`, source = admin panel) ‚Üí show a badge on order list and detail. Same stock reserve, cutoff, delivery, and pricing rules as normal customer checkout ‚Äî do not invent a parallel order engine.
+Add an admin-only **Create order** experience: pick an approved customer ? choose order type ? build lines / RX (and later color/wholesale) ? place via existing checkout APIs ? persist attribution (`placed by admin`, source = admin panel) ? show a badge on order list and detail. Same stock reserve, cutoff, delivery, and pricing rules as normal customer checkout ó do not invent a parallel order engine.
 
 ### Current state
 
 | Piece | Status |
 |--------|--------|
-| Website employee on-behalf (customer ‚Üí catalog / RX / white / color) | **Exists** ‚Äî `drishx-website` `/employee/orders/on-behalf` |
-| APIs accept staff + `userId` (customer) for cart, retail order, RX, color, wholesale | **Exists** ‚Äî `ADMIN` and `EMPLOYEE` treated as staff |
+| Website employee on-behalf (customer ? catalog / RX / white / color) | **Exists** ó `drishx-website` `/employee/orders/on-behalf` |
+| APIs accept staff + `userId` (customer) for cart, retail order, RX, color, wholesale | **Exists** ó `ADMIN` and `EMPLOYEE` treated as staff |
 | Admin panel create order UI | **Missing** |
 | Admin panel return-on-behalf from order detail | Exists (returns only) |
-| `Order.userId` | Customer owner ‚Äî correct; keep |
-| Explicit `placedBy` / `orderSource` on `Order` | **Missing** ‚Äî create is only loosely visible via audit / `OrderActivityLog` actor |
+| `Order.userId` | Customer owner ó correct; keep |
+| Explicit `placedBy` / `orderSource` on `Order` | **Missing** ó create is only loosely visible via audit / `OrderActivityLog` actor |
 
 ### Hard rules (do / do not)
 
@@ -794,68 +794,68 @@ Add an admin-only **Create order** experience: pick an approved customer ‚Üí cho
 1. Build **dedicated admin UI** under Order Management (new route + sidebar/action from Orders).
 2. Keep `Order.userId` = **customer**. Never set the admin as the order customer.
 3. Persist attribution on create, e.g.:
-   - `placedByUserId` ‚Üí admin user id  
-   - `orderSource` ‚Üí `ADMIN_PANEL` (enum also allowing `CUSTOMER_APP`, `EMPLOYEE_ON_BEHALF` for consistency)  
+   - `placedByUserId` ? admin user id  
+   - `orderSource` ? `ADMIN_PANEL` (enum also allowing `CUSTOMER_APP`, `EMPLOYEE_ON_BEHALF` for consistency)  
    - Optionally store role snapshot if useful for display  
-4. Show admin UI badge: **‚ÄúPlaced by admin ¬∑ {name}‚Äù** on list + detail (and activity message on create).
+4. Show admin UI badge: **ìPlaced by admin ∑ {name}î** on list + detail (and activity message on create).
 5. Reuse existing place/cart/RX/color/wholesale APIs and libs (`place-order`, stock reserve, cutoff, delivery). Pass `userId` = selected customer; session = admin.
 6. Default customer picker to **approved / active** customers (align with Clients). Block or warn on incomplete/unapproved unless product says otherwise.
-7. Respect **RW-05** when implemented: admin-created RX/photo still follow admin-hold ‚Üí warehouse release (do not bypass hold by placing from admin).
+7. Respect **RW-05** when implemented: admin-created RX/photo still follow admin-hold ? warehouse release (do not bypass hold by placing from admin).
 8. Write audit + order activity: actor = admin, message includes on-behalf customer.
 
 **Do not**
 
-1. Do not deep-link/iframe the website employee on-behalf screen as the ‚Äúsolution.‚Äù
-2. Do not put ‚ÄúPlaced by admin‚Äù only in customer-visible `notes` as the sole signal ‚Äî use real fields + badge.
+1. Do not deep-link/iframe the website employee on-behalf screen as the ìsolution.î
+2. Do not put ìPlaced by adminî only in customer-visible `notes` as the sole signal ó use real fields + badge.
 3. Do not change customer app checkout.
 4. Do not remove or break website employee on-behalf.
 5. Do not rebuild pricing, inventory reservation, or dispatch cutoff logic.
-6. Do not require RW-08/09 to start (independent); catalog/RX product pickers use today‚Äôs lens APIs.
+6. Do not require RW-08/09 to start (independent); catalog/RX product pickers use todayís lens APIs.
 
 ### Target admin flow
 
 ```
-Admin ‚Üí Orders ‚Üí Create order
+Admin ? Orders ? Create order
   1. Select customer (search by name / business / email / mobile)
   2. Choose type: Catalog (retail) | RX | Color (phase) | Wholesale (phase)
   3. Build order (powers, qty, notes, delivery service as required by type)
   4. Review totals / stock warnings
-  5. Confirm ‚Üí existing APIs with userId = customer
+  5. Confirm ? existing APIs with userId = customer
   6. Set placedByUserId + orderSource = ADMIN_PANEL
-  7. Redirect to /orders/[id] with ‚ÄúPlaced by admin‚Äù badge
+  7. Redirect to /orders/[id] with ìPlaced by adminî badge
 ```
 
 ### Phases
 
-#### Phase A ‚Äî Attribution + Catalog (retail) create + badge
+#### Phase A ó Attribution + Catalog (retail) create + badge
 
 **Build**
 
 - Prisma: add `orderSource` enum + `placedByUserId` (FK to `User`, nullable for legacy rows). Backfill legacy as null / `CUSTOMER_APP` guess only if safe; otherwise leave null.
 - On all create paths used by this flow (at least retail `POST /api/orders` / shared `place-order`): when session is ADMIN and body targets another `userId`, set `orderSource = ADMIN_PANEL`, `placedByUserId = session.userId`.
-- Admin UI: `/orders/new` (or `/orders/create`) ‚Äî step 1 customer, step 2 catalog line picker (reuse admin lens search patterns from inventory/orders), qty, notes, delivery if required, submit.
+- Admin UI: `/orders/new` (or `/orders/create`) ó step 1 customer, step 2 catalog line picker (reuse admin lens search patterns from inventory/orders), qty, notes, delivery if required, submit.
 - Orders list + detail: badge when `orderSource === ADMIN_PANEL` (and show placer name).
-- Activity: ‚ÄúOrder created on behalf of {customer} by admin {name}.‚Äù
+- Activity: ìOrder created on behalf of {customer} by admin {name}.î
 
 **Done when:** Admin can place a normal catalog order for a customer from the admin panel; detail shows who placed it; customer owns the order.
 
-#### Phase B ‚Äî RX (and photo if in scope)
+#### Phase B ó RX (and photo if in scope)
 
 **Build**
 
 - Admin create flow branch for **RX** (same fields as customer/employee RX; call `POST /api/orders/rx` with `userId`).
-- Optional: photo prescription upload on behalf if product needs it in admin (same API patterns as photo route ‚Äî extend for staff `userId` if not already).
+- Optional: photo prescription upload on behalf if product needs it in admin (same API patterns as photo route ó extend for staff `userId` if not already).
 - Wire RW-05 hold behavior once RW-05 exists (create should not dump RX onto warehouse queues early).
 
 **Done when:** Admin can place RX for a customer from admin panel with attribution badge.
 
-#### Phase C ‚Äî Color + Wholesale (as needed)
+#### Phase C ó Color + Wholesale (as needed)
 
 **Build**
 
-- Color-lens wizard subset or ‚Äústart color order‚Äù that posts to color-lens API with `userId`.
+- Color-lens wizard subset or ìstart color orderî that posts to color-lens API with `userId`.
 - Wholesale matrix checkout via existing wholesale-checkout + `userId` if client requires admin wholesale placement in panel.
-- Filter orders by `orderSource` / ‚ÄúPlaced by admin‚Äù on list.
+- Filter orders by `orderSource` / ìPlaced by adminî on list.
 
 **Done when:** Agreed extra channels work from admin with same attribution.
 
@@ -864,7 +864,7 @@ Admin ‚Üí Orders ‚Üí Create order
 | Surface | Suggested UI |
 |---------|----------------|
 | Admin orders table | Pill: `Admin` or `Placed by admin` |
-| Admin order detail | Line: `Placed by admin ¬∑ {admin name} ¬∑ {datetime}` |
+| Admin order detail | Line: `Placed by admin ∑ {admin name} ∑ {datetime}` |
 | Customer web/mobile | Default: **do not** show admin name unless client asks; order still appears under their account normally |
 | Employee order views | Can show same badge if useful for ops |
 
@@ -883,7 +883,7 @@ Admin ‚Üí Orders ‚Üí Create order
 - Multi-warehouse, procurement PO, catalog product-master (RW-08/09)
 - Payment gateway / offline payment capture at create (unless already part of normal checkout)
 - Letting admin create orders as themselves (no customer)
-- Changing loyalty earn rules beyond ‚Äúorder belongs to customer‚Äù
+- Changing loyalty earn rules beyond ìorder belongs to customerî
 
 ### Key code pointers
 
@@ -895,23 +895,23 @@ Admin ‚Üí Orders ‚Üí Create order
 | Cart / wholesale staff `userId` | `app/api/cart/route.ts`, `app/api/orders/wholesale-checkout/route.ts` |
 | Admin orders UI | `app/(admin)/orders/`, `app/(admin)/orders/[id]/page.tsx` |
 | Website employee on-behalf (reference only) | `drishx-website` `components/employee/employee-order-on-behalf-screen.tsx` |
-| Order model | `prisma/schema.prisma` ‚Üí `Order` |
+| Order model | `prisma/schema.prisma` ? `Order` |
 | Activity / audit | `OrderActivityLog`, `recordAuditEvent` / `ORDER_CREATED` |
 
 ### Open questions (do not block Phase A)
 
-1. Must customer see ‚Äúplaced by office/admin‚Äù on their app? Default **no**.
+1. Must customer see ìplaced by office/adminî on their app? Default **no**.
 2. Photo prescription from admin in v1 or RX-form only?
 3. Wholesale/color required for first release or Phase C?
 4. Should **EMPLOYEE_ON_BEHALF** also set `placedByUserId` when website staff places (nice consistency; can be small follow-up)?
-5. Interaction with RW-05 timing ‚Äî implement attribution first; hold rules when RW-05 merges.
+5. Interaction with RW-05 timing ó implement attribution first; hold rules when RW-05 merges.
 
 ### Acceptance
 
 - [ ] Admin can open a dedicated Create order flow in the admin panel
 - [ ] Catalog order for an approved customer succeeds; `userId` is the customer
 - [ ] `orderSource = ADMIN_PANEL` and `placedByUserId` set to the admin
-- [ ] List + detail show ‚ÄúPlaced by admin ¬∑ {name}‚Äù (or equivalent)
+- [ ] List + detail show ìPlaced by admin ∑ {name}î (or equivalent)
 - [ ] Stock/cutoff/delivery behave like normal checkout
 - [ ] Website employee on-behalf still works
 - [ ] RX creatable from admin (Phase B) with same attribution
@@ -923,53 +923,53 @@ Schema (`orderSource`, `placedByUserId`) + set on admin retail create + `/orders
 
 ---
 
-## RW-11 ‚Äî Client API calling pattern + list/table performance
+## RW-11 ó Client API calling pattern + list/table performance
 
 ### Type
 
-Cross-cutting change ‚Äî **all three frontends** + shared backend list APIs (admin panel, website, mobile)
+Cross-cutting change ó **all three frontends** + shared backend list APIs (admin panel, website, mobile)
 
 ### Audience note (for humans + AI)
 
 This is the **single API-calling + list performance task**. It has two layers that must stay in order:
 
-1. **Skills first (documentation / agent contract)** ‚Äî extend the already-added `drishx-client-api` skills in all three repos so every new fetch/mutation and every list screen follows one pattern (no React Query).
-2. **Code second (foundation + hot list APIs)** ‚Äî implement the shared client hooks, then fix the **logical** list/table problems (unbounded payloads, fat includes, client-side filter, inconsistent pagination). Without (2), (1) only makes slow calls cleaner.
+1. **Skills first (documentation / agent contract)** ó extend the already-added `drishx-client-api` skills in all three repos so every new fetch/mutation and every list screen follows one pattern (no React Query).
+2. **Code second (foundation + hot list APIs)** ó implement the shared client hooks, then fix the **logical** list/table problems (unbounded payloads, fat includes, client-side filter, inconsistent pagination). Without (2), (1) only makes slow calls cleaner.
 
 **Do not** introduce TanStack Query / SWR / Axios for this RW. Transport stays what each repo already uses:
 
 | Repo | Transport (keep) |
 |------|------------------|
-| Admin panel (`Drishx-admin-and-backend`) | `adminFetch` / `AdminApiError` ‚Üí `app/lib/admin-api.ts` (+ `adminAuthFetch` refresh) |
-| Website (`drishx-website`) | `authFetch` / `authFetchJson` ‚Üí `lib/auth-fetch.ts` (BFF `/api/...`) |
-| Mobile (`drishx-mobile-app`) | `apiFetch` ‚Üí `lib/api-request.ts` (+ `authFetch`, offline queue, `BACKEND_BASE_URL`) |
+| Admin panel (`Drishx-admin-and-backend`) | `adminFetch` / `AdminApiError` ? `app/lib/admin-api.ts` (+ `adminAuthFetch` refresh) |
+| Website (`drishx-website`) | `authFetch` / `authFetchJson` ? `lib/auth-fetch.ts` (BFF `/api/...`) |
+| Mobile (`drishx-mobile-app`) | `apiFetch` ? `lib/api-request.ts` (+ `authFetch`, offline queue, `BACKEND_BASE_URL`) |
 
-**Relation to other RWs:** Independent of RW-08/09/10 product features. New admin screens from those RWs **must** follow this pattern once Phase A lands. Do not block PO/catalog/create-order on finishing every list in Phase C ‚Äî but **do** block merging new list UIs that still call `adminFetch` / `authFetch` / `apiFetch` from components after Phase A.
+**Relation to other RWs:** Independent of RW-08/09/10 product features. New admin screens from those RWs **must** follow this pattern once Phase A lands. Do not block PO/catalog/create-order on finishing every list in Phase C ó but **do** block merging new list UIs that still call `adminFetch` / `authFetch` / `apiFetch` from components after Phase A.
 
 ### Goal
 
 After this RW:
 
-- Every client has **one** way to read and write APIs: pure api functions ‚Üí `useApiQuery` / `useApiMutation` ‚Üí screens (loading + error from hooks).
+- Every client has **one** way to read and write APIs: pure api functions ? `useApiQuery` / `useApiMutation` ? screens (loading + error from hooks).
 - Agent skills in all three repos accurately describe that pattern **including list/pagination contracts**.
-- Hot list endpoints (especially **orders**, then customers / returns / invoices) are **paginated**, return **summary** payloads for tables, support **server-side** status/search filters, and keep fat detail on `GET ‚Ä¶/:id` only.
-- Admin tables, website order lists, and mobile order lists feel acceptably fast as data grows ‚Äî not because of a nicer hook wrapper alone, but because less data crosses the wire.
+- Hot list endpoints (especially **orders**, then customers / returns / invoices) are **paginated**, return **summary** payloads for tables, support **server-side** status/search filters, and keep fat detail on `GET Ö/:id` only.
+- Admin tables, website order lists, and mobile order lists feel acceptably fast as data grows ó not because of a nicer hook wrapper alone, but because less data crosses the wire.
 
-### Current state (what already exists ‚Äî reuse)
+### Current state (what already exists ó reuse)
 
 | Exists today | Where | Keep / extend? |
 |--------------|--------|----------------|
-| `drishx-client-api` skill (no React Query) | `.agents/skills/drishx-client-api/SKILL.md` in **admin**, **website**, **mobile** | **Yes** ‚Äî Phase 0 expands it (pagination, list DTO, checklist) |
+| `drishx-client-api` skill (no React Query) | `.agents/skills/drishx-client-api/SKILL.md` in **admin**, **website**, **mobile** | **Yes** ó Phase 0 expands it (pagination, list DTO, checklist) |
 | `AGENTS.md` points at the skill | All three repos | Keep; update row text if skill scope grows |
-| Admin transport | `app/lib/admin-api.ts`, `admin-auth-fetch.ts` | Keep ‚Äî hooks call api layer that uses these |
+| Admin transport | `app/lib/admin-api.ts`, `admin-auth-fetch.ts` | Keep ó hooks call api layer that uses these |
 | Website transport | `lib/auth-fetch.ts`, `lib/fetch-with-retry.ts` | Keep |
-| Mobile transport | `lib/api-request.ts`, `lib/auth-fetch.ts`, `lib/app-alert` | Keep ‚Äî alerts stay in hooks/options, not api files |
+| Mobile transport | `lib/api-request.ts`, `lib/auth-fetch.ts`, `lib/app-alert` | Keep ó alerts stay in hooks/options, not api files |
 | Feature api files | Admin `app/lib/admin-*.ts`; web/mobile `lib/*-api.ts` | Keep as pure api layer; add hooks beside them |
-| Good pagination examples | `GET /api/lenses` (`page`/`limit`/`hasMore`); `GET /api/admin/catalog/products`; stock-matrix / suppliers `page`/`pageSize`; loyalty ledger `cursor` | **Reuse contract style** ‚Äî do not invent a fourth shape without reason |
-| Fat unbounded lists (problem) | `GET /api/orders` ‚Äî no `take`, heavy `include`, signed image URL per row in a loop | **Must change** in Phase B |
-| In-memory search | `GET /api/users/customers` ‚Äî load all then `.filter` on `q` | **Must change** |
+| Good pagination examples | `GET /api/lenses` (`page`/`limit`/`hasMore`); `GET /api/admin/catalog/products`; stock-matrix / suppliers `page`/`pageSize`; loyalty ledger `cursor` | **Reuse contract style** ó do not invent a fourth shape without reason |
+| Fat unbounded lists (problem) | `GET /api/orders` ó no `take`, heavy `include`, signed image URL per row in a loop | **Must change** in Phase B |
+| In-memory search | `GET /api/users/customers` ó load all then `.filter` on `q` | **Must change** |
 | Client filter after full fetch | Website `my-orders-screen`; admin dispatch/procurement filters; mobile order screens | **Must move to server params** once APIs support them |
-| Hard caps without ‚Äúnext page‚Äù | Loyalty customers `take: 100`; many finance lists `take: 50‚Äì100` | Document + fix in Phase C or explicit ‚Äúload more‚Äù |
+| Hard caps without ìnext pageî | Loyalty customers `take: 100`; many finance lists `take: 50ñ100` | Document + fix in Phase C or explicit ìload moreî |
 
 **Missing today:** Shared `useApiQuery` / `useApiMutation` implementations; `QUERY_REGISTRY` / `MUTATION_REGISTRY`; list vs detail DTOs for orders; unified `{ items, page, limit, total?, hasMore }` (or documented cursor) on hot endpoints; skills that spell out list/pagination rules.
 
@@ -980,23 +980,23 @@ After this RW:
 1. **Phase 0 before feature code:** Update `drishx-client-api` in all three repos so implementers and agents share one contract (see Phase 0 checklist below).
 2. Components/screens talk **only** to hooks (`useGet*` / `use*`). Never call `adminFetch` / `authFetch` / `authFetchJson` / `apiFetch` / raw `fetch` from UI files for new or migrated work.
 3. Api files are **pure** (no React, no toast/`appAlert`). Hooks own `loading` / `refreshing` / `pending` / `error` and `onSuccess` / `onError`.
-4. **401 / auth:** never toast or `appAlert` for auth failures ‚Äî existing refresh / sign-out paths handle them.
-5. Mutations take **one** argument; wrap `{ id, data }` when needed. Void response ‚Üí `void`; no payload ‚Üí `null`.
-6. List endpoints used by tables must support **server** `page` + `limit` (or cursor) + filters (`status`, `q`, ‚Ä¶). Default `limit` capped (e.g. 20‚Äì50); max hard-capped (e.g. 100).
-7. **List response = summary.** Detail relations (full wholesale lines, all power versions, signed images, full lens rows) belong on detail GET ‚Äî not on every list row.
+4. **401 / auth:** never toast or `appAlert` for auth failures ó existing refresh / sign-out paths handle them.
+5. Mutations take **one** argument; wrap `{ id, data }` when needed. Void response ? `void`; no payload ? `null`.
+6. List endpoints used by tables must support **server** `page` + `limit` (or cursor) + filters (`status`, `q`, Ö). Default `limit` capped (e.g. 20ñ50); max hard-capped (e.g. 100).
+7. **List response = summary.** Detail relations (full wholesale lines, all power versions, signed images, full lens rows) belong on detail GET ó not on every list row.
 8. Prefer one list envelope across new work: `{ items, page, limit, hasMore }` and `total` when cheap. If cursor is better (ledgers), document it in the skill and stick to it for that domain.
 9. Migrate **opportunistically** for non-hot screens; **must** migrate orders (+ consumers) in Phase B/C.
 10. Keep role scoping on `GET /api/orders` (CUSTOMER own / EMPLOYEE assigned / ADMIN all + existing query filters).
 
 **Do not**
 
-1. Do not add React Query, SWR, Axios, or a second HTTP client ‚Äúframework.‚Äù
-2. Do not ‚Äúfix‚Äù slowness only by adding skeletons while still downloading all orders.
-3. Do not silently truncate with `take: 100` and present the UI as complete ‚Äî either page or show ‚Äúload more‚Äù / total.
-4. Do not break offline cache on mobile without a plan ‚Äî cache **pages** or summary lists, not an unbounded forever-growing blob if avoidable.
+1. Do not add React Query, SWR, Axios, or a second HTTP client ìframework.î
+2. Do not ìfixî slowness only by adding skeletons while still downloading all orders.
+3. Do not silently truncate with `take: 100` and present the UI as complete ó either page or show ìload moreî / total.
+4. Do not break offline cache on mobile without a plan ó cache **pages** or summary lists, not an unbounded forever-growing blob if avoidable.
 5. Do not change order lifecycle, pricing, or attribution (RW-10) as part of this RW.
 6. Do not require finishing RW-08/09 first.
-7. Do not rewrite every admin `adminFetch` page in one PR ‚Äî Phase A foundation + Phase B orders is the critical path.
+7. Do not rewrite every admin `adminFetch` page in one PR ó Phase A foundation + Phase B orders is the critical path.
 
 ### Problems this RW must address (inventory)
 
@@ -1009,7 +1009,7 @@ These are **logical** issues independent of hook style. Track them through phase
 | 3 | Per-row `getSignedOrderImageUrl` in list loop | N+1 latency | B |
 | 4 | Customers: load all + in-memory `q` | Admin clients directory does not scale | C |
 | 5 | Returns / invoices: full `findMany`, no page | Admin tables | C |
-| 6 | Client-side status/search after full download | Web my-orders, admin dispatch subsets | B‚ÄìC |
+| 6 | Client-side status/search after full download | Web my-orders, admin dispatch subsets | BñC |
 | 7 | Inconsistent pagination params (`page`/`limit` vs `pageSize` vs `cursor` vs none) | Hard to share UI helpers | A skill + B/C APIs |
 | 8 | Same fat list reused for dashboard counts / queues | Extra work for wrong shape | B (summary + filters) |
 | 9 | Mobile offline cache of entire orders array | Storage + stale giant payloads | B mobile follow-through |
@@ -1020,107 +1020,107 @@ These are **logical** issues independent of hook style. Track them through phase
 
 ```
 [Skill: drishx-client-api] documents contract
-        ‚Üì
-lib/.../api.ts          ‚Üí pure transport call (adminFetch / authFetch / apiFetch)
-lib/.../query|mutation  ‚Üí useApiQuery / useApiMutation
-Screen                  ‚Üí loading / error / data / mutate only from hook
-        ‚Üì
-List APIs               ‚Üí ?page=&limit=&status=&q= ‚Üí { items, page, limit, hasMore[, total] }
-Detail APIs             ‚Üí GET /:id ‚Üí full include (unchanged richness)
+        ?
+lib/.../api.ts          ? pure transport call (adminFetch / authFetch / apiFetch)
+lib/.../query|mutation  ? useApiQuery / useApiMutation
+Screen                  ? loading / error / data / mutate only from hook
+        ?
+List APIs               ? ?page=&limit=&status=&q= ? { items, page, limit, hasMore[, total] }
+Detail APIs             ? GET /:id ? full include (unchanged richness)
 ```
 
 ### Phases (implement in order)
 
-#### Phase 0 ‚Äî Skills first (all three repos) ‚Äî **do this before code PRs that invent patterns**
+#### Phase 0 ó Skills first (all three repos) ó **do this before code PRs that invent patterns**
 
 **Goal:** Anyone (human or agent) reading `drishx-client-api` knows exactly how to call APIs **and** how lists/pagination must work. Skills today cover fetch/mutation isolation; they do **not** yet nail list contracts.
 
-**Update in each repo** (`.agents/skills/drishx-client-api/SKILL.md` ‚Äî keep junctions via `link-skills.ps1`):
+**Update in each repo** (`.agents/skills/drishx-client-api/SKILL.md` ó keep junctions via `link-skills.ps1`):
 
-1. **Single pattern reminder** ‚Äî `useApiQuery` for reads, `useApiMutation` for writes; no transport in components; registry; options types; 401 rules; mobile `appAlert` only via options.
+1. **Single pattern reminder** ó `useApiQuery` for reads, `useApiMutation` for writes; no transport in components; registry; options types; 401 rules; mobile `appAlert` only via options.
 2. **New section: List & pagination contract**
-   - Query hooks for lists accept `params` as first arg: `{ page, limit, status?, q?, ‚Ä¶ }`.
+   - Query hooks for lists accept `params` as first arg: `{ page, limit, status?, q?, Ö }`.
    - `deps` for `useApiQuery` must include every param that changes the request.
    - Response typing: `Paginated<T> = { items: T[]; page: number; limit: number; hasMore: boolean; total?: number }`.
    - UI: table/list uses `loading` for first page, `refreshing` or `pending` for page changes / load-more; do not keep a second ad-hoc loading flag.
    - **Forbidden:** fetch all then `.filter` for primary status/search tabs when the API supports (or should support) those params.
 3. **New section: List vs detail**
-   - List hooks/types use summary types (`OrderListItem`, ‚Ä¶).
+   - List hooks/types use summary types (`OrderListItem`, Ö).
    - Detail hooks call `GET /:id` (or existing detail routes).
-   - Do not type list rows as full detail models ‚Äúfor convenience.‚Äù
+   - Do not type list rows as full detail models ìfor convenience.î
 4. **New section: Migration rule**
    - New screens: must use hooks.
    - Touched list screens: migrate in the same PR when changing that feature.
    - Hot paths in this RW (orders, then customers/returns/invoices): mandatory.
-5. **Repo-specific notes stay** ‚Äî admin `adminFetch`, website BFF, mobile `apiFetch` + offline + `appAlert`.
-6. **AGENTS.md / `.agents/README.md`** ‚Äî one-line note that `drishx-client-api` covers lists/pagination too (if not already obvious).
-7. **Optional short `reference.md`** inside the skill folder for copy-paste hook templates (only if SKILL.md would become too long ‚Äî prefer keeping one SKILL.md unless needed).
+5. **Repo-specific notes stay** ó admin `adminFetch`, website BFF, mobile `apiFetch` + offline + `appAlert`.
+6. **AGENTS.md / `.agents/README.md`** ó one-line note that `drishx-client-api` covers lists/pagination too (if not already obvious).
+7. **Optional short `reference.md`** inside the skill folder for copy-paste hook templates (only if SKILL.md would become too long ó prefer keeping one SKILL.md unless needed).
 
 **Done when:** All three skills agree on the same list envelope + hook rules; a reviewer can reject a PR that violates the skill without debating style.
 
-#### Phase A ‚Äî Client foundation (all three repos)
+#### Phase A ó Client foundation (all three repos)
 
 **Build**
 
-- Shared types: `QueryOptions`, `MutationOptions`, `Paginated<T>` under each repo‚Äôs `types/api-client` (or equivalent path from the skill).
+- Shared types: `QueryOptions`, `MutationOptions`, `Paginated<T>` under each repoís `types/api-client` (or equivalent path from the skill).
 - `QUERY_REGISTRY` / `MUTATION_REGISTRY` constants.
 - `useApiQuery` + `useApiMutation` implementations matching the skill contract (`loading`, `refreshing`, `refetch`, `pending`, `error`, `enabled`, callbacks; skip UI `onError` for auth failures).
-- One **gold-example** migration per repo (small screen, not necessarily orders): e.g. admin loyalty customers list **or** a thin settings GET; website a small authenticated list; mobile a small authenticated list ‚Äî proves the kit works end-to-end.
+- One **gold-example** migration per repo (small screen, not necessarily orders): e.g. admin loyalty customers list **or** a thin settings GET; website a small authenticated list; mobile a small authenticated list ó proves the kit works end-to-end.
 - Do **not** claim performance fixed until Phase B.
 
 **Done when:** Hooks exist and are used on at least one real screen per repo; skills match the code paths.
 
-#### Phase B ‚Äî Orders list API + all consumers (critical path)
+#### Phase B ó Orders list API + all consumers (critical path)
 
 **Backend (`GET /api/orders`)**
 
-- Add query params: `page` (default 1), `limit` (default ~20‚Äì30, max ~100), plus filters needed by UIs: at least `status` (single or CSV), `q` (order number / business / customer name as agreed), keep existing `employeeId` / `userId` / `batchId` where already used.
-- Return paginated **summary** items: fields needed for tables/cards (id, orderNumber, status, dates, customer summary, assignee summary, amounts, lens one-liner / type, flags like warehouseHold / awaiting procurement ‚Äî **document the exact field list in the PR**).
+- Add query params: `page` (default 1), `limit` (default ~20ñ30, max ~100), plus filters needed by UIs: at least `status` (single or CSV), `q` (order number / business / customer name as agreed), keep existing `employeeId` / `userId` / `batchId` where already used.
+- Return paginated **summary** items: fields needed for tables/cards (id, orderNumber, status, dates, customer summary, assignee summary, amounts, lens one-liner / type, flags like warehouseHold / awaiting procurement ó **document the exact field list in the PR**).
 - **Exclude** from list default: full `wholesaleLineItems` arrays, full lens row dumps, `powerVersions`, pending suggestion blobs, delivery pack internals, **signed order image URLs** (expose `hasOrderImage` boolean or omit; sign only on detail).
 - Preserve role `where` clauses; apply filters in Prisma `where`, not after fetch.
 - Keep `GET /api/orders/[id]` (or current detail) as the fat payload for detail screens.
-- Backward compatibility: prefer additive response shape `{ items, page, limit, hasMore, total? }`. If any client still expects a bare array, either dual-support briefly behind a query flag (`?view=summary`) **or** migrate all three clients in the same release train ‚Äî **do not** leave mobile/web broken. Prefer one coordinated cutover for orders.
+- Backward compatibility: prefer additive response shape `{ items, page, limit, hasMore, total? }`. If any client still expects a bare array, either dual-support briefly behind a query flag (`?view=summary`) **or** migrate all three clients in the same release train ó **do not** leave mobile/web broken. Prefer one coordinated cutover for orders.
 
 **Admin panel**
 
 - Orders table(s), dispatch, procurement order subsets: call paginated summary API with server filters; wire loading/error via hooks (`useGetOrders`).
 - Detail pages keep detail GET.
-- Stop loading full `/api/orders` then `.filter` for dispatch/history where a status filter on the API suffices (may use dedicated pending-dispatch endpoint if one already exists ‚Äî prefer extending filters over duplicate fat fetches).
+- Stop loading full `/api/orders` then `.filter` for dispatch/history where a status filter on the API suffices (may use dedicated pending-dispatch endpoint if one already exists ó prefer extending filters over duplicate fat fetches).
 
 **Website**
 
 - `fetchOrders` / my-orders / employee orders / any dashboard that currently pulls all orders: switch to paginated summary (+ load more or page controls).
-- Status tabs + search ‚Üí query params, not only client `filter` on a full array.
+- Status tabs + search ? query params, not only client `filter` on a full array.
 - BFF: if website proxies `/api/orders`, ensure query params pass through unchanged.
 
 **Mobile**
 
-- `fetchOrders` + order list UI: paginated summary; pull-to-refresh = page 1; infinite scroll or ‚Äúload more‚Äù for next pages.
+- `fetchOrders` + order list UI: paginated summary; pull-to-refresh = page 1; infinite scroll or ìload moreî for next pages.
 - Offline cache: cache latest summary page(s) or a bounded recent set; document behavior when offline (stale summary OK; do not require full history offline unless product demands it).
 - Hooks + `appAlert` on non-auth errors per skill.
 
 **Done when:** Creating more orders no longer forces every client to download the entire order history with detail includes; list UIs page; detail still complete.
 
-#### Phase C ‚Äî Other hot admin lists + consistency
+#### Phase C ó Other hot admin lists + consistency
 
 **Build**
 
 - **Customers** (`GET /api/users/customers`): Prisma/`where` search for `q`; `page`/`limit`/`hasMore`; admin Clients UI uses hooks + server search.
-- **Returns** + **Invoices** list routes: same pagination + summary fields for tables; detail routes stay rich (aligns with RW-03 ‚Äúfuller detail on detail,‚Äù not on list).
-- Align param names with Phase B (`page`/`limit`) unless an existing endpoint already standardized on `pageSize` ‚Äî then document exception in skill.
-- Finance/loyalty hard caps: either add real paging/load-more or show explicit ‚Äúshowing latest N‚Äù ‚Äî no silent incompleteness.
+- **Returns** + **Invoices** list routes: same pagination + summary fields for tables; detail routes stay rich (aligns with RW-03 ìfuller detail on detail,î not on list).
+- Align param names with Phase B (`page`/`limit`) unless an existing endpoint already standardized on `pageSize` ó then document exception in skill.
+- Finance/loyalty hard caps: either add real paging/load-more or show explicit ìshowing latest Nî ó no silent incompleteness.
 - Migrate corresponding admin screens to hooks.
 
-**Done when:** Main admin directory/tables that hurt in production are paginated and hooked; skills‚Äô list rules have concrete examples in-repo.
+**Done when:** Main admin directory/tables that hurt in production are paginated and hooked; skillsí list rules have concrete examples in-repo.
 
-#### Phase D ‚Äî Polish (optional but recommended)
+#### Phase D ó Polish (optional but recommended)
 
 - Shared tiny UI helpers: `ErrorState` + retry, table pagination controls (admin), load-more button patterns (web/mobile).
 - Dashboard endpoints that only need counts: prefer count/aggregate APIs instead of downloading order lists.
 - Audit that no new PR reintroduced component-level `adminFetch` for lists.
 - Performance smoke: rough before/after payload size on `/api/orders` for a seeded large dataset (note numbers in PR description).
 
-### Skill update checklist (Phase 0 ‚Äî copy into PR description)
+### Skill update checklist (Phase 0 ó copy into PR description)
 
 For **each** of admin / website / mobile `drishx-client-api`:
 
@@ -1148,7 +1148,7 @@ For **each** of admin / website / mobile `drishx-client-api`:
 - RW-08 PO / RW-09 catalog product master / RW-10 create-order UX (they consume this pattern; they are not this RW)
 - Rewriting every historical screen in one go
 - Changing order business rules, payments, or auth token TTLs (RW-01)
-- Full reports module (RW-06) ‚Äî but new report tables should follow this list contract when built
+- Full reports module (RW-06) ó but new report tables should follow this list contract when built
 - Pixel redesign of tables (behavior/performance first; mild UI for page controls OK)
 
 ### Key code pointers
@@ -1159,24 +1159,24 @@ For **each** of admin / website / mobile `drishx-client-api`:
 | Website skill | `drishx-website/.agents/skills/drishx-client-api/SKILL.md` |
 | Mobile skill | `drishx-mobile-app/.agents/skills/drishx-client-api/SKILL.md` |
 | Orders list (problem) | `app/api/orders/route.ts` `GET` |
-| Order detail | `app/api/orders/[id]/‚Ä¶` (keep fat) |
+| Order detail | `app/api/orders/[id]/Ö` (keep fat) |
 | Customers list | `app/api/users/customers/route.ts` |
 | Returns list | `app/api/returns/route.ts` |
 | Invoices list | `app/api/invoices/route.ts` |
 | Good pagination refs | `app/api/lenses/route.ts`, `app/api/admin/catalog/products/route.ts` |
 | Admin transport | `app/lib/admin-api.ts` |
-| Website orders client | `drishx-website/lib/orders-api.ts` ‚Üí `fetchOrders` |
+| Website orders client | `drishx-website/lib/orders-api.ts` ? `fetchOrders` |
 | Website my-orders UI | `drishx-website/components/orders/my-orders-screen.tsx` |
-| Mobile orders client | `drishx-mobile-app/lib/orders-api.ts` ‚Üí `fetchOrders` |
+| Mobile orders client | `drishx-mobile-app/lib/orders-api.ts` ? `fetchOrders` |
 | Admin orders / dispatch UI | `app/(admin)/orders/`, `app/(admin)/orders/dispatch/page.tsx` |
 
 ### Open questions (do not block Phase 0 / A)
 
-1. Orders list cutover: additive `{ items, ‚Ä¶ }` only, or short dual-mode (`?view=summary`) for one release?
+1. Orders list cutover: additive `{ items, Ö }` only, or short dual-mode (`?view=summary`) for one release?
 2. Default `limit` for admin tables vs customer apps (30 vs 20)?
 3. Should `total` count always be returned (extra SQL `count`) or only `hasMore`?
 4. Mobile offline: how many recent summary pages to cache?
-5. Dispatch ‚Äúpending‚Äù ‚Äî extend `GET /api/orders` filters vs keep/expand a dedicated pending endpoint?
+5. Dispatch ìpendingî ó extend `GET /api/orders` filters vs keep/expand a dedicated pending endpoint?
 
 ### Acceptance
 
@@ -1191,14 +1191,14 @@ For **each** of admin / website / mobile `drishx-client-api`:
 
 ### Suggested first PR
 
-1. **Skills-only PR (Phase 0)** across all three repos ‚Äî list/pagination sections.  
-2. **Foundation PR (Phase A)** ‚Äî hooks + registry + one gold example per repo.  
-3. **Orders PR (Phase B)** ‚Äî backend summary pagination + admin/web/mobile cutover.  
-4. **Follow-ups (Phase C)** ‚Äî customers, returns, invoices, hard-cap honesty.
+1. **Skills-only PR (Phase 0)** across all three repos ó list/pagination sections.  
+2. **Foundation PR (Phase A)** ó hooks + registry + one gold example per repo.  
+3. **Orders PR (Phase B)** ó backend summary pagination + admin/web/mobile cutover.  
+4. **Follow-ups (Phase C)** ó customers, returns, invoices, hard-cap honesty.
 
 ---
 
-## RW-12 ‚Äî Customer account configuration: OTP clients + reject/resubmit + Path C (web / mobile)
+## RW-12 ó Customer account configuration: OTP clients + reject/resubmit + Path C (web / mobile)
 
 ### Type
 
