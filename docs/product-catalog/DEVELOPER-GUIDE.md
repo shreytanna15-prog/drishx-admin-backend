@@ -2,18 +2,19 @@
 
 **Companion:** [CLIENT-PLAN.md](./CLIENT-PLAN.md) (product contract — do not contradict without updating both)  
 **Hierarchy:** [ATTRIBUTE-TABLES-AND-HIERARCHY.md](../product-catalog-hierarchy/ATTRIBUTE-TABLES-AND-HIERARCHY.md)  
-**Repos:** `Drishx-admin-and-backend` (admin + API). Shop/mobile cutover is out of this slice.
+**Repos:** `Drishx-admin-and-backend` (admin + API). Shop/mobile cutover is out of this slice.  
+**Status:** Phases **A–C shipped**. Phase D items below are optional follow-ons.
 
 ---
 
 ## 0. How to use this doc
 
 1. Read **CLIENT-PLAN.md** for agreed Admin behaviour.  
-2. Implement **phases A→D** below.  
-3. Add **new** attribute + product tables; **do not** drop `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` / existing `CatalogProductLine`.  
+2. Phases **A→C** are implemented; use §1 code map when extending.  
+3. **Do not** drop `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` / existing `CatalogProductLine`.  
 4. Follow `drishx-api-auth-audit` for routes/audit; `drishx-client-api` for admin hooks; `drishx-prisma` for schema.  
 5. Matrix cells are **frontend-only** in this slice — no bulk leaf insert, no stock PATCH from the grid.  
-6. Prefer DrishX admin chrome patterns (`AdminPage`, list skeletons, existing table/card styles).
+6. **`skuCode` is always built by** `buildLensProductSkuCode` — never accept free-text SKU from Admin on create.
 
 ---
 
@@ -21,37 +22,45 @@
 
 | Area | Path |
 |------|------|
-| Products & catalog UI | `app/(admin)/inventory/products-catalog/` |
-| Create product (if present) | `app/(admin)/inventory/products-catalog/new/` |
-| Existing catalog helpers (may predate this plan) | `app/lib/admin-catalog.ts`, `app/lib/admin-lenses.ts` |
-| Wholesale cards (separate concept) | `CatalogProductLine`, `catalog-product-lines.ts` |
-| Coating filter chips (shop) | `CoatingFilterLabel` |
+| Attributes UI | `app/(admin)/inventory/attributes/page.tsx` |
+| Products list / grid | `app/(admin)/inventory/products-catalog/page.tsx` |
+| Create product | `app/(admin)/inventory/products-catalog/new/page.tsx` |
+| Product detail + matrix | `app/(admin)/inventory/products-catalog/[id]/page.tsx` |
+| Admin client wrappers | `app/lib/admin-lens-catalog.ts` |
+| SKU builder | `app/lib/catalog/lens-product-sku.ts` |
+| Product / attribute services | `app/lib/catalog/lens-product-service.ts`, `lens-attribute-service.ts` |
+| Attribute APIs | `app/api/admin/catalog/attributes/` |
+| Product APIs | `app/api/admin/catalog/lens-products/` |
+| Seed | `prisma/seed-lens-catalog-attributes.ts` (`npm run db:seed-lens-attributes` if scripted) |
+| Migration | `prisma/migrations/20261028150000_lens_product_catalog_attributes/` |
+| Nav | `components/admin-sidebar.tsx` (Attributes + Products & catalog) |
+| Older leaf-generation stack (separate) | `CatalogProduct` / `CatalogRange`, `app/lib/admin-catalog.ts`, `/api/admin/catalog/products` |
+| Wholesale cards (separate) | `CatalogProductLine`, `catalog-product-lines.ts` |
 | Legacy power leaves | `SingleVisionLens`, `KryptokLens`, `ProgressiveLens` |
-| Stock overview | `app/(admin)/inventory/stock-overview/` |
-| Nav | `app/lib/admin-nav-active.ts`, admin shell nav config |
-| Domain / hierarchy | `docs/product-catalog-hierarchy/`, `docs/lens-domain-logic.md` |
+| Stock notes (later) | `docs/stock-management-notes.md` |
 | RW tracking | `docs/remaining-work.md` → RW-09 |
 
-**Naming:** New product entity must **not** reuse `CatalogProductLine` (that is wholesale shop cards). Prefer names such as `LensProduct` / `ProductSku` (lock in migration).
+**Naming:** Catalog SKU master = **`LensProduct`**. Do not confuse with `CatalogProductLine` (wholesale cards) or older `CatalogProduct` (range → leaf generation).
 
 ---
 
-## 2. Target architecture
+## 2. Architecture (as built)
 
 ```
 Attribute masters (separate tables, one Attributes admin UI)
   LensFamily | LensBase | LensMaterial | LensIndex | LensCoating | LensColor
-  (+ optional LensBaseMaterialAllowed for cascade)
+  + LensBaseMaterialLink (cascade)
         │
         ▼
 LensProduct (catalog SKU)
   FKs → attributes
-  + range, skuCode
-  + range range fields (sphMin/Max, cylMin/Max, rangeType, …)
-  + optional defaultPrice, isActive
+  + name
+  + skuCode = buildLensProductSkuCode(attrs + range)   ← auto
+  + power range (sphMin/Max, cylMin/Max, rangeType, …)
+  + optional defaultPrice, isActive, KT/V2 extras
         │
         ▼
-Admin UI only (this slice)
+Admin UI
   List / Grid  →  Detail matrix (SPH×CYL @ 0.25, cells "_ / _ / _")
 ```
 
@@ -60,133 +69,88 @@ Admin UI only (this slice)
 ```
 ExactPower / stock leaf rows
   quantity, threshold, target
-  ← later inventory / procurement (lazy insert or other strategy TBD)
+  ← later inventory / procurement (see stock-management-notes.md)
 ```
-
-**Repos ownership**
-
-| Concern | Backend | Admin | Web / Mobile |
-|---------|---------|-------|--------------|
-| Attribute CRUD | ✓ | ✓ | — |
-| Product CRUD + list | ✓ | ✓ | — |
-| Matrix preview UI | — | ✓ (client expand) | — |
-| Live stock on cells | later | later | later |
-| Shop catalog from new products | later | — | later |
 
 ---
 
-## 3. Schema (Phase A)
+## 3. Schema (shipped)
 
-Proposed Prisma models (names can be adjusted; keep semantics).
+Models in `prisma/schema.prisma` under “Product catalog attribute masters + LensProduct”.
 
-### 3.1 Attribute masters (pattern for each)
+### 3.1 Attribute masters
 
-Shared shape:
+Shared shape: `id`, `code` (unique), `name`, `isActive`, `sortOrder`, timestamps.  
+`LensIndex` also has optional numeric `value`.
 
-| Field | Type | Notes |
-|-------|------|--------|
-| `id` | cuid | PK |
-| `code` | string | Stable short code (`HC`, `UC`, `1.56`) unique per table |
-| `name` | string | Display name |
-| `isActive` | boolean | Default true; inactive hidden from create selects |
-| `sortOrder` | int | Optional |
-| `createdAt` / `updatedAt` | datetime | |
+### 3.2 Compatibility
 
-Tables:
+`LensBaseMaterialLink` — unique `(baseId, materialId)`. Seeded from hierarchy (HC / ARC / BRC → allowed materials).
 
-| Model | Purpose |
-|-------|---------|
-| `LensFamily` | SV, KT, V2 |
-| `LensBase` | HC, BRC, ARC |
-| `LensMaterial` | PLAIN, UC, TINTABLE, POLY, PG, PG_POLY |
-| `LensIndex` | 1.49, 1.56, … (store decimal or string code) |
-| `LensCoating` | Green, Mari-Blue, … |
-| `LensColor` | Tint colours |
+### 3.3 `LensProduct`
 
-### 3.2 Compatibility (cascade)
+Fields match CLIENT-PLAN: attribute FKs, range, optional ADD/AXIS/EYE, `defaultPrice`, `isActive`, unique `skuCode`.
 
-```prisma
-model LensBaseMaterialLink {
-  id         String @id @default(cuid())
-  baseId     String
-  materialId String
-  // @@unique([baseId, materialId])
-}
-```
-
-Seed from hierarchy: HC → Plain, UC, Tintable, PG; BRC → …; ARC → ….
-
-Create-product API must reject material not allowed for selected base.
-
-### 3.3 Product (catalog SKU)
-
-```prisma
-model LensProduct {
-  id           String   @id @default(cuid())
-  skuCode      String   @unique
-  name         String
-  familyId     String
-  baseId       String
-  materialId   String
-  indexId      String?
-  coatingId    String?
-  colorId      String?
-  // Range (SV-first; extend for KT/V2)
-  rangeType    String   @default("NORMAL") // NORMAL | CROSS
-  sphMin       Decimal
-  sphMax       Decimal
-  cylMin       Decimal
-  cylMax       Decimal
-  // Optional KT/V2 range metadata (nullable until Phase C)
-  addMin       Decimal?
-  addMax       Decimal?
-  axis         Int?
-  eye          String?  // LEFT | RIGHT | BOTH — if needed
-  defaultPrice Decimal?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
-```
-
-**Uniqueness (document chosen rule):**  
-Prefer unique `(familyId, baseId, materialId, indexId, coatingId, colorId, rangeType, sphMin, sphMax, cylMin, cylMax, …)` **or** rely on unique `skuCode` + overlap check later. Overlap engine across same attribute combo is **Phase D / follow-on** if not needed for MVP create.
-
-**Do not** create child power rows on save in this slice.
+**Uniqueness:** `skuCode` unique. Create also rejects another product with the same attributes + range (would produce the same SKU).  
+**Do not** create child power rows on save.
 
 ### 3.4 Seed
 
-Seed standard families, bases, materials, indexes, and base↔material links so Create product works without empty dropdowns. Coatings/colors can start from a short seed + admin add.
+`prisma/seed-lens-catalog-attributes.ts` — families, bases, materials, indexes, coatings, colors, base↔material links.
 
 ---
 
-## 4. APIs
+## 4. Auto SKU (locked)
 
-All under admin auth + inventory/catalog permissions (match existing admin lens routes).
+**Source of truth:** `app/lib/catalog/lens-product-sku.ts` → `buildLensProductSkuCode`.
 
-### 4.1 Attributes
+**Format:**
+
+```
+FAMILY-BASE-MATERIAL[-INDEX][-COATING][-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}[-CROSS]
+```
+
+| Rule | Detail |
+|------|--------|
+| Codes | Uppercase; `.` → `P` (e.g. `1.56` → `1P56`); strip non-alphanumeric |
+| Powers | Negatives → `M` prefix (e.g. `-6` → `M6`); decimals use `P` |
+| Bounds | Min/max normalized before encode |
+| Cross | Append `-CROSS` when `rangeType === CROSS` |
+| Create | Server builds SKU; Admin create body must **not** rely on typed `skuCode` |
+| UI | Preview chip on create form from the same helper |
+
+Example: `SV-HC-PLAIN-1P56-S0T10-C0T4`
+
+---
+
+## 5. APIs (as built)
+
+All ADMIN session.
+
+### 5.1 Attributes
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/admin/catalog/attributes/:type` | List (`family` \| `base` \| `material` \| `index` \| `coating` \| `color`); query `activeOnly` |
+| GET | `/api/admin/catalog/attributes/:type` | List; `?activeOnly=true` |
 | POST | `/api/admin/catalog/attributes/:type` | Create |
-| PATCH | `/api/admin/catalog/attributes/:type/:id` | Update name/code/sort/active |
-| GET | `/api/admin/catalog/attributes/compatibility` | Base → allowed materials (or embed in base detail) |
+| PATCH | `/api/admin/catalog/attributes/:type/:id` | Update |
+| GET | `/api/admin/catalog/attributes/compatibility` | Base → materials |
 
-### 4.2 Products
+`:type` = `family` \| `base` \| `material` \| `index` \| `coating` \| `color`
+
+### 5.2 Products (`LensProduct`)
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/admin/catalog/products` | Paginated list; filters: q, familyId, baseId, materialId, isActive |
-| GET | `/api/admin/catalog/products/:id` | Detail + attribute joins + range |
-| POST | `/api/admin/catalog/products` | Create (validate FKs active + compatibility + range min/max) |
-| PATCH | `/api/admin/catalog/products/:id` | Update metadata / range / active |
+| GET | `/api/admin/catalog/lens-products` | Paginated list; filters q, familyId, baseId, materialId, isActive |
+| GET | `/api/admin/catalog/lens-products/:id` | Detail + joins |
+| POST | `/api/admin/catalog/lens-products` | Create — **SKU generated server-side** |
+| PATCH | `/api/admin/catalog/lens-products/:id` | Update metadata / range / active |
 
-**Create body (sketch)**
+**Create body (no skuCode required):**
 
 ```json
 {
-  "skuCode": "HC-SV-PLUS-001",
   "name": "Hard Coat Single Vision +",
   "familyId": "...",
   "baseId": "...",
@@ -203,152 +167,80 @@ All under admin auth + inventory/catalog permissions (match existing admin lens 
 }
 ```
 
-Validation:
+Validation: active FKs, base↔material allowed, coherent range, unique resulting SKU / duplicate attr+range.
 
-- All required FKs exist and `isActive`  
-- Material allowed for base  
-- `sphMin`/`sphMax`/`cylMin`/`cylMax` coherent (document sign convention: allow plus or minus bands as stored)  
-- `skuCode` unique  
+**Note:** Older `/api/admin/catalog/products` (+ ranges) serves the separate `CatalogProduct` leaf-generation path — do not mix with `LensProduct` UI.
 
-**No** `POST .../generate-powers` in this slice.
+### 5.3 Client wrappers
 
-### 4.3 Client wrappers
-
-- Pure functions in `app/lib/admin-catalog-attributes.ts` / extend `admin-catalog.ts`  
-- Hooks: `useApiQuery` / `useApiMutation` per `drishx-client-api`  
-- Register paths in `api-registry` if that pattern is used for the module  
+`app/lib/admin-lens-catalog.ts` — `fetchLensAttributes`, `fetchLensProducts`, `createLensProductRequest`, `steppedPowerRange`, etc.
 
 ---
 
-## 5. Admin UI
+## 6. Admin UI (as built)
 
-### 5.1 Attributes page
+| Page | Route | Notes |
+|------|-------|--------|
+| Attributes | `/inventory/attributes` | Tabs; add/edit modal; active toggle |
+| Catalog | `/inventory/products-catalog` | List \| grid; filters; Create |
+| New | `/inventory/products-catalog/new` | Cascade selects; SKU preview; KT/V2 optional fields |
+| Detail | `/inventory/products-catalog/[id]` | Header + frontend SPH×CYL matrix `_ / _ / _` |
 
-| Item | Detail |
-|------|--------|
-| Route | `/inventory/attributes` (confirm nav) |
-| Layout | Tabs = attribute types |
-| Row actions | Edit; Switch active |
-| Add | Dialog or inline form: code + name |
-| Loading | Table skeleton |
-
-### 5.2 Catalog list / grid
-
-| Item | Detail |
-|------|--------|
-| Route | `/inventory/products-catalog` |
-| Toggle | List \| Grid (local state or `?view=`) |
-| List | Table columns per CLIENT-PLAN |
-| Grid | Responsive cards: name, SKU, attribute line, range |
-| Actions | Create → `/inventory/products-catalog/new`; row → detail |
-
-### 5.3 Create product
-
-| Item | Detail |
-|------|--------|
-| Route | `/inventory/products-catalog/new` |
-| Selects | Fetch `activeOnly=true`; material options depend on selected `baseId` |
-| Range inputs | Number fields; step 0.25 hints in UI copy |
-| Submit | POST product → redirect to detail |
-
-### 5.4 Product detail + matrix
-
-| Item | Detail |
-|------|--------|
-| Route | `/inventory/products-catalog/[id]` |
-| Header | Name, SKU, attribute summary, range text |
-| Matrix | Client-only: build arrays `sphValues`, `cylValues` from min→max step **0.25** |
-| Cell | Render `_ / _ / _` (three placeholders) |
-| UX | Overflow scroll; sticky first column + header row |
-| Family | SV: SPH×CYL as primary. KT/V2: same range fields if present; document simplified matrix or “range summary only” until follow-on |
-
-**Helper (frontend)**
-
-```ts
-function steppedRange(min: number, max: number, step = 0.25): number[] {
-  // inclusive ends; normalize float with fixed(2); handle min > max by swapping or rejecting at API
-}
-```
-
-Do **not** call an API per cell.
+Matrix uses `steppedPowerRange` (0.25) on the client — no per-cell API.
 
 ---
 
-## 6. Phases
+## 7. Phases
 
-### Phase A — Attribute masters + Attributes UI
+### Phase A — Attribute masters + Attributes UI — **done**
 
-- Prisma models + migration + seed  
-- Attribute APIs  
-- `/inventory/attributes` tabs CRUD + active switch  
-- Nav link  
+### Phase B — Product create + list/grid — **done** (auto SKU)
 
-**Done when:** Admin can add “Tintable”, deactivate a coating, and list active-only.
+### Phase C — Product detail matrix UI — **done**
 
-### Phase B — Product create + list/grid
+### Phase D — Optional hardening (follow-on)
 
-- `LensProduct` model + APIs  
-- Create form with cascade selects  
-- Catalog list + grid + search/filters  
-- Compatibility enforced server-side  
+Clarify terms so docs stay clear:
 
-**Done when:** Admin creates a product and sees it in list and grid.
-
-### Phase C — Product detail matrix UI
-
-- Detail page header  
-- Frontend SPH×CYL matrix from saved range; `_ / _ / _` cells  
-- Sticky headers / scroll  
-
-**Done when:** Opening a product matches CLIENT-PLAN matrix description (visual).
-
-### Phase D — Hardening (same slice if time)
-
-- Audit log on attribute/product create-update  
-- Empty states, validation messages  
-- Optional: prevent exact duplicate attribute combo + identical range  
-- KT/V2 extra fields on form (matrix may stay SPH×CYL-only)
+| Item | Meaning | Status |
+|------|---------|--------|
+| **Audit log** | Record who created/updated attributes/products (activity / audit helpers) | Partially present on product create/update via service activity messages — expand if product wants full audit trail |
+| **Overlap / duplicate range** | Reject two products with same attributes whose power ranges collide (or same SKU) | Same attrs+range already blocked via duplicate SKU; **broader partial-range overlap** (e.g. −6…0 vs −4…+2) not required yet |
+| Empty states / validation copy | UX polish | Ongoing |
+| KT/V2 matrix axes | Beyond SPH×CYL | Later; form fields exist |
 
 ---
 
-## 7. Explicit non-goals (do not implement here)
+## 8. Explicit non-goals
 
 | Item | Why |
 |------|-----|
-| Bulk insert of every SPH×CYL leaf at qty 0 | Out of scope; inventory strategy later |
-| Lazy “insert on first stock edit” | Later; matrix remains display-only |
-| Wire matrix to `quantity` / reorder | RW-08 / stock module |
+| Free-text Admin SKU on create | Locked to auto format |
+| Bulk insert of every SPH×CYL leaf at qty 0 | Inventory later |
+| Live stock on matrix | See `stock-management-notes.md` |
 | Delete legacy lens tables | Orders/cart depend on them |
-| Replace wholesale `CatalogProductLine` | Different product (shop cards) |
+| Replace wholesale `CatalogProductLine` | Different concept |
 | Customer-facing fetch from `LensProduct` | Follow-on cutover |
 
 ---
 
-## 8. Testing checklist
+## 9. Testing checklist
 
-- [ ] Attribute create / rename / deactivate  
-- [ ] Create product rejects inactive FK and illegal base↔material  
-- [ ] Create product rejects duplicate `skuCode`  
-- [ ] List pagination + filters; grid toggle  
-- [ ] Detail matrix row/col counts match `(sph steps) × (cyl steps)` for sample ranges (plus and minus)  
-- [ ] Large range still scrolls; header remains readable  
-- [ ] Legacy `/api/lenses*` and existing orders unaffected  
+- [x] Attribute create / rename / deactivate  
+- [x] Create product rejects inactive FK and illegal base↔material  
+- [x] Create product builds unique auto `skuCode`; duplicate attrs+range rejected  
+- [x] List pagination + filters; grid toggle  
+- [x] Detail matrix row/col counts from range @ 0.25  
+- [ ] Broader partial range-overlap engine (optional Phase D)  
+- [x] Legacy `/api/lenses*` and existing orders unaffected  
 
----
-
-## 9. Suggested PR order
-
-1. Schema + seed + attribute APIs + Attributes page  
-2. Product APIs + create form + list/grid  
-3. Product detail matrix UI  
-4. Polish (audit, empty states, KT/V2 fields)
+Unit/integration coverage lives under `app/lib/catalog/*.test.ts` and smoke scripts under `scripts/lens-catalog-*.mjs`.
 
 ---
 
 ## 10. Open engineering decisions
 
-1. Final model names (`LensProduct` vs `ProductSku`).  
-2. Index stored as `Decimal` vs string code.  
-3. Sign convention for ranges (always store min≤max numerically vs optical “from −6 to 0”).  
-4. Whether existing WIP in `admin-catalog.ts` / products-catalog pages is extended or replaced — align to this guide’s attribute FK model.  
-5. When to introduce exact-power stock table (separate RW after this UI ships).
+1. Broader **partial** range overlap policy (same attrs, intersecting SPH×CYL) — if/when client asks.  
+2. Whether PATCH that changes attrs/range should **rebuild** `skuCode` automatically (recommend yes; confirm before shipping).  
+3. When to introduce exact-power stock table (separate RW; stock-management-notes).  
+4. Long-term: retire or bridge older `CatalogProduct` / range→leaf path vs `LensProduct` master.
