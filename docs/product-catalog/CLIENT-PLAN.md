@@ -37,8 +37,8 @@ Existing stock and order systems keep working. This slice builds the **new produ
 ### Out of scope (this phase)
 
 - Saving stock numbers into every matrix cell / auto-creating thousands of empty stock rows
-- Procurement (PO → receive), reorder rules, power-wise stock APIs beyond display placeholders  
-  *(Future stock rules: see [stock-management-notes.md](../stock-management-notes.md).)*
+- Procurement (PO → receive), reorder rules, power-wise stock beyond display placeholders  
+  *(See [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md).)*
 - Customer website / mobile catalog rewrite
 - Removing or replacing `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` tables
 - Hold / Archive shop visibility (can follow once master is stable)

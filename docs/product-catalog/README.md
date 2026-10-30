@@ -11,8 +11,9 @@ Approved hierarchy (Family → Base → Material + Index / Coating / Color; rang
 | [CLIENT-PLAN.md](./CLIENT-PLAN.md) | Client + product | Screens, flows, what admin does, acceptance |
 | [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | Schema, APIs, UI routes, phases, checklists |
 
-**Related:** tracked as **[RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers)** in [`../remaining-work.md`](../remaining-work.md). Stock notes for later: [`../stock-management-notes.md`](../stock-management-notes.md).
+**Related:** tracked as **[RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers)** in [`../remaining-work.md`](../remaining-work.md).  
+**Next (stock + PO):** [`../stock-management/`](../stock-management/) — live matrix, receipts, adjustments, reorder (catalog-centered). Feedback notes: [`../stock-management-notes.md`](../stock-management-notes.md).
 
 **SKU rule (locked):** product `skuCode` is **auto-built** from attribute codes + power range — Admin does **not** type a free-text SKU.
 
-**Out of this slice:** live stock on matrix cells, bulk insert of every 0.25 power into the DB, procurement PO/receive, shop/mobile checkout rewrite, deleting legacy lens tables.
+**Out of product-catalog slice:** live stock on matrix cells, procurement PO/receive, shop/mobile checkout rewrite, deleting legacy lens tables — covered under stock-management plans.
