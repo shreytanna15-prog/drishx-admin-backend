@@ -6,7 +6,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Project agent skills
 
-Repo-local skills live in `.agents/skills/` (also linked as `.agent/` and `.cursor/skills/`).
+Repo-local skills live in `.agents/skills/`.
 
 Read the matching skill **before** substantial work:
 

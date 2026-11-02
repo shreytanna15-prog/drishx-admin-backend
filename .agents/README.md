@@ -1,8 +1,6 @@
 # Project agent skills (Drishx-admin-and-backend)
 
-Canonical folder: **`.agents/skills/`** (skills CLI standard).  
-Alias: **`.agent/`** → same directory (junction).  
-Cursor discovery: **`.cursor/skills/`** junctions into each skill.
+Skills live in **`.agents/skills/`** as markdown (`SKILL.md` + optional references).
 
 ## Installed community skills
 
