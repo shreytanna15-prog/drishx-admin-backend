@@ -2,7 +2,7 @@
 
 Client feedback captured during Product Catalog review (Oct 2026).
 
-**Implementation plans (use these):** [`stock-management/`](./stock-management/) — [CLIENT-PLAN](./stock-management/CLIENT-PLAN.md) · [DEVELOPER-GUIDE](./stock-management/DEVELOPER-GUIDE.md)
+**Implementation plans (use these):** [`stock-management/`](./stock-management/) — [CLIENT-PLAN](./stock-management/CLIENT-PLAN.md) · [CLIENT-FOLLOW-ONS](./stock-management/CLIENT-FOLLOW-ONS.md) · [DEVELOPER-GUIDE](./stock-management/DEVELOPER-GUIDE.md)
 
 Related: [product-catalog](./product-catalog/), [RW-08](./remaining-work.md#rw-08--procurement-purchase-order--receive--close-power-wise), [RW-06](./remaining-work.md#rw-06--reports-module-client-report-catalog-phased).
 

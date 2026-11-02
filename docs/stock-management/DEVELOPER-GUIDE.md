@@ -17,7 +17,7 @@
 3. **Reuse** PO / receive / open-power-lock / Confirm-only post — do not rewrite from scratch.  
 4. **Rebind** stock identity from legacy `lensType`+`lensId` to **catalog product + power** (new leaf table).  
 5. Follow `drishx-api-auth-audit`, `drishx-client-api`, `drishx-prisma`.  
-6. Never add a free-edit `quantity` field in UI; only Confirm Receipt + Stock Adjustment.
+6. Never add a free-edit `quantity` field in UI. Stock moves only via audited events: Confirm Receipt (accepted), Stock Adjustment / stock check, reserve/release, pack deduct, return/reversal (see CLIENT-PLAN §5).
 
 ---
 
@@ -109,7 +109,9 @@ model LensProductPower {
   add            Decimal?
   axis           Int?
   eye            String?
-  quantity       Int      @default(0)
+  quantity       Int      @default(0)   // on hand
+  /// reserved often derived from open orders; store or compute — pick one and document in code
+  blockedQty     Int      @default(0)   // discrepancy hold until Admin adjusts
   minStock       Int      @default(0)   // threshold
   targetStock    Int      @default(0)
   /// Optional bridge while shop still uses legacy leaves
@@ -200,13 +202,57 @@ Reorder-check route today: `app/api/inventory/reorder-check/route.ts`.
 
 From RW-08 / CLIENT-PLAN — do not regress:
 
-1. Manual Run reorder only.  
+1. Manual Run reorder only; consolidated queue; draft editable before approve.  
 2. Power-wise stock truth; range for grouping/bills.  
 3. Current not free-editable.  
-4. Open PO → no second PO for same power.  
-5. Stock post only on Confirm Receipt (+ Stock Adjustment).  
+4. Open PO → no second PO for same power; expose **incoming** on UI/API.  
+5. On-hand posts: Confirm Receipt (**accepted** only) + Stock Adjustment / stock check + pack deduct + return/reversal. Available also changes via reserve/release / blocked. Never free-edit qty.  
 6. Close outstanding with reason list.  
-7. Incoming = open PO qty for that power.  
+7. Incoming = outstanding qty on open PO lines for that power.  
+8. Reorder math per **§6.1** (available + incoming; never double-count reserved).  
+9. Reject adjustments that would make available &lt; 0.  
+10. Stock check: Employee API must **not** return system qty; Admin verifies.  
+11. Open count session → **freeze** stock mutations on those powers until complete.  
+12. Pick short → blocked/discrepancy until Admin adjusts.  
+13. Full audit on every stock-affecting mutation.
+
+Client follow-ons (order modify, WAC, etc.): [CLIENT-FOLLOW-ONS.md](./CLIENT-FOLLOW-ONS.md) — do not implement inside S1–S5 unless stock hooks only.
+
+### 6.1 Reorder calculation (implement exactly)
+
+Align with [CLIENT-PLAN §8.1](./CLIENT-PLAN.md). Existing helpers in `app/lib/procurement-rules.ts` already use:
+
+- gate: `available <= minStock` (`isAtOrBelowMinimum`)
+- need: `required = trunc(targetStock - available - incoming)` (`computeRecommendedQuantity` base)
+
+**Definitions (catalog power leaf):**
+
+```
+available = onHand - reserved - blocked
+incoming  = sum(outstanding open-PO qty for this power)   // OPEN / SENT / PARTIALLY_RECEIVED
+```
+
+**Run reorder per power:**
+
+```
+if openPoExists(power):
+  // do NOT create new PR/PO line for this power
+  // still return position for UI: available, incoming, threshold, target
+  skipNewRequirement = true
+else if available <= threshold:  // threshold = minStock
+  required = max(0, target - available - incoming)
+  // unreserved customer shortage (never reserved):
+  required = max(required, max(0, unreservedShortage - incoming))
+  // NEVER add `reserved` into required (already excluded from available)
+  enqueue consolidated queue with required
+else:
+  skip
+```
+
+**Worked example (client):** onHand 20, reserved 8, blocked 2 → available 10; threshold 12; target 30; incoming 10 on open PO → **skip new PO**; UI shows Incoming 10.  
+If no open PO: `required = max(0, 30 - 10 - 0) = 20`.
+
+**Code touchpoints:** `procurement-rules.ts`, `reorder-check` route, `OpenPurchaseOrderPower` (rebind to `lensProductPowerId`), power-wise + Run reorder UI columns for incoming.
 
 ---
 
@@ -214,43 +260,51 @@ From RW-08 / CLIENT-PLAN — do not regress:
 
 ### S1 — Live matrix on `LensProduct`
 
-- Add `LensProductPower` migration  
+- Add `LensProductPower` migration (include reserved/blocked fields or compute reserved from orders)  
 - GET matrix + PATCH rules (upsert leaf)  
 - Wire product detail UI  
-- Seed optional demo product powers only if useful for QA  
 
 **Done when:** Admin opens a catalog product and sees real C/T/Target; threshold/target save.
 
-### S2 — Stock Adjustment + movements
+### S2 — Stock Adjustment + movements + guards
 
 - `StockAdjustment` model + API + UI  
-- Post qty + `StockMovement`  
-- Reason codes: physical_mismatch, damaged, counting_error, wrong_entry, other (see audit-and-logs-spec)  
+- Post qty + `StockMovement` + audit  
+- Negative-available guard  
+- Reason codes: physical_mismatch, damaged, counting_error, wrong_entry, other  
 
-**Done when:** Adjustment changes current; appears in transactions.
+**Done when:** Adjustment changes current; appears in transactions; illegal −qty rejected.
+
+### S2b — Stock Check + freeze
+
+- Count session model (product/range, status, frozen power ids)  
+- Employee submit counted qty only (strip live qty from responses)  
+- Admin verify → create adjustment  
+- Block Confirm Receipt / other adjusts on frozen powers  
+
+**Done when:** End-to-end count → verify → adjust → unfreeze.
 
 ### S3 — Rebind PO + Confirm Receipt
 
 - Lines / locks / receipt lines use `lensProductPowerId`  
-- Queue “Add from reorder” uses new powers  
-- Confirm Receipt updates `LensProductPower.quantity`  
+- Accept/reject lines; only accepted updates on hand  
 - Dual-write to legacy **only** if still required for orders  
 
-**Done when:** Full PO → receive → confirm updates catalog power stock; open-PO lock works on new id.
+**Done when:** PO → receive → confirm updates catalog power stock; open-PO lock works.
 
-### S4 — Overview, power-wise, Run reorder
+### S4 — Overview, power-wise, reserved/blocked, Run reorder
 
-- ReorderRule on new leaf  
-- Reorder-check + requests queue  
-- Overview + power-wise list filters  
+- ReorderRule on new leaf; reorder-check implements **§6.1**  
+- Show incoming; skip new requirement when open PO exists  
+- Overview + power-wise; pick-discrepancy → blocked  
 
-**Done when:** Run reorder raises demand for catalog powers; overview matches matrix.
+**Done when:** Example (available 10, incoming 10, open PO) creates no second PO and shows incoming; required formula matches CLIENT-PLAN.
 
-### S5 — Reports + returns alignment + polish
+### S5 — Reports + polish
 
-- Stock reports queries on new movements  
-- Returns credit/stock paths use power id when touching inventory  
-- Remove or hide legacy-only stock-matrix if fully replaced  
+- Stock reports on new movements  
+- Returns stock hooks use power id (full returns UX = follow-on)  
+- Hide legacy-only stock-matrix if replaced  
 
 ---
 
@@ -258,11 +312,14 @@ From RW-08 / CLIENT-PLAN — do not regress:
 
 - [ ] Matrix cell count = stepped range; missing leaf shows 0 current  
 - [ ] Cannot PATCH quantity directly via a public “set qty” admin field  
-- [ ] Adjustment: before/after + reason + actor  
-- [ ] Confirm Receipt idempotent (existing `confirmationKey`) still works  
+- [ ] Adjustment: before/after + reason + actor; available cannot go negative  
+- [ ] Employee stock-check response has no system qty  
+- [ ] Frozen powers reject concurrent stock posts  
+- [ ] Confirm Receipt posts accepted only; rejected stays out  
+- [ ] Confirm Receipt idempotent (`confirmationKey`)  
 - [ ] Second PO for same power while open → rejected  
-- [ ] Close outstanding unlocks reorder  
-- [ ] Catalog SKU + power labels appear on PO PDF/Excel  
+- [ ] Reorder: `required = max(0, target - available - incoming)` (+ unreserved shortage max); reserved not added again  
+- [ ] Open PO → no second requirement; API/UI returns **incoming**  
 - [ ] Legacy shop order path still works until explicit cutover  
 
 ---
@@ -270,10 +327,11 @@ From RW-08 / CLIENT-PLAN — do not regress:
 ## 9. Suggested PR order
 
 1. `LensProductPower` + matrix GET/PATCH + product detail UI (S1)  
-2. StockAdjustment + transactions read API (S2)  
-3. PO/receipt/reorder FK rebind + confirm post (S3)  
-4. Overview / power-wise / Run reorder (S4)  
-5. Reports + cleanup (S5)  
+2. StockAdjustment + transactions + available guard (S2)  
+3. Stock Check session + freeze + employee/admin APIs (S2b)  
+4. PO/receipt/reorder FK rebind + confirm accepted-only (S3)  
+5. Overview / power-wise / reserved-blocked / Run reorder (S4)  
+6. Reports + cleanup (S5)  
 
 ---
 
@@ -281,6 +339,7 @@ From RW-08 / CLIENT-PLAN — do not regress:
 
 1. Exact unique constraint for KT/V2 powers (nullable add/axis/eye).  
 2. Dual-write to `SingleVisionLens.quantity` during S3 — yes/no (default **no** if shop not demoing stock).  
-3. Adjustment approval workflow vs single Admin apply.  
+3. Freeze granularity: whole product range vs powers on the count sheet.  
 4. Deprecate `/inventory/stock-matrix` vs keep as product list facade.  
-5. When shop/cart switch to `lensProductPowerId` (separate cutover RW).
+5. When shop/cart switch to `lensProductPowerId` (separate cutover RW).  
+6. Order/returns/WAC follow-ons — see CLIENT-FOLLOW-ONS.md.
