@@ -19,6 +19,7 @@
 |----|------|-------|
 | RC-01 | Admin edit client + detail UX + verify rules + change history | backend (admin panel); APIs as needed |
 | RC-02 | Unwire / remove photo prescription orders from RX | backend, website, mobile, admin panel |
+| RC-03 | Product catalog: optional material + power range as attribute | backend (admin panel); APIs as needed |
 
 ---
 
@@ -159,4 +160,91 @@ RX form orders stay as today. Photo prescription orders (`POST /api/orders/photo
 ### Suggested first PR
 
 Strip combined UI copy + RX-queue photo inclusion. Then unwire `isPhotoPrescriptionOrder` from hold/list/notify. Then retire photo create (API + mobile entry) and clean reports/filters that mixed photo into RX.
+
+---
+
+## RC-03 — Product catalog: optional material + power range as attribute
+
+### Type
+
+Change — product catalog / attributes (critical)
+
+### Goal
+
+1. **Material is optional** on create product — if Admin skips it, that is fine (omit from cascade/SKU when absent).  
+2. Stop asking Admin to **type** SPH/CYL range numbers on create product. Instead they maintain **power-range masters** once (new Attributes tab), then **select** an existing range when creating a product. That range is part of product identity and the (interim) SKU — same Family · Base · Material · Index with **different ranges** are **different products** (different pricing / full matrix), even when overlapping cell powers exist (e.g. −4.25 and +1.25).
+
+### Current state
+
+- Attributes tabs: Family, Base, Material, Index, Coating, Color — no power-range master.
+- Create product (`/inventory/products-catalog/new`): cascade Family → Base → Material (required-ish) + number inputs for SPH/CYL min–max.
+- SKU auto-built from attribute codes + inline range bounds; uniqueness = same attrs + same range.
+- Only a couple of **test** catalog products exist in practice.
+
+### Locked behaviour
+
+1. **Material optional**  
+   Create/edit product may omit Material. No Material → do not require it in cascade; omit from SKU/display when absent.
+
+2. **Power range attribute (new tab)**  
+   - New Attributes tab + **list page** for power ranges (same list/active/edit patterns as other tabs where they fit).  
+   - **Add UX differs** from a normal name/code form: Admin picks bounds via **select fields** (customer/mobile-style power pickers), not free number typing.  
+   - Option universe **−40 … +8**, stepped as:
+     | Band | Step |
+     |------|------|
+     | −40 → −16 | **0.5** |
+     | after −16 toward +4 (e.g. −15.75 …) | **0.25** |
+     | after **+4** → +8 | **0.5** |
+   - Show options in the select the same way mobile shows power options (ordering / labels).
+
+3. **How Admin names a range**  
+   Client language for one range is slash form, e.g. **`-6.00/+2.00`** (SPH min/max).  
+   Store **SPH min + SPH max** (required) and **CYL min + CYL max** (same select options so create product does not fall back to number inputs).  
+   Auto display label from SPH bounds as `-6.00/+2.00`; show CYL summary beside it in the list (e.g. `Cyl 0.00/-2.00`).
+
+4. **Create product**  
+   Replace SPH/CYL number inputs with a **dropdown of existing active power-range attributes** (CRUD/list APIs parallel to other attribute types).  
+   Selecting a range attaches that master to the product; bounds drive matrix + identity.
+
+5. **Identity / SKU (interim)**  
+   Full SKU **string redesign is a later RC**. For this task: keep encoding range from the **selected attribute’s bounds** into the current-style SKU so  
+   `SV · HC · PLAIN · 1.56` + range **−6…+2** ≠ same attrs + **−6…+4**.  
+   Duplicate same attributes + same power-range attribute (or same bounds) remains rejected.
+
+6. **Existing products — no migration**  
+   Do **not** build a data migration. Only ~2 test products: developer should **delete existing catalog products and recreate** them under the new model after shipping. Call this out clearly in the PR / notes.
+
+### Scope (in)
+
+- Material optional on product create/edit + SKU/display when absent  
+- Power-range attribute type: schema, APIs (list/create/update/active), Attributes tab + list + add-with-selects UI  
+- Shared stepped option helper (−40…+8 rules above) for admin selects  
+- Create product: select power-range attribute; remove SPH/CYL free number inputs for range  
+- Interim SKU/uniqueness from selected range bounds  
+- Dev note: delete test products and recreate (no migrate)
+
+### Out of scope
+
+- Full SKU format redesign (separate future RC)  
+- Migrating or rewriting existing production catalog rows  
+- Changing customer/mobile wholesale order UX beyond reusing the same *style* of power select in admin  
+- Stock matrix / pricing rule redesign beyond “range is part of product identity”
+
+### Acceptance
+
+- [ ] Product can be saved **without** Material  
+- [ ] Attributes has a **Power range** tab with list + add/edit via selects (−40…+8 step rules)  
+- [ ] Range label reads like `-6.00/+2.00` (SPH); CYL bounds stored and visible  
+- [ ] Create product picks an existing power range (no typed SPH/CYL range numbers)  
+- [ ] Same other attrs + different power range ⇒ different product / different interim SKU  
+- [ ] Power-range APIs work like other attribute masters (active-only in create dropdowns)  
+- [ ] Docs/task note followed: delete ~2 test products and recreate; no migration path required
+
+### Suggested first PR
+
+Power-range option helper + attribute API/schema + Attributes tab UI. Then wire create product to select a range + make Material optional. Then interim SKU from selected bounds; delete/recreate test products locally.
+
+### Follow-up (not this RC)
+
+SKU string formatting / display redesign — track as a later `RC-*` when ready.
 
