@@ -1,7 +1,7 @@
 /**
- * RW-05 — RX & photo prescription orders stay admin-only until warehouse release.
+ * RW-05 / RC-02 — RX prescription orders stay admin-only until warehouse release.
  *
- * warehouseHold=true on create for RX/photo. Assignment alone never exposes
+ * warehouseHold=true on create for RX. Assignment alone never exposes
  * the order to employees. Staff see it only when assigned AND released.
  */
 
@@ -26,7 +26,11 @@ export function isColorLensNotes(notes: string | null | undefined): boolean {
   return typeof notes === "string" && notes.includes(COLOR_LENS_NOTES_MARKER);
 }
 
-/** Photo prescription (not RX form, not color reference). */
+/**
+ * RC-02: legacy photo prescription rows (not RX form, not color reference).
+ * Photo orders are retired — this is for legacy classification only
+ * (e.g. excluding old rows from ready-stock). It is NOT a hold candidate.
+ */
 export function isPhotoPrescriptionOrder(
   order: Pick<HoldOrderFields, "notes" | "orderImageUrl">
 ): boolean {
@@ -36,10 +40,11 @@ export function isPhotoPrescriptionOrder(
   return true;
 }
 
+/** RC-02: RX form orders only (photo prescription is retired). */
 export function isPrescriptionHoldCandidate(
-  order: Pick<HoldOrderFields, "notes" | "orderImageUrl">
+  order: Pick<HoldOrderFields, "notes">
 ): boolean {
-  return isRxOrderNotes(order.notes) || isPhotoPrescriptionOrder(order);
+  return isRxOrderNotes(order.notes);
 }
 
 export function isWarehouseHoldActive(

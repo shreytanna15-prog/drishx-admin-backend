@@ -13,7 +13,7 @@ import { prisma } from "@/app/lib/prisma";
 
 /**
  * POST /api/orders/:id/warehouse-release
- * Admin-only: mark RX/photo hold order available at warehouse.
+ * Admin-only: mark RX hold order available at warehouse.
  * Assignment alone does not release; this action does (idempotent).
  */
 export async function POST(

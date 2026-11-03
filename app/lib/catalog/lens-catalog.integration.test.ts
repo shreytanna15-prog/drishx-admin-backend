@@ -16,7 +16,30 @@ const RUN =
 
 const createdProductIds: string[] = [];
 const createdAttrIds: { type: string; id: string }[] = [];
+const createdRangeIds: string[] = [];
 const RUN_TAG = Date.now();
+
+/** Find-or-create a power range master (tracked for cleanup only when created here). */
+async function ensureRange(b: {
+  sphMin: number;
+  sphMax: number;
+  cylMin: number;
+  cylMax: number;
+}) {
+  const { prisma } = await import("@/app/lib/prisma");
+  const existing = await prisma.lensPowerRange.findFirst({
+    where: {
+      sphMin: b.sphMin,
+      sphMax: b.sphMax,
+      cylMin: b.cylMin,
+      cylMax: b.cylMax,
+    },
+  });
+  if (existing) return existing;
+  const created = await prisma.lensPowerRange.create({ data: b });
+  createdRangeIds.push(created.id);
+  return created;
+}
 
 describe("lens catalog integration", { skip: !RUN }, () => {
   before(async () => {
@@ -38,6 +61,9 @@ describe("lens catalog integration", { skip: !RUN }, () => {
       if (row.type === "coating") {
         await prisma.lensCoating.deleteMany({ where: { id: row.id } });
       }
+    }
+    for (const id of createdRangeIds) {
+      await prisma.lensPowerRange.deleteMany({ where: { id } });
     }
   });
 
@@ -111,6 +137,13 @@ describe("lens catalog integration", { skip: !RUN }, () => {
       ]);
     assert.ok(family && baseHc && materialPlain && materialPoly && index);
 
+    const smallRange = await ensureRange({
+      sphMin: 0,
+      sphMax: 1,
+      cylMin: 0,
+      cylMax: 0.5,
+    });
+
     await assert.rejects(
       () =>
         createLensProduct({
@@ -119,10 +152,7 @@ describe("lens catalog integration", { skip: !RUN }, () => {
           baseId: baseHc.id,
           materialId: materialPoly.id,
           indexId: index.id,
-          sphMin: 0,
-          sphMax: 1,
-          cylMin: 0,
-          cylMax: 0.5,
+          powerRangeId: smallRange.id,
           actorUserId: admin.id,
         }),
       (err: unknown) =>
@@ -135,19 +165,23 @@ describe("lens catalog integration", { skip: !RUN }, () => {
     );
     // Unique band per run so duplicate-combo guard does not collide
     const sphMax = 0.25 + (RUN_TAG % 10) * 0.25;
+    const range = await ensureRange({
+      sphMin: 0,
+      sphMax,
+      cylMin: 0,
+      cylMax: 0.5,
+    });
     const product = await createLensProduct({
       name: "E2E HC Plain SV",
       familyId: family.id,
       baseId: baseHc.id,
       materialId: materialPlain.id,
       indexId: index.id,
-      sphMin: 0,
-      sphMax,
-      cylMin: 0,
-      cylMax: 0.5,
+      powerRangeId: range.id,
       actorUserId: admin.id,
     });
     createdProductIds.push(product.id);
+    assert.equal(product.powerRangeId, range.id);
 
     const expectedSku = buildLensProductSkuCode({
       familyCode: "SV",
@@ -195,15 +229,13 @@ describe("lens catalog integration", { skip: !RUN }, () => {
     // Unique band per run
     const sphMin = -6 - (RUN_TAG % 5);
     const sphMax = sphMin + 2;
+    const range = await ensureRange({ sphMin, sphMax, cylMin: -2, cylMax: 0 });
     const first = await createLensProduct({
       name: "Dup A",
       familyId: family.id,
       baseId: base.id,
       materialId: material.id,
-      sphMin,
-      sphMax,
-      cylMin: -2,
-      cylMax: 0,
+      powerRangeId: range.id,
       actorUserId: admin.id,
     });
     createdProductIds.push(first.id);
@@ -215,15 +247,96 @@ describe("lens catalog integration", { skip: !RUN }, () => {
           familyId: family.id,
           baseId: base.id,
           materialId: material.id,
-          sphMin,
-          sphMax,
-          cylMin: -2,
-          cylMax: 0,
+          powerRangeId: range.id,
           actorUserId: admin.id,
         }),
       (err: unknown) =>
         err instanceof LensProductServiceError &&
         err.code === "DUPLICATE_COMBO_RANGE"
     );
+
+    // Same attrs + a different power range is a different product / SKU.
+    const widerRange = await ensureRange({
+      sphMin,
+      sphMax: sphMax + 2,
+      cylMin: -2,
+      cylMax: 0,
+    });
+    const second = await createLensProduct({
+      name: "Dup C (wider range)",
+      familyId: family.id,
+      baseId: base.id,
+      materialId: material.id,
+      powerRangeId: widerRange.id,
+      actorUserId: admin.id,
+    });
+    createdProductIds.push(second.id);
+    assert.notEqual(second.skuCode, first.skuCode);
+  });
+
+  it("allows product without material and omits it from the SKU", async () => {
+    const { prisma } = await import("@/app/lib/prisma");
+    const { createLensProduct } = await import(
+      "@/app/lib/catalog/lens-product-service"
+    );
+    const admin = await prisma.user.findFirst({
+      where: { role: "ADMIN", isActive: true },
+      select: { id: true },
+    });
+    assert.ok(admin);
+    const [family, base] = await Promise.all([
+      prisma.lensFamily.findUnique({ where: { code: "SV" } }),
+      prisma.lensBase.findUnique({ where: { code: "BRC" } }),
+    ]);
+    assert.ok(family && base);
+
+    const sphMin = -8 - (RUN_TAG % 5);
+    const range = await ensureRange({
+      sphMin,
+      sphMax: sphMin + 1,
+      cylMin: -1,
+      cylMax: 0,
+    });
+    const product = await createLensProduct({
+      name: "E2E no material",
+      familyId: family.id,
+      baseId: base.id,
+      materialId: null,
+      powerRangeId: range.id,
+      actorUserId: admin.id,
+    });
+    createdProductIds.push(product.id);
+    assert.equal(product.materialId, null);
+    assert.equal(product.material, null);
+    assert.ok(product.skuCode.startsWith("SV-BRC-S"));
+  });
+
+  it("creates / lists a power range via the service", async () => {
+    const { prisma } = await import("@/app/lib/prisma");
+    const { createLensPowerRange, listLensPowerRanges, updateLensPowerRange } =
+      await import("@/app/lib/catalog/lens-power-range-service");
+    const admin = await prisma.user.findFirst({
+      where: { role: "ADMIN", isActive: true },
+      select: { id: true },
+    });
+    assert.ok(admin);
+
+    const sphMin = -20 - (RUN_TAG % 5) * 0.5;
+    const created = await createLensPowerRange({
+      sphMin,
+      sphMax: sphMin + 1,
+      cylMin: -2,
+      cylMax: 0,
+      actorUserId: admin.id,
+    });
+    createdRangeIds.push(created.id);
+    assert.match(created.label, /^-\d+\.\d{2}\/-\d+\.\d{2}$/);
+
+    await updateLensPowerRange(created.id, {
+      isActive: false,
+      actorUserId: admin.id,
+    });
+    const active = await listLensPowerRanges(true);
+    assert.ok(!active.some((r) => r.id === created.id));
   });
 });

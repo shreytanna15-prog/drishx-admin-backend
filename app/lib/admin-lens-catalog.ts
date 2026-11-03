@@ -24,16 +24,39 @@ export type LensAttribute = {
   updatedAt: string;
 };
 
+/** RC-03 power-range master (SPH/CYL bounds). `label` is `-6.00/+2.00`. */
+export type LensPowerRange = {
+  id: string;
+  label: string;
+  cylSummary: string;
+  sphMin: number;
+  sphMax: number;
+  cylMin: number;
+  cylMax: number;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LensPowerRangeBounds = {
+  sphMin: number;
+  sphMax: number;
+  cylMin: number;
+  cylMax: number;
+};
+
 export type LensProduct = {
   id: string;
   skuCode: string;
   name: string;
   familyId: string;
   baseId: string;
-  materialId: string;
+  materialId: string | null;
   indexId: string | null;
   coatingId: string | null;
   colorId: string | null;
+  powerRangeId: string | null;
   rangeType: string;
   sphMin: number;
   sphMax: number;
@@ -49,11 +72,13 @@ export type LensProduct = {
   updatedAt: string;
   family: { id: string; code: string; name: string };
   base: { id: string; code: string; name: string };
-  material: { id: string; code: string; name: string };
+  material: { id: string; code: string; name: string } | null;
   index: { id: string; code: string; name: string; value: number | null } | null;
   coating: { id: string; code: string; name: string } | null;
   color: { id: string; code: string; name: string } | null;
+  powerRange: { id: string; label: string; cylSummary: string } | null;
   attributeSummary: string;
+  rangeLabel: string;
   rangeSummary: string;
 };
 
@@ -116,6 +141,34 @@ export function updateLensAttributeRequest(
   );
 }
 
+export function fetchLensPowerRanges(opts?: { activeOnly?: boolean }) {
+  const sp = new URLSearchParams();
+  if (opts?.activeOnly) sp.set("activeOnly", "true");
+  const qs = sp.toString();
+  return adminFetch<{ items: LensPowerRange[] }>(
+    `/api/admin/catalog/power-ranges${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function createLensPowerRangeRequest(
+  body: LensPowerRangeBounds & { sortOrder?: number; isActive?: boolean }
+) {
+  return adminFetch<{ item: LensPowerRange }>(`/api/admin/catalog/power-ranges`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateLensPowerRangeRequest(
+  id: string,
+  body: Partial<LensPowerRangeBounds> & { sortOrder?: number; isActive?: boolean }
+) {
+  return adminFetch<{ item: LensPowerRange }>(
+    `/api/admin/catalog/power-ranges/${id}`,
+    { method: "PATCH", body: JSON.stringify(body) }
+  );
+}
+
 export function fetchAttributeCompatibility(baseId?: string) {
   const sp = new URLSearchParams();
   if (baseId) sp.set("baseId", baseId);
@@ -172,3 +225,9 @@ export function updateLensProductRequest(
 }
 
 export { steppedRange as steppedPowerRange } from "./catalog/lens-product-range";
+export {
+  formatCylSummary,
+  formatPowerLabel,
+  formatPowerRangeLabel,
+  getPowerSelectOptions,
+} from "./catalog/catalog-power-select-options";

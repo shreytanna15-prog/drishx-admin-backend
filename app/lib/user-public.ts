@@ -35,6 +35,7 @@ export type SafeUser = {
   alternateMobileNumber: string | null;
   whatsappNumber: string | null;
   emailVerifiedAt: Date | null;
+  addressVerifiedAt: Date | null;
   shopName: string | null;
   businessType: string | null;
   addressLine1: string | null;
@@ -110,6 +111,7 @@ export function toSafeUser(
     alternateMobileNumber: user.alternateMobileNumber,
     whatsappNumber: user.whatsappNumber,
     emailVerifiedAt: user.emailVerifiedAt ?? null,
+    addressVerifiedAt: user.addressVerifiedAt ?? null,
     shopName: user.shopName,
     businessType: user.businessType,
     addressLine1: user.addressLine1,

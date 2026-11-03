@@ -1,15 +1,20 @@
 /**
  * Phase E — customer self-service profile PATCH → PENDING_REVIEW.
+ * RC-01: unverify mobile/email on change; lock GST/PAN when ACTIVE; clear address verified.
  */
 
-import type { Prisma, User } from "@prisma/client";
+import { Prisma, type User } from "@prisma/client";
+import { ADDRESS_VERIFY_FIELDS } from "./admin-customer-field-labels";
 import {
   composeBusinessAddress,
+  normalizeGstin,
+  normalizePan,
   optionalTrim,
   parseSparseRegistrationBody,
   resolveBusinessName,
   validateOptionalGstinPan,
 } from "./customer-registration";
+import { normalizeIndianMobile } from "./otp/mobile-normalize";
 
 export type CustomerProfilePatchResult =
   | { ok: true; data: Prisma.UserUpdateInput; fieldsTouched: string[] }
@@ -49,12 +54,28 @@ const PROFILE_KEYS = [
   "businessAddress",
 ] as const;
 
+type ExistingProfile = Pick<
+  User,
+  | "businessName"
+  | "addressLine1"
+  | "addressLine2"
+  | "city"
+  | "state"
+  | "pincode"
+  | "email"
+  | "mobileNumber"
+  | "gstNumber"
+  | "panNumber"
+  | "gstinVerifyStatus"
+  | "addressVerifiedAt"
+>;
+
 /**
  * Parse customer self-update body. Any successful apply must flip approval to pending.
  */
 export function parseCustomerProfilePatch(
   body: Record<string, unknown>,
-  existing: Pick<User, "businessName" | "addressLine1" | "addressLine2" | "city" | "state" | "pincode">
+  existing: ExistingProfile
 ): CustomerProfilePatchResult {
   const touched = PROFILE_KEYS.filter((k) => k in body);
   if (touched.length === 0) {
@@ -68,6 +89,28 @@ export function parseCustomerProfilePatch(
   });
   if (!tax.ok) return tax;
 
+  const gstLocked = existing.gstinVerifyStatus === "ACTIVE";
+  if (gstLocked) {
+    if ("gstNumber" in body) {
+      const nextGst = normalizeGstin(tax.gstNumber);
+      if (nextGst !== normalizeGstin(existing.gstNumber)) {
+        return {
+          ok: false,
+          error: "GSTIN is verified and cannot be changed.",
+        };
+      }
+    }
+    if ("panNumber" in body) {
+      const nextPan = normalizePan(tax.panNumber);
+      if (nextPan !== normalizePan(existing.panNumber)) {
+        return {
+          ok: false,
+          error: "PAN is locked while GST is verified and cannot be changed.",
+        };
+      }
+    }
+  }
+
   const data: Prisma.UserUpdateInput = {};
 
   if ("name" in body) data.name = optionalTrim(body.name);
@@ -78,8 +121,15 @@ export function parseCustomerProfilePatch(
     data.whatsappNumber = optionalTrim(body.whatsappNumber);
   }
   if ("mobileNumber" in body) {
-    // Mobile identity changes go through OTP elsewhere; allow trim-only updates.
-    data.mobileNumber = optionalTrim(body.mobileNumber);
+    const nextMobile = normalizeIndianMobile(String(body.mobileNumber ?? ""));
+    if (!nextMobile) {
+      return { ok: false, error: "A valid 10-digit Indian mobile number is required." };
+    }
+    data.mobileNumber = nextMobile;
+    const existingMobile = normalizeIndianMobile(existing.mobileNumber ?? "");
+    if (nextMobile !== existingMobile) {
+      data.mobileVerifiedAt = null;
+    }
   }
 
   if ("shopName" in body) data.shopName = sparse.shopName;
@@ -112,15 +162,12 @@ export function parseCustomerProfilePatch(
   if ("shippingState" in body) data.shippingState = sparse.shippingState;
   if ("shippingPincode" in body) data.shippingPincode = sparse.shippingPincode;
 
-  if ("gstNumber" in body) data.gstNumber = tax.gstNumber;
-  if ("panNumber" in body) data.panNumber = tax.panNumber;
+  if ("gstNumber" in body && !gstLocked) data.gstNumber = tax.gstNumber;
+  if ("panNumber" in body && !gstLocked) data.panNumber = tax.panNumber;
 
   if ("businessName" in body) {
     data.businessName = sparse.legacyBusinessName;
-  } else if (
-    "shopName" in body ||
-    "legalBusinessName" in body
-  ) {
+  } else if ("shopName" in body || "legalBusinessName" in body) {
     data.businessName = resolveBusinessName({
       shopName: "shopName" in body ? sparse.shopName : null,
       legalBusinessName:
@@ -148,6 +195,29 @@ export function parseCustomerProfilePatch(
       state: "state" in body ? sparse.state : existing.state,
       pincode: "pincode" in body ? sparse.pincode : existing.pincode,
     });
+  }
+
+  // Customer self-edit does not change login email via this path today;
+  // if added later, clear emailVerifiedAt similarly.
+
+  const addressTouched = ADDRESS_VERIFY_FIELDS.some((field) => field in data);
+  if (addressTouched && existing.addressVerifiedAt) {
+    data.addressVerifiedAt = null;
+  }
+
+  if (!gstLocked && ("gstNumber" in body || "panNumber" in body)) {
+    const gstChanged =
+      "gstNumber" in body &&
+      normalizeGstin(tax.gstNumber) !== normalizeGstin(existing.gstNumber);
+    const panChanged =
+      "panNumber" in body &&
+      normalizePan(tax.panNumber) !== normalizePan(existing.panNumber);
+    if (gstChanged || panChanged) {
+      data.gstinVerifyStatus = "UNKNOWN";
+      data.gstinVerifiedAt = null;
+      data.gstinVerifiedById = null;
+      data.gstinVerifyRaw = Prisma.DbNull;
+    }
   }
 
   // Phase E: any customer self-update returns to pending review.

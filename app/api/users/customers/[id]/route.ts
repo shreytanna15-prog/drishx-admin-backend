@@ -5,9 +5,17 @@ import {
   AuditModule,
   actorFromSession,
   buildAuditRequestContext,
+  diffFields,
   recordAuditEvent,
 } from "../../../../lib/audit";
-import { parseAdminCustomerPatchBody } from "../../../../lib/admin-customer-write";
+import {
+  labelForCustomerField,
+  parseRequiredAdminUpdateNotes,
+} from "../../../../lib/admin-customer-field-labels";
+import {
+  applyAdminCustomerPatchSideEffects,
+  parseAdminCustomerPatchBody,
+} from "../../../../lib/admin-customer-write";
 import { composeBusinessAddress } from "../../../../lib/customer-registration";
 import { getCustomerOutstanding } from "../../../../lib/finance/credit-limit";
 import { prisma } from "../../../../lib/prisma";
@@ -17,6 +25,48 @@ import { toSafeUser } from "../../../../lib/user-public";
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
+
+const DIFF_FIELDS = [
+  "name",
+  "email",
+  "mobileNumber",
+  "alternateMobileNumber",
+  "whatsappNumber",
+  "businessName",
+  "shopName",
+  "businessType",
+  "addressLine1",
+  "addressLine2",
+  "city",
+  "state",
+  "pincode",
+  "businessEmail",
+  "shopPhoneNumber",
+  "businessAddress",
+  "gstNumber",
+  "panNumber",
+  "legalBusinessName",
+  "tradeName",
+  "gstRegistrationState",
+  "billingLegalName",
+  "billingAddress",
+  "billingCity",
+  "billingState",
+  "billingPincode",
+  "billingGstState",
+  "shippingLegalName",
+  "shippingAddress",
+  "shippingCity",
+  "shippingState",
+  "shippingPincode",
+  "creditLimit",
+  "creditAllowed",
+  "pricingTierId",
+  "mobileVerifiedAt",
+  "emailVerifiedAt",
+  "addressVerifiedAt",
+  "gstinVerifyStatus",
+] as const;
 
 export async function GET(req: NextRequest, context: RouteContext) {
   const auth = getSessionOrUnauthorized(req);
@@ -70,6 +120,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
 /**
  * Admin PATCH — direct apply; does not flip approvalStatus to pending.
+ * RC-01: requires notes; stays Approved; side effects for verify/GST/address.
  */
 export async function PATCH(req: NextRequest, context: RouteContext) {
   const auth = getSessionOrUnauthorized(req);
@@ -91,12 +142,17 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     const body = (await req.json()) as Record<string, unknown>;
+    const notesParsed = parseRequiredAdminUpdateNotes(body);
+    if (!notesParsed.ok) {
+      return NextResponse.json({ error: notesParsed.error }, { status: 400 });
+    }
+
     const parsed = parseAdminCustomerPatchBody(body);
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
-    const data = { ...parsed.data };
+    let data = { ...parsed.data };
 
     if ("email" in data && typeof data.email === "string") {
       const emailTaken = await prisma.user.findFirst({
@@ -168,6 +224,12 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       });
     }
 
+    const withEffects = applyAdminCustomerPatchSideEffects(existing, data);
+    if (!withEffects.ok) {
+      return NextResponse.json({ error: withEffects.error }, { status: 400 });
+    }
+    data = withEffects.data;
+
     const pricingTierConnect = data.pricingTier;
     if (
       pricingTierConnect &&
@@ -198,6 +260,18 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       },
     });
 
+    const beforeSnap = Object.fromEntries(
+      DIFF_FIELDS.map((f) => [f, (existing as Record<string, unknown>)[f]])
+    );
+    const afterSnap = Object.fromEntries(
+      DIFF_FIELDS.map((f) => [f, (updated as Record<string, unknown>)[f]])
+    );
+    const rawChanges = diffFields(beforeSnap, afterSnap, [...DIFF_FIELDS]);
+    const changes = rawChanges.map((c) => ({
+      ...c,
+      field: labelForCustomerField(c.field),
+    }));
+
     await recordAuditEvent(prisma, {
       action: AuditAction.CUSTOMER_UPDATED,
       module: AuditModule.CUSTOMER,
@@ -205,8 +279,16 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       entityId: id,
       actor: actorFromSession(session),
       request: buildAuditRequestContext(req),
+      reasonText: notesParsed.notes,
+      changes,
       context: {
-        fields: Object.keys(body),
+        fields: Object.keys(body).filter(
+          (k) => k !== "notes" && k !== "adminNotes" && k !== "reasonText"
+        ),
+        clearedMobileVerified: withEffects.effects.clearedMobileVerified,
+        clearedEmailVerified: withEffects.effects.clearedEmailVerified,
+        clearedAddressVerified: withEffects.effects.clearedAddressVerified,
+        resetGstVerification: withEffects.effects.resetGstVerification,
       },
       activityMessage: "Customer profile updated by admin",
     });
@@ -214,6 +296,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     return NextResponse.json({
       customer: toSafeUser(updated),
       message: "Customer updated.",
+      effects: withEffects.effects,
     });
   } catch (error) {
     console.error("PATCH /api/users/customers/[id] error:", error);

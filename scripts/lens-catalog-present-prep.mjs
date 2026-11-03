@@ -92,6 +92,14 @@ async function main() {
     },
   });
 
+  const powerRange = await prisma.lensPowerRange.upsert({
+    where: {
+      sphMin_sphMax_cylMin_cylMax: { sphMin, sphMax, cylMin, cylMax },
+    },
+    update: { isActive: true },
+    create: { sphMin, sphMax, cylMin, cylMax },
+  });
+
   const demo = await prisma.lensProduct.create({
     data: {
       skuCode: expectedSku,
@@ -100,6 +108,7 @@ async function main() {
       baseId: base.id,
       materialId: material.id,
       indexId: index.id,
+      powerRangeId: powerRange.id,
       rangeType: "NORMAL",
       sphMin,
       sphMax,

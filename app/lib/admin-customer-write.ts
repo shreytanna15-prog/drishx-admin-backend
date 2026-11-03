@@ -1,14 +1,133 @@
 /**
  * Path B — Admin create/update customer field parsing (Phase B).
+ * Admin client edit side effects: docs/requested-changes.md RC-01
  */
 
-import type { AccountAction, Prisma } from "@prisma/client";
+import { Prisma, type AccountAction, type GstinVerifyStatus } from "@prisma/client";
+import { ADDRESS_VERIFY_FIELDS } from "./admin-customer-field-labels";
 import {
   composeBusinessAddress,
+  normalizeGstin,
+  normalizePan,
   optionalTrim,
   validateOptionalGstinPan,
 } from "./customer-registration";
 import { normalizeIndianMobile } from "./otp/mobile-normalize";
+
+export type AdminCustomerPatchSideEffects = {
+  clearedMobileVerified: boolean;
+  clearedEmailVerified: boolean;
+  clearedAddressVerified: boolean;
+  resetGstVerification: boolean;
+};
+
+export type ExistingCustomerForPatch = {
+  email: string;
+  mobileNumber: string | null;
+  gstNumber: string | null;
+  panNumber: string | null;
+  gstinVerifyStatus: GstinVerifyStatus | string;
+  addressVerifiedAt?: Date | null;
+};
+
+/**
+ * Apply GST/PAN lock + identity/address unverified + GST verify reset on Admin PATCH data.
+ * Mutates a copy of `data`; does not flip approvalStatus.
+ */
+export function applyAdminCustomerPatchSideEffects(
+  existing: ExistingCustomerForPatch,
+  data: Prisma.UserUpdateInput
+):
+  | {
+      ok: true;
+      data: Prisma.UserUpdateInput;
+      effects: AdminCustomerPatchSideEffects;
+    }
+  | { ok: false; error: string } {
+  const next: Prisma.UserUpdateInput = { ...data };
+  const effects: AdminCustomerPatchSideEffects = {
+    clearedMobileVerified: false,
+    clearedEmailVerified: false,
+    clearedAddressVerified: false,
+    resetGstVerification: false,
+  };
+
+  const gstLocked = existing.gstinVerifyStatus === "ACTIVE";
+  const nextGst =
+    "gstNumber" in next
+      ? normalizeGstin(next.gstNumber as string | null)
+      : undefined;
+  const nextPan =
+    "panNumber" in next
+      ? normalizePan(next.panNumber as string | null)
+      : undefined;
+
+  if (gstLocked) {
+    if (
+      nextGst !== undefined &&
+      nextGst !== normalizeGstin(existing.gstNumber)
+    ) {
+      return {
+        ok: false,
+        error: "GSTIN is verified and cannot be changed by Admin or client.",
+      };
+    }
+    if (
+      nextPan !== undefined &&
+      nextPan !== normalizePan(existing.panNumber)
+    ) {
+      return {
+        ok: false,
+        error: "PAN is locked while GST is verified and cannot be changed.",
+      };
+    }
+  } else {
+    const gstChanged =
+      nextGst !== undefined && nextGst !== normalizeGstin(existing.gstNumber);
+    const panChanged =
+      nextPan !== undefined && nextPan !== normalizePan(existing.panNumber);
+    if (gstChanged || panChanged) {
+      next.gstinVerifyStatus = "UNKNOWN";
+      next.gstinVerifiedAt = null;
+      next.gstinVerifiedById = null;
+      next.gstinVerifyRaw = Prisma.DbNull;
+      effects.resetGstVerification = true;
+    }
+  }
+
+  if ("mobileNumber" in next && typeof next.mobileNumber === "string") {
+    const existingMobile = normalizeIndianMobile(existing.mobileNumber ?? "");
+    if (next.mobileNumber !== existingMobile) {
+      next.mobileVerifiedAt = null;
+      effects.clearedMobileVerified = true;
+    }
+  }
+
+  if ("email" in next && typeof next.email === "string") {
+    const existingEmail = existing.email.trim().toLowerCase();
+    if (next.email !== existingEmail) {
+      next.emailVerifiedAt = null;
+      effects.clearedEmailVerified = true;
+    }
+  }
+
+  const addressTouched = ADDRESS_VERIFY_FIELDS.some((field) => field in next);
+  if (addressTouched && existing.addressVerifiedAt) {
+    next.addressVerifiedAt = null;
+    effects.clearedAddressVerified = true;
+  }
+
+  return { ok: true, data: next, effects };
+}
+
+export function clearGstVerificationData(): Prisma.UserUpdateInput {
+  return {
+    gstinVerifyStatus: "UNKNOWN",
+    gstinVerifiedAt: null,
+    gstinVerifiedById: null,
+    gstinVerifyRaw: Prisma.DbNull,
+  };
+}
 
 export const ACCOUNT_ACTIONS = [
   "NONE",

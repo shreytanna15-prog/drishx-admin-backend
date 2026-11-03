@@ -168,6 +168,11 @@ export default function LensProductDetailPage() {
                 Range
               </dt>
               <dd className="leading-snug">
+                {product.powerRange ? (
+                  <div className="font-mono font-bold">
+                    {product.powerRange.label}
+                  </div>
+                ) : null}
                 <div>
                   SPH {product.sphMin}…{product.sphMax}
                 </div>

@@ -11,8 +11,10 @@ export const QUERY_REGISTRY = {
   getOrdersOverview: "getOrdersOverview",
   getCustomers: "getCustomers",
   getCustomer: "getCustomer",
+  getCustomerChangeHistory: "getCustomerChangeHistory",
   getReturns: "getReturns",
   getInvoices: "getInvoices",
+  getLensPowerRanges: "getLensPowerRanges",
 } as const;
 
 export const MUTATION_REGISTRY = {
@@ -22,7 +24,11 @@ export const MUTATION_REGISTRY = {
   updateCustomer: "updateCustomer",
   setCustomerAccountAction: "setCustomerAccountAction",
   verifyCustomerGst: "verifyCustomerGst",
+  clearCustomerGstVerification: "clearCustomerGstVerification",
+  verifyCustomerAddress: "verifyCustomerAddress",
   createWalkInCustomer: "createWalkInCustomer",
+  createLensPowerRange: "createLensPowerRange",
+  updateLensPowerRange: "updateLensPowerRange",
 } as const;
 
 export type QueryRegistryKey =

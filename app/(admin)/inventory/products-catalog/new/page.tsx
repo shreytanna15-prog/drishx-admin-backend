@@ -8,6 +8,7 @@ import { AdminPage } from "@/components/admin-shell";
 import { SkuChip } from "@/components/catalog/sku-chip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { AdminApiError } from "@/app/lib/admin-api";
 import {
   createLensProductRequest,
@@ -15,6 +16,7 @@ import {
   fetchLensAttributes,
   type LensAttribute,
 } from "@/app/lib/admin-lens-catalog";
+import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
 import { buildLensProductSkuCode } from "@/app/lib/catalog/lens-product-sku";
 
 const CATALOG_HREF = "/inventory/products-catalog";
@@ -23,8 +25,8 @@ const labelClass =
   "text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)";
 const inputClass =
   "h-10 rounded-xl border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text) placeholder:text-(--brand-placeholder)";
-const selectClass =
-  "h-10 w-full rounded-xl border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text) outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const selectTriggerClass =
+  "h-10 rounded-xl border-(--brand-input-border) bg-(--brand-input-bg) min-w-0";
 const errorBannerClass =
   "rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200";
 
@@ -41,10 +43,7 @@ type FormState = {
   coatingId: string;
   colorId: string;
   rangeType: string;
-  sphMin: string;
-  sphMax: string;
-  cylMin: string;
-  cylMax: string;
+  powerRangeId: string;
   addMin: string;
   addMax: string;
   axis: string;
@@ -61,10 +60,7 @@ const EMPTY: FormState = {
   coatingId: "",
   colorId: "",
   rangeType: "NORMAL",
-  sphMin: "0",
-  sphMax: "10",
-  cylMin: "0",
-  cylMax: "4",
+  powerRangeId: "",
   addMin: "",
   addMax: "",
   axis: "",
@@ -87,6 +83,15 @@ export default function NewLensProductPage() {
     new Set()
   );
   const [attrsLoading, setAttrsLoading] = useState(true);
+  const {
+    data: powerRangeData,
+    loading: powerRangesLoading,
+    error: powerRangesError,
+  } = useGetPowerRanges({ activeOnly: true });
+  const powerRanges = useMemo(
+    () => powerRangeData?.items ?? [],
+    [powerRangeData]
+  );
 
   useEffect(() => {
     void (async () => {
@@ -153,21 +158,14 @@ export default function NewLensProductPage() {
     const family = families.find((f) => f.id === form.familyId);
     const base = bases.find((b) => b.id === form.baseId);
     const material = materials.find((m) => m.id === form.materialId);
-    if (!family || !base || !material) return "";
-    const sphMin = Number(form.sphMin);
-    const sphMax = Number(form.sphMax);
-    const cylMin = Number(form.cylMin);
-    const cylMax = Number(form.cylMax);
-    if (
-      ![sphMin, sphMax, cylMin, cylMax].every((n) => Number.isFinite(n))
-    ) {
-      return "";
-    }
+    const range = powerRanges.find((r) => r.id === form.powerRangeId);
+    if (!family || !base || !range) return "";
+    const { sphMin, sphMax, cylMin, cylMax } = range;
     try {
       return buildLensProductSkuCode({
         familyCode: family.code,
         baseCode: base.code,
-        materialCode: material.code,
+        materialCode: material?.code ?? null,
         indexCode: indexes.find((i) => i.id === form.indexId)?.code ?? null,
         coatingCode:
           coatings.find((c) => c.id === form.coatingId)?.code ?? null,
@@ -194,10 +192,8 @@ export default function NewLensProductPage() {
     form.indexId,
     form.coatingId,
     form.colorId,
-    form.sphMin,
-    form.sphMax,
-    form.cylMin,
-    form.cylMax,
+    form.powerRangeId,
+    powerRanges,
     form.rangeType,
   ]);
 
@@ -210,15 +206,12 @@ export default function NewLensProductPage() {
         name: form.name.trim(),
         familyId: form.familyId,
         baseId: form.baseId,
-        materialId: form.materialId,
+        materialId: form.materialId || null,
         indexId: form.indexId || null,
         coatingId: form.coatingId || null,
         colorId: form.colorId || null,
         rangeType: form.rangeType,
-        sphMin: Number(form.sphMin),
-        sphMax: Number(form.sphMax),
-        cylMin: Number(form.cylMin),
-        cylMax: Number(form.cylMax),
+        powerRangeId: form.powerRangeId,
         defaultPrice:
           form.defaultPrice.trim() === "" ? null : Number(form.defaultPrice),
       };
@@ -277,7 +270,7 @@ export default function NewLensProductPage() {
                 <SkuChip sku={generatedSku} />
               ) : (
                 <span className="text-sm text-(--brand-text-muted)">
-                  Select Family, Base, Material + range
+                  Select Family, Base + power range
                 </span>
               )}
             </div>
@@ -296,154 +289,150 @@ export default function NewLensProductPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <label className="space-y-1">
             <span className={labelClass}>Family *</span>
-            <select
-              className={selectClass}
-              required
+            <AdminSelect
               value={form.familyId}
-              onChange={(e) => set("familyId", e.target.value)}
-            >
-              <option value="">Select…</option>
-              {families.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.code} — {f.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => set("familyId", v)}
+              options={[
+                { value: "", label: "Select…" },
+                ...families.map((f) => ({
+                  value: f.id,
+                  label: `${f.code} — ${f.name}`,
+                })),
+              ]}
+              placeholder="Select…"
+              triggerClassName={selectTriggerClass}
+            />
           </label>
           <label className="space-y-1">
             <span className={labelClass}>Base *</span>
-            <select
-              className={selectClass}
-              required
+            <AdminSelect
               value={form.baseId}
-              onChange={(e) => set("baseId", e.target.value)}
-            >
-              <option value="">Select…</option>
-              {bases.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.code} — {b.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => set("baseId", v)}
+              options={[
+                { value: "", label: "Select…" },
+                ...bases.map((b) => ({
+                  value: b.id,
+                  label: `${b.code} — ${b.name}`,
+                })),
+              ]}
+              placeholder="Select…"
+              triggerClassName={selectTriggerClass}
+            />
           </label>
           <label className="space-y-1">
-            <span className={labelClass}>Material *</span>
-            <select
-              className={selectClass}
-              required
+            <span className={labelClass}>Material (optional)</span>
+            <AdminSelect
               value={form.materialId}
               disabled={!form.baseId}
-              onChange={(e) => set("materialId", e.target.value)}
-            >
-              <option value="">
-                {form.baseId ? "Select…" : "Pick base first"}
-              </option>
-              {materialOptions.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.code} — {m.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => set("materialId", v)}
+              options={[
+                {
+                  value: "",
+                  label: form.baseId ? "None" : "Pick base first",
+                },
+                ...materialOptions.map((m) => ({
+                  value: m.id,
+                  label: `${m.code} — ${m.name}`,
+                })),
+              ]}
+              placeholder="None"
+              triggerClassName={selectTriggerClass}
+            />
           </label>
           <label className="space-y-1">
             <span className={labelClass}>Index</span>
-            <select
-              className={selectClass}
+            <AdminSelect
               value={form.indexId}
-              onChange={(e) => set("indexId", e.target.value)}
-            >
-              <option value="">None</option>
-              {indexes.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.code}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => set("indexId", v)}
+              options={[
+                { value: "", label: "None" },
+                ...indexes.map((i) => ({ value: i.id, label: i.code })),
+              ]}
+              placeholder="None"
+              triggerClassName={selectTriggerClass}
+            />
           </label>
           <label className="space-y-1">
             <span className={labelClass}>Coating</span>
-            <select
-              className={selectClass}
+            <AdminSelect
               value={form.coatingId}
-              onChange={(e) => set("coatingId", e.target.value)}
-            >
-              <option value="">None</option>
-              {coatings.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code} — {c.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => set("coatingId", v)}
+              options={[
+                { value: "", label: "None" },
+                ...coatings.map((c) => ({
+                  value: c.id,
+                  label: `${c.code} — ${c.name}`,
+                })),
+              ]}
+              placeholder="None"
+              triggerClassName={selectTriggerClass}
+            />
           </label>
           <label className="space-y-1">
             <span className={labelClass}>Color (tint)</span>
-            <select
-              className={selectClass}
+            <AdminSelect
               value={form.colorId}
-              onChange={(e) => set("colorId", e.target.value)}
-            >
-              <option value="">None</option>
-              {colors.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code} — {c.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => set("colorId", v)}
+              options={[
+                { value: "", label: "None" },
+                ...colors.map((c) => ({
+                  value: c.id,
+                  label: `${c.code} — ${c.name}`,
+                })),
+              ]}
+              placeholder="None"
+              triggerClassName={selectTriggerClass}
+            />
           </label>
         </div>
 
         <div className="space-y-3 rounded-2xl border border-(--brand-card-border) bg-(--brand-input-bg)/40 p-4">
           <p className="text-sm font-bold text-(--brand-text)">Power range</p>
           <p className="text-xs text-(--brand-text-muted)">
-            Values use 0.25 diopter steps in the matrix view. Store min ≤ max
-            numerically (plus or minus bands allowed).
+            Pick an active power range from Attributes → Power range. Its SPH/CYL
+            bounds drive the matrix and the SKU.
           </p>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {powerRangesError ? (
+            <div className={errorBannerClass}>
+              {powerRangesError.message || "Failed to load power ranges."}
+            </div>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className={labelClass}>Power range *</span>
+              <AdminSelect
+                value={form.powerRangeId}
+                disabled={powerRangesLoading}
+                onValueChange={(v) => set("powerRangeId", v)}
+                options={[
+                  {
+                    value: "",
+                    label: powerRangesLoading
+                      ? "Loading…"
+                      : powerRanges.length === 0
+                        ? "No active power ranges"
+                        : "Select…",
+                  },
+                  ...powerRanges.map((r) => ({
+                    value: r.id,
+                    label: `${r.label} (${r.cylSummary})`,
+                  })),
+                ]}
+                placeholder="Select…"
+                triggerClassName={selectTriggerClass}
+              />
+            </label>
             <label className="space-y-1">
               <span className={labelClass}>Range type</span>
-              <select
-                className={selectClass}
+              <AdminSelect
                 value={form.rangeType}
-                onChange={(e) => set("rangeType", e.target.value)}
-              >
-                <option value="NORMAL">NORMAL</option>
-                <option value="CROSS">CROSS</option>
-              </select>
-            </label>
-            <label className="space-y-1">
-              <span className={labelClass}>SPH min</span>
-              <Input
-                className={inputClass}
-                required
-                value={form.sphMin}
-                onChange={(e) => set("sphMin", e.target.value)}
-              />
-            </label>
-            <label className="space-y-1">
-              <span className={labelClass}>SPH max</span>
-              <Input
-                className={inputClass}
-                required
-                value={form.sphMax}
-                onChange={(e) => set("sphMax", e.target.value)}
-              />
-            </label>
-            <label className="space-y-1">
-              <span className={labelClass}>CYL min</span>
-              <Input
-                className={inputClass}
-                required
-                value={form.cylMin}
-                onChange={(e) => set("cylMin", e.target.value)}
-              />
-            </label>
-            <label className="space-y-1">
-              <span className={labelClass}>CYL max</span>
-              <Input
-                className={inputClass}
-                required
-                value={form.cylMax}
-                onChange={(e) => set("cylMax", e.target.value)}
+                onValueChange={(v) => set("rangeType", v)}
+                options={[
+                  { value: "NORMAL", label: "NORMAL" },
+                  { value: "CROSS", label: "CROSS" },
+                ]}
+                placeholder="Range type"
+                triggerClassName={selectTriggerClass}
               />
             </label>
           </div>
@@ -476,16 +465,18 @@ export default function NewLensProductPage() {
               </label>
               <label className="space-y-1">
                 <span className={labelClass}>EYE</span>
-                <select
-                  className={selectClass}
+                <AdminSelect
                   value={form.eye}
-                  onChange={(e) => set("eye", e.target.value)}
-                >
-                  <option value="">None</option>
-                  <option value="LEFT">LEFT</option>
-                  <option value="RIGHT">RIGHT</option>
-                  <option value="BOTH">BOTH</option>
-                </select>
+                  onValueChange={(v) => set("eye", v)}
+                  options={[
+                    { value: "", label: "None" },
+                    { value: "LEFT", label: "LEFT" },
+                    { value: "RIGHT", label: "RIGHT" },
+                    { value: "BOTH", label: "BOTH" },
+                  ]}
+                  placeholder="None"
+                  triggerClassName={selectTriggerClass}
+                />
               </label>
             </div>
           ) : null}
@@ -493,7 +484,7 @@ export default function NewLensProductPage() {
 
         <Button
           type="submit"
-          disabled={busy || attrsLoading}
+          disabled={busy || attrsLoading || powerRangesLoading}
           className="h-11 rounded-xl bg-(--brand-primary) px-6 font-bold text-black"
         >
           {busy ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}

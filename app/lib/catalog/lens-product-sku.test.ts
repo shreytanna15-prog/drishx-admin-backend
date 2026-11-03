@@ -36,6 +36,53 @@ describe("lens product SKU helpers", () => {
     );
   });
 
+  it("omits material from SKU when absent", () => {
+    for (const materialCode of [undefined, null, "", "  "]) {
+      assert.equal(
+        buildLensProductSkuCode({
+          familyCode: "SV",
+          baseCode: "HC",
+          materialCode,
+          indexCode: "1.56",
+          sphMin: -6,
+          sphMax: 2,
+          cylMin: -2,
+          cylMax: 0,
+        }),
+        "SV-HC-1P56-SM6T2-CM2T0"
+      );
+    }
+  });
+
+  it("different power-range bounds yield different SKUs", () => {
+    const base = {
+      familyCode: "SV",
+      baseCode: "HC",
+      materialCode: "PLAIN",
+      indexCode: "1.56",
+      cylMin: -2,
+      cylMax: 0,
+    };
+    const a = buildLensProductSkuCode({ ...base, sphMin: -6, sphMax: 2 });
+    const b = buildLensProductSkuCode({ ...base, sphMin: -6, sphMax: 4 });
+    assert.equal(a, "SV-HC-PLAIN-1P56-SM6T2-CM2T0");
+    assert.equal(b, "SV-HC-PLAIN-1P56-SM6T4-CM2T0");
+    assert.notEqual(a, b);
+  });
+
+  it("requires family and base codes", () => {
+    assert.throws(() =>
+      buildLensProductSkuCode({
+        familyCode: "",
+        baseCode: "HC",
+        sphMin: 0,
+        sphMax: 1,
+        cylMin: 0,
+        cylMax: 0,
+      })
+    );
+  });
+
   it("includes optional attributes and CROSS when set", () => {
     assert.equal(
       buildLensProductSkuCode({

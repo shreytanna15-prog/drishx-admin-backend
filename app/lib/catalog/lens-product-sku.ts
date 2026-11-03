@@ -1,12 +1,13 @@
 /**
- * Deterministic LensProduct SKU from attribute codes + power range.
- * Format: FAMILY-BASE-MATERIAL[-INDEX][-COATING][-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}[-CROSS]
+ * Deterministic LensProduct SKU from attribute codes + power range (interim format).
+ * Format: FAMILY-BASE[-MATERIAL][-INDEX][-COATING][-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}[-CROSS]
+ * Material is optional (RC-03) and omitted when absent.
  */
 
 export type LensProductSkuParts = {
   familyCode: string;
   baseCode: string;
-  materialCode: string;
+  materialCode?: string | null;
   indexCode?: string | null;
   coatingCode?: string | null;
   colorCode?: string | null;
@@ -43,13 +44,17 @@ export function encodeSkuPower(value: number): string {
 export function buildLensProductSkuCode(parts: LensProductSkuParts): string {
   const family = sanitizeSkuCodePart(parts.familyCode);
   const base = sanitizeSkuCodePart(parts.baseCode);
-  const material = sanitizeSkuCodePart(parts.materialCode);
-  if (!family || !base || !material) {
-    throw new Error("familyCode, baseCode, and materialCode are required for SKU.");
+  if (!family || !base) {
+    throw new Error("familyCode and baseCode are required for SKU.");
   }
 
-  const tokens = [family, base, material];
-  for (const optional of [parts.indexCode, parts.coatingCode, parts.colorCode]) {
+  const tokens = [family, base];
+  for (const optional of [
+    parts.materialCode,
+    parts.indexCode,
+    parts.coatingCode,
+    parts.colorCode,
+  ]) {
     if (optional == null || String(optional).trim() === "") continue;
     const token = sanitizeSkuCodePart(String(optional));
     if (token) tokens.push(token);

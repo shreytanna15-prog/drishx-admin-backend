@@ -24,7 +24,7 @@ export class WarehouseReleaseError extends Error {
 }
 
 /**
- * Admin-only: mark an RX/photo hold order available at the warehouse.
+ * Admin-only: mark an RX hold order available at the warehouse.
  * Idempotent when already released. Does not change assignment.
  * Notifies the assignee only when this action newly makes the order eligible.
  */

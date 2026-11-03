@@ -9,15 +9,15 @@ import { Button } from "@/components/ui/button";
 export default function RxLabPage() {
   return (
     <AdminPage
-      title="Rx & photo orders"
-      subtitle="Prescription RX and photo orders — admin review, assign, then release to warehouse"
+      title="Rx orders"
+      subtitle="Prescription RX orders — admin review, assign, then release to warehouse"
     >
       <AdminOrdersTable
-        title="Rx & photo orders"
+        title="Rx orders"
         description="Held for admin until Mark available at warehouse. Assignment alone does not expose them to staff queues."
-        searchPlaceholder="Search RX / photo orders by customer, order #…"
-        emptyMessage="No RX or photo prescription orders found yet."
-        emptySearchMessage="No RX or photo orders match your search."
+        searchPlaceholder="Search RX orders by customer, order #…"
+        emptyMessage="No RX orders found yet."
+        emptySearchMessage="No RX orders match your search."
         scope="rx_lab"
         showNotes
         showFilters

@@ -1,5 +1,6 @@
 /**
  * RW-09 LensProduct SKU master (docs/product-catalog).
+ * RC-03: material optional; power range comes from a LensPowerRange master.
  * No power-leaf / stock insert in this slice.
  */
 
@@ -10,6 +11,10 @@ import {
   assertMaterialAllowedForBase,
   LensAttributeServiceError,
 } from "./lens-attribute-service";
+import {
+  formatCylSummary,
+  formatPowerRangeLabel,
+} from "./catalog-power-select-options";
 import { steppedRange } from "./lens-product-range";
 import { buildLensProductSkuCode } from "./lens-product-sku";
 
@@ -53,6 +58,7 @@ const productInclude = {
   index: true,
   coating: true,
   color: true,
+  powerRange: true,
 } as const;
 
 type ProductWithAttrs = Prisma.LensProductGetPayload<{
@@ -69,6 +75,10 @@ function num(d: Prisma.Decimal | null | undefined): number | null {
 }
 
 export function serializeLensProduct(row: ProductWithAttrs) {
+  const sphMin = Number(row.sphMin);
+  const sphMax = Number(row.sphMax);
+  const cylMin = Number(row.cylMin);
+  const cylMax = Number(row.cylMax);
   return {
     id: row.id,
     skuCode: row.skuCode,
@@ -79,11 +89,12 @@ export function serializeLensProduct(row: ProductWithAttrs) {
     indexId: row.indexId,
     coatingId: row.coatingId,
     colorId: row.colorId,
+    powerRangeId: row.powerRangeId,
     rangeType: row.rangeType,
-    sphMin: Number(row.sphMin),
-    sphMax: Number(row.sphMax),
-    cylMin: Number(row.cylMin),
-    cylMax: Number(row.cylMax),
+    sphMin,
+    sphMax,
+    cylMin,
+    cylMax,
     addMin: num(row.addMin),
     addMax: num(row.addMax),
     axis: row.axis,
@@ -98,11 +109,13 @@ export function serializeLensProduct(row: ProductWithAttrs) {
       name: row.family.name,
     },
     base: { id: row.base.id, code: row.base.code, name: row.base.name },
-    material: {
-      id: row.material.id,
-      code: row.material.code,
-      name: row.material.name,
-    },
+    material: row.material
+      ? {
+          id: row.material.id,
+          code: row.material.code,
+          name: row.material.name,
+        }
+      : null,
     index: row.index
       ? {
           id: row.index.id,
@@ -117,48 +130,32 @@ export function serializeLensProduct(row: ProductWithAttrs) {
     color: row.color
       ? { id: row.color.id, code: row.color.code, name: row.color.name }
       : null,
+    powerRange: row.powerRange
+      ? {
+          id: row.powerRange.id,
+          label: formatPowerRangeLabel(
+            Number(row.powerRange.sphMin),
+            Number(row.powerRange.sphMax)
+          ),
+          cylSummary: formatCylSummary(
+            Number(row.powerRange.cylMin),
+            Number(row.powerRange.cylMax)
+          ),
+        }
+      : null,
     attributeSummary: [
       row.family.code,
       row.base.code,
-      row.material.code,
+      row.material?.code,
       row.index?.code,
       row.coating?.code,
       row.color?.code,
     ]
       .filter(Boolean)
       .join(" · "),
-    rangeSummary: `SPH ${Number(row.sphMin)}…${Number(row.sphMax)} / CYL ${Number(row.cylMin)}…${Number(row.cylMax)}`,
+    rangeLabel: formatPowerRangeLabel(sphMin, sphMax),
+    rangeSummary: `SPH ${sphMin}…${sphMax} / CYL ${cylMin}…${cylMax}`,
   };
-}
-
-function requireFinite(label: string, value: unknown): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) {
-    throw new LensProductServiceError(`${label} must be a number.`);
-  }
-  return n;
-}
-
-function validateRange(bounds: {
-  sphMin: number;
-  sphMax: number;
-  cylMin: number;
-  cylMax: number;
-}) {
-  if (bounds.sphMin > bounds.sphMax) {
-    throw new LensProductServiceError(
-      "sphMin must be less than or equal to sphMax.",
-      400,
-      "INVALID_RANGE"
-    );
-  }
-  if (bounds.cylMin > bounds.cylMax) {
-    throw new LensProductServiceError(
-      "cylMin must be less than or equal to cylMax.",
-      400,
-      "INVALID_RANGE"
-    );
-  }
 }
 
 async function assertActiveFk(
@@ -180,21 +177,170 @@ async function assertActiveFk(
   }
 }
 
+function normalizeOptionalId(value: string | null | undefined): string | null {
+  const v = value?.trim();
+  return v ? v : null;
+}
+
+function parseRangeType(raw: string | null | undefined): string {
+  const rangeType = (raw?.trim() || "NORMAL").toUpperCase();
+  if (rangeType !== "NORMAL" && rangeType !== "CROSS") {
+    throw new LensProductServiceError("rangeType must be NORMAL or CROSS.");
+  }
+  return rangeType;
+}
+
+type IdentityIds = {
+  familyId: string;
+  baseId: string;
+  materialId: string | null;
+  indexId: string | null;
+  coatingId: string | null;
+  colorId: string | null;
+  powerRangeId: string;
+  rangeType: string;
+};
+
+/**
+ * Loads the attribute rows for an identity, validates FKs (active, compatible) as asked,
+ * and returns the generated interim SKU + power bounds copied from the range master.
+ */
+async function resolveIdentity(
+  ids: IdentityIds,
+  opts: { validate: Set<keyof IdentityIds> | "all" }
+) {
+  const [family, base, material, indexRow, coating, color, powerRange] =
+    await Promise.all([
+      prisma.lensFamily.findUnique({ where: { id: ids.familyId } }),
+      prisma.lensBase.findUnique({ where: { id: ids.baseId } }),
+      ids.materialId
+        ? prisma.lensMaterial.findUnique({ where: { id: ids.materialId } })
+        : Promise.resolve(null),
+      ids.indexId
+        ? prisma.lensIndex.findUnique({ where: { id: ids.indexId } })
+        : Promise.resolve(null),
+      ids.coatingId
+        ? prisma.lensCoating.findUnique({ where: { id: ids.coatingId } })
+        : Promise.resolve(null),
+      ids.colorId
+        ? prisma.lensColor.findUnique({ where: { id: ids.colorId } })
+        : Promise.resolve(null),
+      prisma.lensPowerRange.findUnique({ where: { id: ids.powerRangeId } }),
+    ]);
+
+  const check = (key: keyof IdentityIds) =>
+    opts.validate === "all" || opts.validate.has(key);
+
+  if (check("familyId")) await assertActiveFk("Family", ids.familyId, async () => family);
+  if (check("baseId")) await assertActiveFk("Base", ids.baseId, async () => base);
+  if (check("materialId"))
+    await assertActiveFk("Material", ids.materialId, async () => material);
+  if (check("indexId")) await assertActiveFk("Index", ids.indexId, async () => indexRow);
+  if (check("coatingId"))
+    await assertActiveFk("Coating", ids.coatingId, async () => coating);
+  if (check("colorId")) await assertActiveFk("Color", ids.colorId, async () => color);
+  if (check("powerRangeId"))
+    await assertActiveFk("Power range", ids.powerRangeId, async () => powerRange);
+
+  if (!family || !base) {
+    throw new LensProductServiceError(
+      "Family or base not found.",
+      400,
+      "INVALID_FK"
+    );
+  }
+  if (!powerRange) {
+    throw new LensProductServiceError(
+      "Power range not found.",
+      400,
+      "INVALID_FK"
+    );
+  }
+  if (ids.materialId && !material) {
+    throw new LensProductServiceError("Material not found.", 400, "INVALID_FK");
+  }
+
+  if (
+    ids.materialId &&
+    (check("materialId") || check("baseId"))
+  ) {
+    await ensureBaseMaterialCompat(ids.baseId, ids.materialId);
+  }
+
+  const bounds = {
+    sphMin: Number(powerRange.sphMin),
+    sphMax: Number(powerRange.sphMax),
+    cylMin: Number(powerRange.cylMin),
+    cylMax: Number(powerRange.cylMax),
+  };
+
+  const skuCode = buildLensProductSkuCode({
+    familyCode: family.code,
+    baseCode: base.code,
+    materialCode: material?.code ?? null,
+    indexCode: indexRow?.code ?? null,
+    coatingCode: coating?.code ?? null,
+    colorCode: color?.code ?? null,
+    ...bounds,
+    rangeType: ids.rangeType,
+  });
+
+  return { skuCode, bounds };
+}
+
+/** Same attrs + same power-range master (or identical bounds) ⇒ duplicate. */
+async function findDuplicate(
+  ids: IdentityIds,
+  bounds: { sphMin: number; sphMax: number; cylMin: number; cylMax: number },
+  excludeId?: string
+) {
+  return prisma.lensProduct.findFirst({
+    where: {
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+      familyId: ids.familyId,
+      baseId: ids.baseId,
+      materialId: ids.materialId,
+      indexId: ids.indexId,
+      coatingId: ids.coatingId,
+      colorId: ids.colorId,
+      rangeType: ids.rangeType,
+      OR: [
+        { powerRangeId: ids.powerRangeId },
+        {
+          sphMin: dec(bounds.sphMin),
+          sphMax: dec(bounds.sphMax),
+          cylMin: dec(bounds.cylMin),
+          cylMax: dec(bounds.cylMax),
+        },
+      ],
+    },
+    select: { id: true, skuCode: true },
+  });
+}
+
+function duplicateError(dup: { id: string; skuCode: string }) {
+  return new LensProductServiceError(
+    `A product with the same attributes and power range already exists (${dup.skuCode}).`,
+    409,
+    "DUPLICATE_COMBO_RANGE",
+    { productId: dup.id, skuCode: dup.skuCode }
+  );
+}
+
 export type CreateLensProductInput = {
   /** Ignored when present — SKU is generated from attribute codes + range. */
   skuCode?: string | null;
   name: string;
   familyId: string;
   baseId: string;
-  materialId: string;
+  /** Optional (RC-03). */
+  materialId?: string | null;
   indexId?: string | null;
   coatingId?: string | null;
   colorId?: string | null;
+  /** Required: active LensPowerRange master. Bounds are copied from it. */
+  powerRangeId: string;
   rangeType?: string;
-  sphMin: number;
-  sphMax: number;
-  cylMin: number;
-  cylMax: number;
   addMin?: number | null;
   addMax?: number | null;
   axis?: number | null;
@@ -209,104 +355,53 @@ export async function createLensProduct(input: CreateLensProductInput) {
   if (!name) {
     throw new LensProductServiceError("name is required.");
   }
-
-  const sphMin = requireFinite("sphMin", input.sphMin);
-  const sphMax = requireFinite("sphMax", input.sphMax);
-  const cylMin = requireFinite("cylMin", input.cylMin);
-  const cylMax = requireFinite("cylMax", input.cylMax);
-  validateRange({ sphMin, sphMax, cylMin, cylMax });
-
-  const [family, base, material, indexRow, coating, color] = await Promise.all([
-    prisma.lensFamily.findUnique({ where: { id: input.familyId } }),
-    prisma.lensBase.findUnique({ where: { id: input.baseId } }),
-    prisma.lensMaterial.findUnique({ where: { id: input.materialId } }),
-    input.indexId
-      ? prisma.lensIndex.findUnique({ where: { id: input.indexId } })
-      : Promise.resolve(null),
-    input.coatingId
-      ? prisma.lensCoating.findUnique({ where: { id: input.coatingId } })
-      : Promise.resolve(null),
-    input.colorId
-      ? prisma.lensColor.findUnique({ where: { id: input.colorId } })
-      : Promise.resolve(null),
-  ]);
-
-  await assertActiveFk("Family", input.familyId, async () => family);
-  await assertActiveFk("Base", input.baseId, async () => base);
-  await assertActiveFk("Material", input.materialId, async () => material);
-  await assertActiveFk("Index", input.indexId, async () => indexRow);
-  await assertActiveFk("Coating", input.coatingId, async () => coating);
-  await assertActiveFk("Color", input.colorId, async () => color);
-
-  await ensureBaseMaterialCompat(input.baseId, input.materialId);
-
-  const rangeType = (input.rangeType?.trim() || "NORMAL").toUpperCase();
-  if (rangeType !== "NORMAL" && rangeType !== "CROSS") {
-    throw new LensProductServiceError("rangeType must be NORMAL or CROSS.");
+  const powerRangeId = normalizeOptionalId(input.powerRangeId);
+  if (!powerRangeId) {
+    throw new LensProductServiceError(
+      "powerRangeId is required.",
+      400,
+      "POWER_RANGE_REQUIRED"
+    );
   }
+
+  const ids: IdentityIds = {
+    familyId: input.familyId,
+    baseId: input.baseId,
+    materialId: normalizeOptionalId(input.materialId),
+    indexId: normalizeOptionalId(input.indexId),
+    coatingId: normalizeOptionalId(input.coatingId),
+    colorId: normalizeOptionalId(input.colorId),
+    powerRangeId,
+    rangeType: parseRangeType(input.rangeType),
+  };
 
   const eye = input.eye?.trim() || null;
   if (eye && !["LEFT", "RIGHT", "BOTH"].includes(eye.toUpperCase())) {
     throw new LensProductServiceError("eye must be LEFT, RIGHT, or BOTH.");
   }
 
-  // Codes are guaranteed after assertActiveFk for required FKs
-  const skuCode = buildLensProductSkuCode({
-    familyCode: family!.code,
-    baseCode: base!.code,
-    materialCode: material!.code,
-    indexCode: indexRow?.code ?? null,
-    coatingCode: coating?.code ?? null,
-    colorCode: color?.code ?? null,
-    sphMin,
-    sphMax,
-    cylMin,
-    cylMax,
-    rangeType,
-  });
+  const { skuCode, bounds } = await resolveIdentity(ids, { validate: "all" });
 
-  // Phase D: reject exact duplicate attribute combo + identical range
-  const duplicate = await prisma.lensProduct.findFirst({
-    where: {
-      familyId: input.familyId,
-      baseId: input.baseId,
-      materialId: input.materialId,
-      indexId: input.indexId ?? null,
-      coatingId: input.coatingId ?? null,
-      colorId: input.colorId ?? null,
-      rangeType,
-      sphMin: dec(sphMin),
-      sphMax: dec(sphMax),
-      cylMin: dec(cylMin),
-      cylMax: dec(cylMax),
-    },
-    select: { id: true, skuCode: true },
-  });
-  if (duplicate) {
-    throw new LensProductServiceError(
-      `A product with the same attributes and range already exists (${duplicate.skuCode}).`,
-      409,
-      "DUPLICATE_COMBO_RANGE",
-      { productId: duplicate.id, skuCode: duplicate.skuCode }
-    );
-  }
+  const duplicate = await findDuplicate(ids, bounds);
+  if (duplicate) throw duplicateError(duplicate);
 
   try {
     const created = await prisma.lensProduct.create({
       data: {
         skuCode,
         name,
-        familyId: input.familyId,
-        baseId: input.baseId,
-        materialId: input.materialId,
-        indexId: input.indexId || null,
-        coatingId: input.coatingId || null,
-        colorId: input.colorId || null,
-        rangeType,
-        sphMin: dec(sphMin),
-        sphMax: dec(sphMax),
-        cylMin: dec(cylMin),
-        cylMax: dec(cylMax),
+        familyId: ids.familyId,
+        baseId: ids.baseId,
+        materialId: ids.materialId,
+        indexId: ids.indexId,
+        coatingId: ids.coatingId,
+        colorId: ids.colorId,
+        powerRangeId: ids.powerRangeId,
+        rangeType: ids.rangeType,
+        sphMin: dec(bounds.sphMin),
+        sphMax: dec(bounds.sphMax),
+        cylMin: dec(bounds.cylMin),
+        cylMax: dec(bounds.cylMax),
         addMin:
           input.addMin != null && Number.isFinite(input.addMin)
             ? dec(input.addMin)
@@ -342,9 +437,10 @@ export async function createLensProduct(input: CreateLensProductInput) {
       context: {
         event: "LENS_PRODUCT_CREATED",
         skuCode,
-        familyId: input.familyId,
-        baseId: input.baseId,
-        materialId: input.materialId,
+        familyId: ids.familyId,
+        baseId: ids.baseId,
+        materialId: ids.materialId,
+        powerRangeId: ids.powerRangeId,
       },
       activityMessage: `Lens product created: ${skuCode}`,
     });
@@ -381,6 +477,7 @@ export async function listLensProducts(params: {
   familyId?: string;
   baseId?: string;
   materialId?: string;
+  powerRangeId?: string;
   isActive?: boolean | null;
   page?: number;
   limit?: number;
@@ -392,6 +489,7 @@ export async function listLensProducts(params: {
   if (params.familyId) where.familyId = params.familyId;
   if (params.baseId) where.baseId = params.baseId;
   if (params.materialId) where.materialId = params.materialId;
+  if (params.powerRangeId) where.powerRangeId = params.powerRangeId;
   if (params.isActive === true || params.isActive === false) {
     where.isActive = params.isActive;
   }
@@ -433,15 +531,13 @@ export type UpdateLensProductInput = {
   name?: string;
   familyId?: string;
   baseId?: string;
-  materialId?: string;
+  /** `null` clears material (optional); `undefined` keeps the existing value. */
+  materialId?: string | null;
   indexId?: string | null;
   coatingId?: string | null;
   colorId?: string | null;
+  powerRangeId?: string;
   rangeType?: string;
-  sphMin?: number;
-  sphMax?: number;
-  cylMin?: number;
-  cylMax?: number;
   addMin?: number | null;
   addMax?: number | null;
   axis?: number | null;
@@ -459,64 +555,15 @@ export async function updateLensProduct(input: UpdateLensProductInput) {
     throw new LensProductServiceError("Product not found.", 404, "NOT_FOUND");
   }
 
-  const familyId = input.familyId ?? existing.familyId;
-  const baseId = input.baseId ?? existing.baseId;
-  const materialId = input.materialId ?? existing.materialId;
-  const indexId =
-    input.indexId !== undefined ? input.indexId : existing.indexId;
-  const coatingId =
-    input.coatingId !== undefined ? input.coatingId : existing.coatingId;
-  const colorId =
-    input.colorId !== undefined ? input.colorId : existing.colorId;
-
-  if (input.familyId) {
-    await assertActiveFk("Family", familyId, (id) =>
-      prisma.lensFamily.findUnique({ where: { id } })
-    );
-  }
-  if (input.baseId || input.materialId) {
-    await assertActiveFk("Base", baseId, (id) =>
-      prisma.lensBase.findUnique({ where: { id } })
-    );
-    await assertActiveFk("Material", materialId, (id) =>
-      prisma.lensMaterial.findUnique({ where: { id } })
-    );
-    await ensureBaseMaterialCompat(baseId, materialId);
-  }
-  if (input.indexId) {
-    await assertActiveFk("Index", indexId, (id) =>
-      prisma.lensIndex.findUnique({ where: { id } })
-    );
-  }
-  if (input.coatingId) {
-    await assertActiveFk("Coating", coatingId, (id) =>
-      prisma.lensCoating.findUnique({ where: { id } })
-    );
-  }
-  if (input.colorId) {
-    await assertActiveFk("Color", colorId, (id) =>
-      prisma.lensColor.findUnique({ where: { id } })
-    );
-  }
-
-  const sphMin =
-    input.sphMin != null ? requireFinite("sphMin", input.sphMin) : Number(existing.sphMin);
-  const sphMax =
-    input.sphMax != null ? requireFinite("sphMax", input.sphMax) : Number(existing.sphMax);
-  const cylMin =
-    input.cylMin != null ? requireFinite("cylMin", input.cylMin) : Number(existing.cylMin);
-  const cylMax =
-    input.cylMax != null ? requireFinite("cylMax", input.cylMax) : Number(existing.cylMax);
-  validateRange({ sphMin, sphMax, cylMin, cylMax });
-
-  const rangeType = (
-    input.rangeType?.trim() ||
-    existing.rangeType ||
-    "NORMAL"
-  ).toUpperCase();
-  if (rangeType !== "NORMAL" && rangeType !== "CROSS") {
-    throw new LensProductServiceError("rangeType must be NORMAL or CROSS.");
-  }
+  const identityTouched =
+    input.familyId !== undefined ||
+    input.baseId !== undefined ||
+    input.materialId !== undefined ||
+    input.indexId !== undefined ||
+    input.coatingId !== undefined ||
+    input.colorId !== undefined ||
+    input.powerRangeId !== undefined ||
+    input.rangeType !== undefined;
 
   const eyeRaw =
     input.eye !== undefined ? input.eye?.trim() || null : existing.eye;
@@ -524,19 +571,84 @@ export async function updateLensProduct(input: UpdateLensProductInput) {
     throw new LensProductServiceError("eye must be LEFT, RIGHT, or BOTH.");
   }
 
-  const data: Prisma.LensProductUpdateInput = {
-    family: { connect: { id: familyId } },
-    base: { connect: { id: baseId } },
-    material: { connect: { id: materialId } },
-    index: indexId ? { connect: { id: indexId } } : { disconnect: true },
-    coating: coatingId ? { connect: { id: coatingId } } : { disconnect: true },
-    color: colorId ? { connect: { id: colorId } } : { disconnect: true },
-    rangeType,
-    sphMin: dec(sphMin),
-    sphMax: dec(sphMax),
-    cylMin: dec(cylMin),
-    cylMax: dec(cylMax),
-  };
+  const data: Prisma.LensProductUpdateInput = {};
+
+  if (identityTouched) {
+    const powerRangeId =
+      input.powerRangeId !== undefined
+        ? normalizeOptionalId(input.powerRangeId)
+        : existing.powerRangeId;
+    if (!powerRangeId) {
+      throw new LensProductServiceError(
+        "powerRangeId is required.",
+        400,
+        "POWER_RANGE_REQUIRED"
+      );
+    }
+
+    const ids: IdentityIds = {
+      familyId: input.familyId ?? existing.familyId,
+      baseId: input.baseId ?? existing.baseId,
+      materialId:
+        input.materialId !== undefined
+          ? normalizeOptionalId(input.materialId)
+          : existing.materialId,
+      indexId:
+        input.indexId !== undefined
+          ? normalizeOptionalId(input.indexId)
+          : existing.indexId,
+      coatingId:
+        input.coatingId !== undefined
+          ? normalizeOptionalId(input.coatingId)
+          : existing.coatingId,
+      colorId:
+        input.colorId !== undefined
+          ? normalizeOptionalId(input.colorId)
+          : existing.colorId,
+      powerRangeId,
+      rangeType: parseRangeType(input.rangeType ?? existing.rangeType),
+    };
+
+    // Only re-validate pieces the caller actually changed (legacy rows stay editable).
+    const validate = new Set<keyof IdentityIds>();
+    if (input.familyId !== undefined) validate.add("familyId");
+    if (input.baseId !== undefined || input.materialId !== undefined) {
+      validate.add("baseId");
+      validate.add("materialId");
+    }
+    if (input.indexId) validate.add("indexId");
+    if (input.coatingId) validate.add("coatingId");
+    if (input.colorId) validate.add("colorId");
+    if (input.powerRangeId !== undefined) validate.add("powerRangeId");
+
+    const { skuCode, bounds } = await resolveIdentity(ids, { validate });
+
+    const duplicate = await findDuplicate(ids, bounds, input.id);
+    if (duplicate) throw duplicateError(duplicate);
+
+    data.family = { connect: { id: ids.familyId } };
+    data.base = { connect: { id: ids.baseId } };
+    data.material = ids.materialId
+      ? { connect: { id: ids.materialId } }
+      : { disconnect: true };
+    data.index = ids.indexId
+      ? { connect: { id: ids.indexId } }
+      : { disconnect: true };
+    data.coating = ids.coatingId
+      ? { connect: { id: ids.coatingId } }
+      : { disconnect: true };
+    data.color = ids.colorId
+      ? { connect: { id: ids.colorId } }
+      : { disconnect: true };
+    data.powerRange = { connect: { id: ids.powerRangeId } };
+    data.rangeType = ids.rangeType;
+    data.sphMin = dec(bounds.sphMin);
+    data.sphMax = dec(bounds.sphMax);
+    data.cylMin = dec(bounds.cylMin);
+    data.cylMax = dec(bounds.cylMax);
+    // Regenerate interim SKU when identity changes (explicit skuCode below still wins).
+    data.skuCode = skuCode;
+  }
 
   if (input.skuCode != null) {
     const skuCode = input.skuCode.trim();

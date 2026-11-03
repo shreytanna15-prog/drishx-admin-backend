@@ -9,6 +9,12 @@ const existing = {
   city: "Ahmedabad",
   state: "Gujarat",
   pincode: "380001",
+  email: "shop@example.com",
+  mobileNumber: "9876543210",
+  gstNumber: null as string | null,
+  panNumber: null as string | null,
+  gstinVerifyStatus: "UNKNOWN" as const,
+  addressVerifiedAt: null as Date | null,
 };
 
 describe("parseCustomerProfilePatch", () => {

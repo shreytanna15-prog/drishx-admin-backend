@@ -178,30 +178,16 @@ export function classifyOrdersListScope(
 ): "catalog" | "rx_lab" {
   if (order.warehouseHold) return "rx_lab";
   if (order.notes?.includes(RX_ORDER_NOTES_MARKER)) return "rx_lab";
-  // Match Prisma `{ orderImageUrl: { not: null } }` (empty string counts as present).
-  if (
-    order.orderImageUrl != null &&
-    !order.notes?.includes(RX_ORDER_NOTES_MARKER) &&
-    !order.notes?.includes(COLOR_LENS_NOTES_MARKER)
-  ) {
-    return "rx_lab";
-  }
+  // RC-02: photo prescription (image without RX notes) is no longer rx_lab.
   return "catalog";
 }
 
-/** Prescription lab: RX form, photo prescription, or still on warehouse hold. */
+/** Prescription lab: RX form orders or still on warehouse hold (RC-02: no photo). */
 export function rxLabWhere(): Prisma.OrderWhereInput {
   return {
     OR: [
       { warehouseHold: true },
       { notes: { contains: RX_ORDER_NOTES_MARKER } },
-      {
-        AND: [
-          { orderImageUrl: { not: null } },
-          notesDoesNotContainMarker(RX_ORDER_NOTES_MARKER),
-          notesDoesNotContainMarker(COLOR_LENS_NOTES_MARKER),
-        ],
-      },
     ],
   };
 }
@@ -215,13 +201,6 @@ export function catalogWhere(): Prisma.OrderWhereInput {
     AND: [
       { warehouseHold: false },
       notesDoesNotContainMarker(RX_ORDER_NOTES_MARKER),
-      {
-        OR: [
-          { orderImageUrl: null },
-          { notes: { contains: RX_ORDER_NOTES_MARKER } },
-          { notes: { contains: COLOR_LENS_NOTES_MARKER } },
-        ],
-      },
     ],
   };
 }

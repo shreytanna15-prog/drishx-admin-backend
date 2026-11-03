@@ -128,6 +128,8 @@ export async function PUT(req: NextRequest, context: RouteContext) {
             approvedAt: now,
             approvedById: session.userId,
             rejectionReason: null,
+            // RC-01 Option A: address verified immediately on onboarding approve
+            addressVerifiedAt: now,
             ...(defaultTierId ? { pricingTierId: defaultTierId } : {}),
           }
         : action === "reject"

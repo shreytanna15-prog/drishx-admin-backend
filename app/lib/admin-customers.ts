@@ -23,6 +23,9 @@ export type AdminCustomer = {
   state: string | null;
   pincode: string | null;
   mobileNumber?: string | null;
+  mobileVerifiedAt?: string | null;
+  emailVerifiedAt?: string | null;
+  addressVerifiedAt?: string | null;
   alternateMobileNumber?: string | null;
   whatsappNumber?: string | null;
   shopName?: string | null;
@@ -90,7 +93,23 @@ export type CreateAdminCustomerPayload = {
   pricingTierId?: string | null;
 };
 
-export type UpdateAdminCustomerPayload = Partial<CreateAdminCustomerPayload>;
+export type UpdateAdminCustomerPayload = Partial<CreateAdminCustomerPayload> & {
+  /** Required on every Admin customer update (RC-01). */
+  notes?: string;
+};
+
+export type CustomerChangeHistoryItem = {
+  id: string;
+  publicId: string;
+  action: string;
+  createdAt: string;
+  adminName: string | null;
+  adminUserId: string | null;
+  notes: string | null;
+  fieldLabels: string[];
+  changes: unknown;
+  message: string | null;
+};
 
 export type AccountActionValue =
   | "NONE"
@@ -310,6 +329,122 @@ export async function verifyCustomerGst(id: string): Promise<VerifyGstResult> {
   return adminFetch<VerifyGstResult>(`/api/users/${id}/verify-gst`, {
     method: "POST",
     body: JSON.stringify({}),
+  });
+}
+
+export async function clearCustomerGstVerification(
+  id: string
+): Promise<AdminCustomer> {
+  const data = await adminFetch<{ customer: AdminCustomer }>(
+    `/api/users/${id}/clear-gst-verification`,
+    { method: "POST", body: JSON.stringify({}) }
+  );
+  return data.customer;
+}
+
+export async function verifyCustomerAddress(
+  id: string
+): Promise<AdminCustomer> {
+  const data = await adminFetch<{ customer: AdminCustomer }>(
+    `/api/users/${id}/verify-address`,
+    { method: "POST", body: JSON.stringify({}) }
+  );
+  return data.customer;
+}
+
+export async function fetchCustomerChangeHistory(
+  id: string,
+  limit = 50
+): Promise<CustomerChangeHistoryItem[]> {
+  const data = await adminFetch<{ items: CustomerChangeHistoryItem[] }>(
+    `/api/users/customers/${id}/change-history?limit=${limit}`
+  );
+  return data.items;
+}
+
+export function isGstTaxLocked(
+  customer: Pick<AdminCustomer, "gstinVerifyStatus">
+) {
+  return customer.gstinVerifyStatus === "ACTIVE";
+}
+
+export function isMobileVerified(
+  customer: Pick<AdminCustomer, "mobileVerifiedAt">
+) {
+  return Boolean(customer.mobileVerifiedAt);
+}
+
+export function isEmailVerified(
+  customer: Pick<AdminCustomer, "emailVerifiedAt">
+) {
+  return Boolean(customer.emailVerifiedAt);
+}
+
+export function isAddressVerified(
+  customer: Pick<AdminCustomer, "addressVerifiedAt">
+) {
+  return Boolean(customer.addressVerifiedAt);
+}
+
+export async function sendAdminMobileOtp(mobileNumber: string): Promise<{
+  challengeId: string;
+  providerSessionId: string | null;
+}> {
+  return adminFetch("/api/auth/otp/mobile/send", {
+    method: "POST",
+    body: JSON.stringify({ mobileNumber, purpose: "ADMIN_INVITE" }),
+  });
+}
+
+export async function verifyAdminMobileOtp(input: {
+  mobileNumber: string;
+  code: string;
+  sessionId?: string | null;
+}): Promise<{
+  ok: boolean;
+  challengeId: string;
+  mobileNumber: string;
+  user: AdminCustomer | null;
+}> {
+  return adminFetch("/api/auth/otp/mobile/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      mobileNumber: input.mobileNumber,
+      code: input.code,
+      purpose: "ADMIN_INVITE",
+      sessionId: input.sessionId ?? undefined,
+    }),
+  });
+}
+
+export async function sendAdminEmailOtp(email: string): Promise<{
+  challengeId: string;
+  providerSessionId: string | null;
+}> {
+  return adminFetch("/api/auth/otp/email/send", {
+    method: "POST",
+    body: JSON.stringify({ email, purpose: "VERIFY_EMAIL" }),
+  });
+}
+
+export async function verifyAdminEmailOtp(input: {
+  email: string;
+  code: string;
+  sessionId?: string | null;
+}): Promise<{
+  ok: boolean;
+  challengeId: string;
+  email: string;
+  user: AdminCustomer | null;
+}> {
+  return adminFetch("/api/auth/otp/email/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      email: input.email,
+      code: input.code,
+      purpose: "VERIFY_EMAIL",
+      sessionId: input.sessionId ?? undefined,
+    }),
   });
 }
 

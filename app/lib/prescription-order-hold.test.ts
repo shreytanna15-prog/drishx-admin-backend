@@ -18,7 +18,18 @@ describe("prescription order identification", () => {
     assert.equal(isRxOrderNotes("normal notes"), false);
   });
 
-  it("detects photo prescription vs color / RX", () => {
+  it("legacy photo rows are not hold candidates (RC-02); RX only", () => {
+    assert.equal(
+      isPrescriptionHoldCandidate({ notes: null }),
+      false
+    );
+    assert.equal(
+      isPrescriptionHoldCandidate({ notes: "[Color Lens]" }),
+      false
+    );
+  });
+
+  it("still classifies legacy photo prescription vs color / RX", () => {
     assert.equal(
       isPhotoPrescriptionOrder({
         notes: null,
@@ -43,9 +54,16 @@ describe("prescription order identification", () => {
     assert.equal(
       isPrescriptionHoldCandidate({
         notes: "[RX Order]",
-        orderImageUrl: null,
       }),
       true
+    );
+    // Photo image with no RX notes must not be a hold candidate.
+    assert.equal(
+      isPrescriptionHoldCandidate({
+        notes: null,
+        orderImageUrl: "https://cdn.example/p.jpg",
+      } as { notes: string | null }),
+      false
     );
   });
 });
@@ -190,18 +208,28 @@ describe("release + notify timing", () => {
 });
 
 describe("create routes never auto-assign held orders (structural)", () => {
-  it("rx and photo create use warehouse hold fields and skip resolveOrderAssigneeId", async () => {
+  it("rx create uses warehouse hold fields and skips resolveOrderAssigneeId", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    for (const file of [
-      "app/api/orders/rx/route.ts",
-      "app/api/orders/photo/route.ts",
-    ]) {
-      const src = readFileSync(join(process.cwd(), file), "utf8");
-      assert.match(src, /warehouseReleaseCreateFields/);
-      assert.equal(src.includes("resolveOrderAssigneeId"), false);
-      assert.equal(src.includes("notifyStaffOfNewOrder"), false);
-    }
+    const src = readFileSync(
+      join(process.cwd(), "app/api/orders/rx/route.ts"),
+      "utf8"
+    );
+    assert.match(src, /warehouseReleaseCreateFields/);
+    assert.equal(src.includes("resolveOrderAssigneeId"), false);
+    assert.equal(src.includes("notifyStaffOfNewOrder"), false);
+  });
+
+  it("photo create route is retired (410 Gone, no order creation)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(
+      join(process.cwd(), "app/api/orders/photo/route.ts"),
+      "utf8"
+    );
+    assert.match(src, /status:\s*410/);
+    assert.equal(src.includes("prisma.order.create"), false);
+    assert.equal(src.includes("warehouseReleaseCreateFields"), false);
   });
 
   it("not-available staff mutation enforces warehouse hold gate", async () => {

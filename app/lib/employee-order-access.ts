@@ -1,5 +1,5 @@
 /**
- * Shared employee order access gate for RX/photo warehouse hold (RW-05).
+ * Shared employee order access gate for RX warehouse hold (RW-05 / RC-02).
  */
 
 import { NextResponse } from "next/server";

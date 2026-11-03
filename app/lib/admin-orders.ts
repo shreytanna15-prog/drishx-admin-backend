@@ -470,25 +470,12 @@ export function isColorLensOrder(order: Pick<AdminOrder, "notes">) {
   return order.notes?.includes("[Color Lens]") ?? false;
 }
 
-/** Photo prescription (image present, not RX form / color). */
-export function isPhotoPrescriptionOrder(
-  order: Pick<AdminOrder, "notes" | "orderImageUrl" | "hasOrderImage">
-) {
-  const hasImage = Boolean(order.hasOrderImage || order.orderImageUrl);
-  if (!hasImage) return false;
-  if (isRxOrder(order) || isColorLensOrder(order)) return false;
-  return true;
-}
-
-/** RX form or photo prescription — subject to admin hold → warehouse release. */
+/** RX form (or warehouse hold) — subject to admin hold → warehouse release. RC-02: no photo. */
 export function isPrescriptionLabOrder(
-  order: Pick<
-    AdminOrder,
-    "notes" | "orderImageUrl" | "hasOrderImage" | "warehouseHold"
-  >
+  order: Pick<AdminOrder, "notes" | "warehouseHold">
 ) {
   if (order.warehouseHold) return true;
-  return isRxOrder(order) || isPhotoPrescriptionOrder(order);
+  return isRxOrder(order);
 }
 
 export function isAdminHeldWarehouseOrder(
@@ -497,12 +484,12 @@ export function isAdminHeldWarehouseOrder(
   return Boolean(order.warehouseHold) && !order.warehouseReleasedAt;
 }
 
-/** Catalog / color / wholesale list — excludes prescription RX/photo lab orders. */
+/** Catalog / color / wholesale list — excludes prescription RX lab orders. */
 export function filterNonRxOrders(orders: AdminOrder[]) {
   return orders.filter((order) => !isPrescriptionLabOrder(order));
 }
 
-/** Prescription RX + photo orders for the Rx Lab screen. */
+/** Prescription RX orders for the Rx Lab screen. */
 export function filterRxOrders(orders: AdminOrder[]) {
   return orders.filter(isPrescriptionLabOrder);
 }
@@ -850,7 +837,7 @@ export type ListAdminOrdersParams = {
   batchId?: string;
   lineType?: string;
   orderKind?: string;
-  /** catalog = non-RX/photo; rx_lab = prescription lab; all = no scope filter */
+  /** catalog = non-RX; rx_lab = prescription lab; all = no scope filter */
   scope?: "all" | "catalog" | "rx_lab";
   assigneeId?: string;
   dateFrom?: string;

@@ -118,7 +118,35 @@ async function main() {
   assert(family && base && material, "missing SV/HC/PLAIN");
 
   // Unique range so leftover browser-QA products with same combo don't 409.
-  const band = (Date.now() % 40) * 0.25; // 0 .. 9.75
+  // Bounds must sit on the stepped grid (0.25 up to +4); keep within 0 .. 3.
+  const band = (Date.now() % 12) * 0.25; // 0 .. 2.75
+  const { res: rangeRes, json: rangeJson } = await api(
+    token,
+    "/api/admin/catalog/power-ranges",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        sphMin: band,
+        sphMax: band + 0.5,
+        cylMin: 0,
+        cylMax: 0.25,
+      }),
+    }
+  );
+  // 409 = same bounds already exist (re-run); reuse it.
+  let powerRangeId = rangeJson?.item?.id;
+  let createdRange = rangeRes.status === 201;
+  if (!powerRangeId) {
+    const { json: ranges } = await api(token, "/api/admin/catalog/power-ranges");
+    const found = ranges.items.find(
+      (r) => r.sphMin === band && r.sphMax === band + 0.5 && r.cylMin === 0 && r.cylMax === 0.25
+    );
+    assert(found, `power range create ${rangeRes.status} ${JSON.stringify(rangeJson)}`);
+    powerRangeId = found.id;
+    createdRange = false;
+  }
+  console.log("✓ power range ready");
+
   const { res: createRes, json: createJson } = await api(
     token,
     "/api/admin/catalog/lens-products",
@@ -129,10 +157,7 @@ async function main() {
         familyId: family.id,
         baseId: base.id,
         materialId: material.id,
-        sphMin: band,
-        sphMax: band + 0.5,
-        cylMin: 0,
-        cylMax: 0.25,
+        powerRangeId,
       }),
     }
   );
@@ -163,6 +188,9 @@ async function main() {
 
   // cleanup
   await prisma.lensProduct.delete({ where: { id: productId } });
+  if (createdRange) {
+    await prisma.lensPowerRange.delete({ where: { id: powerRangeId } });
+  }
   console.log("✓ cleanup");
   console.log("\nAll API e2e smoke checks passed.");
 }

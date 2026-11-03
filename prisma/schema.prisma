@@ -60,105 +60,107 @@ enum CustomerTaxType {
 }
 
 model User {
-  id                     String                @id @default(cuid())
-  email                  String                @unique
-  password               String
-  name                   String?
-  role                   UserRole              @default(CUSTOMER)
-  isActive               Boolean               @default(true)
-  isApproved             Boolean               @default(true)
-  approvalStatus         AccountApprovalStatus @default(APPROVED)
-  gstNumber              String?               @unique
-  businessName           String?
-  businessAddress        String?
-  state                  String?
-  pincode                String?
-  mobileNumber           String?
+  id                         String                @id @default(cuid())
+  email                      String                @unique
+  password                   String
+  name                       String?
+  role                       UserRole              @default(CUSTOMER)
+  isActive                   Boolean               @default(true)
+  isApproved                 Boolean               @default(true)
+  approvalStatus             AccountApprovalStatus @default(APPROVED)
+  gstNumber                  String?               @unique
+  businessName               String?
+  businessAddress            String?
+  state                      String?
+  pincode                    String?
+  mobileNumber               String?
   /// Set only after successful mobile OTP (2factor / OTP_DEV_MODE).
-  mobileVerifiedAt       DateTime?
-  alternateMobileNumber  String?
-  whatsappNumber         String?
+  mobileVerifiedAt           DateTime?
+  alternateMobileNumber      String?
+  whatsappNumber             String?
   /// Set only after successful email OTP. Null if email skipped or not yet verified.
-  emailVerifiedAt        DateTime?
-  shopName               String?
-  businessType           String?
-  addressLine1           String?
-  addressLine2           String?
-  city                   String?
-  businessEmail          String?
-  shopPhoneNumber        String?
-  legalBusinessName      String?
-  tradeName              String?
-  gstRegistrationState   String?
-  panNumber              String?
-  billingLegalName       String?
-  billingAddress         String?
-  billingCity            String?
-  billingState           String?
-  billingPincode         String?
-  billingGstState        String?
-  shippingLegalName      String?
-  shippingAddress        String?
-  shippingCity           String?
-  shippingState          String?
-  shippingPincode        String?
+  emailVerifiedAt            DateTime?
+  /// Set on Admin onboarding approve; cleared when client/Admin changes address fields.
+  addressVerifiedAt          DateTime?
+  shopName                   String?
+  businessType               String?
+  addressLine1               String?
+  addressLine2               String?
+  city                       String?
+  businessEmail              String?
+  shopPhoneNumber            String?
+  legalBusinessName          String?
+  tradeName                  String?
+  gstRegistrationState       String?
+  panNumber                  String?
+  billingLegalName           String?
+  billingAddress             String?
+  billingCity                String?
+  billingState               String?
+  billingPincode             String?
+  billingGstState            String?
+  shippingLegalName          String?
+  shippingAddress            String?
+  shippingCity               String?
+  shippingState              String?
+  shippingPincode            String?
   /// GST customer classification for invoicing.
-  customerType           CustomerTaxType       @default(UNREGISTERED)
+  customerType               CustomerTaxType       @default(UNREGISTERED)
   /// Max receivable balance before checkout hard-block (Phase D).
-  creditLimit            Decimal?
-  creditAllowed          Boolean               @default(true)
-  accountAction          AccountAction         @default(NONE)
+  creditLimit                Decimal?
+  creditAllowed              Boolean               @default(true)
+  accountAction              AccountAction         @default(NONE)
   /// Pricing tier A–F (default D = base / 0% until assigned).
-  pricingTierId         String?
-  pricingTier           PricingTier?         @relation(fields: [pricingTierId], references: [id])
+  pricingTierId              String?
+  pricingTier                PricingTier?          @relation(fields: [pricingTierId], references: [id])
   /// Staff who created this customer (Path B admin / Path C walk-in).
-  createdByStaffId       String?
-  gstinVerifyStatus      GstinVerifyStatus     @default(UNKNOWN)
-  gstinVerifiedAt        DateTime?
-  gstinVerifyRaw         Json?
-  gstinVerifiedById      String?
-  approvedAt             DateTime?
-  approvedById           String?
-  rejectionReason        String?
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
-  staffRoleId            String?
-  staffRole              StaffRole?            @relation(fields: [staffRoleId], references: [id])
-  transactions           Transaction[]
-  orders                 Order[]               @relation("CustomerOrders")
-  assignedOrders         Order[]               @relation("AssignedOrdersToEmployee")
+  createdByStaffId           String?
+  gstinVerifyStatus          GstinVerifyStatus     @default(UNKNOWN)
+  gstinVerifiedAt            DateTime?
+  gstinVerifyRaw             Json?
+  gstinVerifiedById          String?
+  approvedAt                 DateTime?
+  approvedById               String?
+  rejectionReason            String?
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  staffRoleId                String?
+  staffRole                  StaffRole?            @relation(fields: [staffRoleId], references: [id])
+  transactions               Transaction[]
+  orders                     Order[]               @relation("CustomerOrders")
+  assignedOrders             Order[]               @relation("AssignedOrdersToEmployee")
   /// Orders this staff member placed on behalf of a customer (RW-10).
-  placedOrders           Order[]               @relation("OrdersPlacedByStaff")
-  notifications          Notification[]
-  invoices               Invoice[]
-  assignedTasks          Task[]                @relation("AssignedTasksToEmployee")
-  createdTasks           Task[]                @relation("AssignedTasksByAdmin")
-  cartReservations       CartReservation[]
-  returnRequests         ReturnRequest[]       @relation("CustomerReturnRequests")
-  assignedReturnRequests ReturnRequest[]       @relation("AssignedReturnRequestsToEmployee")
-  reviewedReturnRequests ReturnRequest[]       @relation("ReviewedReturnRequestsByAdmin")
-  returnImages           ReturnRequestImage[]
-  returnTimelineEvents   ReturnTimelineEvent[]
-  creditNotes            CreditNote[]
-  orderActivityLogs      OrderActivityLog[]  @relation("OrderActivityActors")
-  createdPowerVersions   OrderPowerVersion[] @relation("PowerVersionCreatedBy")
-  acceptedPowerVersions  OrderPowerVersion[] @relation("PowerVersionAcceptedBy")
-  refreshTokens          RefreshToken[]
-  payments               Payment[]             @relation("CustomerPayments")
-  paymentClaims          PaymentClaim[]        @relation("CustomerPaymentClaims")
-  reviewedPaymentClaims  PaymentClaim[]        @relation("PaymentClaimReviewer")
-  customerLedgerEntries  CustomerLedgerEntry[]
-  cashAccounts           CashAccount[]         @relation("EmployeeCashAccounts")
-  expenseRequests        ExpenseRequest[]      @relation("ExpenseRequestEmployee")
-  reviewedExpenseRequests ExpenseRequest[]     @relation("ExpenseRequestReviewer")
-  supplierPayments       SupplierPayment[]     @relation("SupplierPaymentRecorder")
-  loyaltyWallet          LoyaltyWallet?
-  loyaltyTransactions    LoyaltyTransaction[]
-  loyaltyCreatedTransactions LoyaltyTransaction[] @relation("LoyaltyCreatedBy")
-  attendanceRecords      AttendanceRecord[]       @relation("AttendanceEmployee")
-  attendanceMarkedBy     AttendanceRecord[]       @relation("AttendanceMarkedBy")
-  orderRefunds           OrderRefund[]
-  orderRefundPayouts     OrderRefundPayout[]      @relation("OrderRefundPayoutRecorder")
+  placedOrders               Order[]               @relation("OrdersPlacedByStaff")
+  notifications              Notification[]
+  invoices                   Invoice[]
+  assignedTasks              Task[]                @relation("AssignedTasksToEmployee")
+  createdTasks               Task[]                @relation("AssignedTasksByAdmin")
+  cartReservations           CartReservation[]
+  returnRequests             ReturnRequest[]       @relation("CustomerReturnRequests")
+  assignedReturnRequests     ReturnRequest[]       @relation("AssignedReturnRequestsToEmployee")
+  reviewedReturnRequests     ReturnRequest[]       @relation("ReviewedReturnRequestsByAdmin")
+  returnImages               ReturnRequestImage[]
+  returnTimelineEvents       ReturnTimelineEvent[]
+  creditNotes                CreditNote[]
+  orderActivityLogs          OrderActivityLog[]    @relation("OrderActivityActors")
+  createdPowerVersions       OrderPowerVersion[]   @relation("PowerVersionCreatedBy")
+  acceptedPowerVersions      OrderPowerVersion[]   @relation("PowerVersionAcceptedBy")
+  refreshTokens              RefreshToken[]
+  payments                   Payment[]             @relation("CustomerPayments")
+  paymentClaims              PaymentClaim[]        @relation("CustomerPaymentClaims")
+  reviewedPaymentClaims      PaymentClaim[]        @relation("PaymentClaimReviewer")
+  customerLedgerEntries      CustomerLedgerEntry[]
+  cashAccounts               CashAccount[]         @relation("EmployeeCashAccounts")
+  expenseRequests            ExpenseRequest[]      @relation("ExpenseRequestEmployee")
+  reviewedExpenseRequests    ExpenseRequest[]      @relation("ExpenseRequestReviewer")
+  supplierPayments           SupplierPayment[]     @relation("SupplierPaymentRecorder")
+  loyaltyWallet              LoyaltyWallet?
+  loyaltyTransactions        LoyaltyTransaction[]
+  loyaltyCreatedTransactions LoyaltyTransaction[]  @relation("LoyaltyCreatedBy")
+  attendanceRecords          AttendanceRecord[]    @relation("AttendanceEmployee")
+  attendanceMarkedBy         AttendanceRecord[]    @relation("AttendanceMarkedBy")
+  orderRefunds               OrderRefund[]
+  orderRefundPayouts         OrderRefundPayout[]   @relation("OrderRefundPayoutRecorder")
 }
 
 /// Customer pricing tiers A–F. Tier D is the base (isBase=true).
@@ -369,13 +371,13 @@ model KryptokLens {
   // Bifocal addition power — typically PLANO or +4.00
   add Decimal
 
-  costPrice Decimal?
-  price     Decimal
-  quantity  Int      @default(0)
-  isDisabled Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  orders    Order[]
+  costPrice  Decimal?
+  price      Decimal
+  quantity   Int      @default(0)
+  isDisabled Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  orders     Order[]
 }
 
 model ProgressiveLens {
@@ -646,92 +648,92 @@ model CartReservation {
 }
 
 model Order {
-  id                 String                   @id @default(cuid())
-  orderNumber        Int?                     @unique
-  checkoutBatchId    String?
-  user               User                     @relation("CustomerOrders", fields: [userId], references: [id])
-  userId             String
+  id                    String                     @id @default(cuid())
+  orderNumber           Int?                       @unique
+  checkoutBatchId       String?
+  user                  User                       @relation("CustomerOrders", fields: [userId], references: [id])
+  userId                String
   /// Staff employee responsible for fulfilling / procuring this order (or batch).
-  assignedTo         User?                    @relation("AssignedOrdersToEmployee", fields: [assignedToId], references: [id])
-  assignedToId       String?
-  assignedAt         DateTime?
+  assignedTo            User?                      @relation("AssignedOrdersToEmployee", fields: [assignedToId], references: [id])
+  assignedToId          String?
+  assignedAt            DateTime?
   /// RW-10: who actually placed the order (admin/employee). Null for customer self-checkout and legacy rows.
-  placedBy           User?                    @relation("OrdersPlacedByStaff", fields: [placedByUserId], references: [id])
-  placedByUserId     String?
+  placedBy              User?                      @relation("OrdersPlacedByStaff", fields: [placedByUserId], references: [id])
+  placedByUserId        String?
   /// RW-10: placement channel. Null = legacy (unknown); never invent a backfill.
-  orderSource        OrderSource?
+  orderSource           OrderSource?
   /// RW-05: true for RX / photo-prescription orders that stay admin-only until release.
-  warehouseHold      Boolean                  @default(false)
+  warehouseHold         Boolean                    @default(false)
   /// When set, assigned staff may see/work the order on warehouse queues.
-  warehouseReleasedAt DateTime?
+  warehouseReleasedAt   DateTime?
   warehouseReleasedById String?
-  lineType           CartLineType             @default(RETAIL)
-  wholesaleSpec      Json?
-  lensType           LensType
+  lineType              CartLineType               @default(RETAIL)
+  wholesaleSpec         Json?
+  lensType              LensType
   // Exactly one of these will be set based on lensType
-  singleVisionLens   SingleVisionLens?        @relation(fields: [singleVisionLensId], references: [id])
-  singleVisionLensId String?
-  kryptokLens        KryptokLens?             @relation(fields: [kryptokLensId], references: [id])
-  kryptokLensId      String?
-  progressiveLens    ProgressiveLens?         @relation(fields: [progressiveLensId], references: [id])
-  progressiveLensId  String?
-  oriVisionLens      OriVisionLens?           @relation(fields: [oriVisionLensId], references: [id])
-  oriVisionLensId    String?
-  magnusLens         MagnusLens?              @relation(fields: [magnusLensId], references: [id])
-  magnusLensId       String?
-  bifocalLens        BifocalLens?             @relation(fields: [bifocalLensId], references: [id])
-  bifocalLensId      String?
-  quantity           Float
+  singleVisionLens      SingleVisionLens?          @relation(fields: [singleVisionLensId], references: [id])
+  singleVisionLensId    String?
+  kryptokLens           KryptokLens?               @relation(fields: [kryptokLensId], references: [id])
+  kryptokLensId         String?
+  progressiveLens       ProgressiveLens?           @relation(fields: [progressiveLensId], references: [id])
+  progressiveLensId     String?
+  oriVisionLens         OriVisionLens?             @relation(fields: [oriVisionLensId], references: [id])
+  oriVisionLensId       String?
+  magnusLens            MagnusLens?                @relation(fields: [magnusLensId], references: [id])
+  magnusLensId          String?
+  bifocalLens           BifocalLens?               @relation(fields: [bifocalLensId], references: [id])
+  bifocalLensId         String?
+  quantity              Float
   /// Stock allocated at order time (logical hold; physical qty reduced on pick/pack).
-  reservedQuantity   Float                    @default(0)
+  reservedQuantity      Float                      @default(0)
   /// Units picked from inventory by staff (decrements lens stock when increased).
-  pickedQuantity     Float                    @default(0)
-  unitPrice          Decimal
-  totalAmount        Decimal
+  pickedQuantity        Float                      @default(0)
+  unitPrice             Decimal
+  totalAmount           Decimal
   /// Snapshot of customer pricing tier at placement (invoice reprint fidelity).
-  tierCode             String?
-  tierDiscountPercent  Decimal?
-  tierDiscountAmount   Decimal?
+  tierCode              String?
+  tierDiscountPercent   Decimal?
+  tierDiscountAmount    Decimal?
   /// Customer-selected prescription at checkout (cart), not catalog lens defaults.
-  sph                Decimal?
-  cyl                Decimal?
-  axis               Int?
-  add                Decimal?
-  eye                String?
-  status             OrderStatus              @default(PENDING)
-  notes              String? // Customer special instructions for this order
+  sph                   Decimal?
+  cyl                   Decimal?
+  axis                  Int?
+  add                   Decimal?
+  eye                   String?
+  status                OrderStatus                @default(PENDING)
+  notes                 String? // Customer special instructions for this order
   /// Staff-only ops notes — never exposed to CUSTOMER API responses.
-  internalNotes      String?
-  cancelReason       String?
-  courierName        String?
-  trackingNumber     String?
+  internalNotes         String?
+  cancelReason          String?
+  courierName           String?
+  trackingNumber        String?
   /// Courier dispatch slot decided at placement: null when the dispatch cutoff was disabled at creation.
-  dispatchDate DateTime?
+  dispatchDate          DateTime?
   /// True when the placement time fell after the admin-configured dispatch cutoff.
-  cutoffDeferred Boolean                   @default(false)
+  cutoffDeferred        Boolean                    @default(false)
   /// Super-admin manual override permitting early dispatch of a deferred order.
   dispatchOverrideStamp Json?
   /// Delivery service chosen at order time (charge calculated after packing).
-  deliveryService    DeliveryService? @relation(fields: [deliveryServiceId], references: [id])
-  deliveryServiceId  String?
-  delivery           OrderDelivery?
-  orderImageUrl      String? // Supabase URL when customer submits a prescription photo
-  transactionId      String? // ID of the CREDIT Transaction auto-created on sale
-  archivedAt         DateTime?
-  archiveReason      String?
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
-  notifications      Notification[]
-  invoice            Invoice?
-  wholesaleLineItems WholesaleOrderLineItem[]
-  returnRequests     ReturnRequest[]          @relation("OrderReturnRequests")
-  returnItems        ReturnRequestItem[]      @relation("OrderReturnItems")
-  inventoryMovements InventoryMovement[]
-  activityLogs       OrderActivityLog[]
-  powerVersions      OrderPowerVersion[]
-  alternateSuggestions AlternatePowerSuggestion[]
-  procurementRequests ProcurementRequest[]
-  orderRefund         OrderRefund?
+  deliveryService       DeliveryService?           @relation(fields: [deliveryServiceId], references: [id])
+  deliveryServiceId     String?
+  delivery              OrderDelivery?
+  orderImageUrl         String? // Supabase URL when customer submits a prescription photo
+  transactionId         String? // ID of the CREDIT Transaction auto-created on sale
+  archivedAt            DateTime?
+  archiveReason         String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  notifications         Notification[]
+  invoice               Invoice?
+  wholesaleLineItems    WholesaleOrderLineItem[]
+  returnRequests        ReturnRequest[]            @relation("OrderReturnRequests")
+  returnItems           ReturnRequestItem[]        @relation("OrderReturnItems")
+  inventoryMovements    InventoryMovement[]
+  activityLogs          OrderActivityLog[]
+  powerVersions         OrderPowerVersion[]
+  alternateSuggestions  AlternatePowerSuggestion[]
+  procurementRequests   ProcurementRequest[]
+  orderRefund           OrderRefund?
 
   @@index([checkoutBatchId])
   @@index([assignedToId])
@@ -745,8 +747,8 @@ model Order {
 
 /// Immutable power history for retail orders. Version 1 is always the original ordered power.
 model OrderPowerVersion {
-  id               String              @id @default(cuid())
-  order            Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id               String                     @id @default(cuid())
+  order            Order                      @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderId          String
   versionNumber    Int
   sph              Decimal?
@@ -756,20 +758,20 @@ model OrderPowerVersion {
   eye              String?
   lensType         LensType
   lensId           String?
-  source           PowerVersionSource  @default(ORIGINAL)
-  status           PowerVersionStatus  @default(ACTIVE)
-  reservedQuantity Float               @default(0)
-  pickedQuantity   Float               @default(0)
-  isFinalFulfilled Boolean             @default(false)
-  createdBy        User?               @relation("PowerVersionCreatedBy", fields: [createdById], references: [id])
+  source           PowerVersionSource         @default(ORIGINAL)
+  status           PowerVersionStatus         @default(ACTIVE)
+  reservedQuantity Float                      @default(0)
+  pickedQuantity   Float                      @default(0)
+  isFinalFulfilled Boolean                    @default(false)
+  createdBy        User?                      @relation("PowerVersionCreatedBy", fields: [createdById], references: [id])
   createdById      String?
-  acceptedBy       User?               @relation("PowerVersionAcceptedBy", fields: [acceptedById], references: [id])
+  acceptedBy       User?                      @relation("PowerVersionAcceptedBy", fields: [acceptedById], references: [id])
   acceptedById     String?
   acceptedAt       DateTime?
   supersededAt     DateTime?
   notes            String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
   suggestionsFor   AlternatePowerSuggestion[]
 
   @@unique([orderId, versionNumber])
@@ -778,24 +780,24 @@ model OrderPowerVersion {
 }
 
 model AlternatePowerSuggestion {
-  id               String                    @id @default(cuid())
-  order            Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId          String
-  forVersion       OrderPowerVersion         @relation(fields: [forVersionId], references: [id], onDelete: Cascade)
-  forVersionId     String
-  sph              Decimal
-  cyl              Decimal?
-  axis             Int?
-  add              Decimal?
-  eye              String?
-  lensType         LensType
-  lensId           String
-  availability     AlternateAvailability
-  etaDays          Int?
-  distanceScore    Float
-  status           AlternateSuggestionStatus @default(PENDING)
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
+  id            String                    @id @default(cuid())
+  order         Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId       String
+  forVersion    OrderPowerVersion         @relation(fields: [forVersionId], references: [id], onDelete: Cascade)
+  forVersionId  String
+  sph           Decimal
+  cyl           Decimal?
+  axis          Int?
+  add           Decimal?
+  eye           String?
+  lensType      LensType
+  lensId        String
+  availability  AlternateAvailability
+  etaDays       Int?
+  distanceScore Float
+  status        AlternateSuggestionStatus @default(PENDING)
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
 
   @@index([orderId, status])
   @@index([forVersionId])
@@ -811,15 +813,15 @@ model AppSetting {
 }
 
 model OrderActivityLog {
-  id        String   @id @default(cuid())
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId   String
-  actor     User?    @relation("OrderActivityActors", fields: [actorUserId], references: [id])
+  id          String   @id @default(cuid())
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId     String
+  actor       User?    @relation("OrderActivityActors", fields: [actorUserId], references: [id])
   actorUserId String?
-  action    String
-  message   String
-  metadata  Json?
-  createdAt DateTime @default(now())
+  action      String
+  message     String
+  metadata    Json?
+  createdAt   DateTime @default(now())
 
   @@index([orderId, createdAt])
 }
@@ -846,50 +848,50 @@ model WholesaleOrderLineItem {
 }
 
 model Invoice {
-  id                   String        @id @default(cuid())
-  invoiceNumber        String        @unique
-  user                 User          @relation(fields: [userId], references: [id])
-  userId               String
-  order                Order         @relation(fields: [orderId], references: [id])
-  orderId              String        @unique
+  id                    String                 @id @default(cuid())
+  invoiceNumber         String                 @unique
+  user                  User                   @relation(fields: [userId], references: [id])
+  userId                String
+  order                 Order                  @relation(fields: [orderId], references: [id])
+  orderId               String                 @unique
   /// Grand total (taxable + GST + rounding). Kept for backward-compatible clients.
-  amount               Decimal
-  status               InvoiceStatus @default(ISSUED)
-  issuedAt             DateTime?
-  dueDate              DateTime?
-  paymentTerms         String?
-  financialYear        String?
-  placeOfSupplyState   String?
-  placeOfSupplyCode    String?
-  isInterState         Boolean       @default(false)
+  amount                Decimal
+  status                InvoiceStatus          @default(ISSUED)
+  issuedAt              DateTime?
+  dueDate               DateTime?
+  paymentTerms          String?
+  financialYear         String?
+  placeOfSupplyState    String?
+  placeOfSupplyCode     String?
+  isInterState          Boolean                @default(false)
   /// True when HSN/GST fell back to company defaults or tax master incomplete.
-  taxIncomplete        Boolean       @default(false)
-  grossAmount          Decimal       @default(0)
-  discountAmount       Decimal       @default(0)
-  taxableAmount        Decimal       @default(0)
-  cgstAmount           Decimal       @default(0)
-  sgstAmount           Decimal       @default(0)
-  igstAmount           Decimal       @default(0)
-  roundingAdjustment   Decimal       @default(0)
-  amountPaid           Decimal       @default(0)
-  amountOutstanding    Decimal       @default(0)
+  taxIncomplete         Boolean                @default(false)
+  grossAmount           Decimal                @default(0)
+  discountAmount        Decimal                @default(0)
+  taxableAmount         Decimal                @default(0)
+  cgstAmount            Decimal                @default(0)
+  sgstAmount            Decimal                @default(0)
+  igstAmount            Decimal                @default(0)
+  roundingAdjustment    Decimal                @default(0)
+  amountPaid            Decimal                @default(0)
+  amountOutstanding     Decimal                @default(0)
   /// Snapshots at issue time
-  companyGstin         String?
-  companyLegalName     String?
-  companyState         String?
-  companyStateCode     String?
-  customerGstin        String?
-  customerLegalName    String?
-  customerBillingState String?
-  customerTypeSnapshot CustomerTaxType?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
-  lines                InvoiceLine[]
-  returnRequests       ReturnRequest[]
-  creditNotes          CreditNote[]
+  companyGstin          String?
+  companyLegalName      String?
+  companyState          String?
+  companyStateCode      String?
+  customerGstin         String?
+  customerLegalName     String?
+  customerBillingState  String?
+  customerTypeSnapshot  CustomerTaxType?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  lines                 InvoiceLine[]
+  returnRequests        ReturnRequest[]
+  creditNotes           CreditNote[]
   creditNoteAllocations CreditNoteAllocation[]
-  paymentAllocations   PaymentAllocation[]
-  paymentClaimItems    PaymentClaimItem[]
+  paymentAllocations    PaymentAllocation[]
+  paymentClaimItems     PaymentClaimItem[]
   customerLedgerEntries CustomerLedgerEntry[]
 
   @@index([userId, status])
@@ -898,26 +900,26 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id            String   @id @default(cuid())
-  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  invoiceId     String
-  lineNumber    Int
-  description   String
-  sku           String?
-  lensType      String?
-  lensId        String?
-  powerLabel    String?
-  hsnCode       String?
-  quantity      Decimal
-  unitPrice     Decimal
+  id             String   @id @default(cuid())
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId      String
+  lineNumber     Int
+  description    String
+  sku            String?
+  lensType       String?
+  lensId         String?
+  powerLabel     String?
+  hsnCode        String?
+  quantity       Decimal
+  unitPrice      Decimal
   discountAmount Decimal  @default(0)
-  taxableAmount Decimal
+  taxableAmount  Decimal
   gstRatePercent Decimal
-  cgstAmount    Decimal   @default(0)
-  sgstAmount    Decimal   @default(0)
-  igstAmount    Decimal   @default(0)
-  lineTotal     Decimal
-  createdAt     DateTime  @default(now())
+  cgstAmount     Decimal  @default(0)
+  sgstAmount     Decimal  @default(0)
+  igstAmount     Decimal  @default(0)
+  lineTotal      Decimal
+  createdAt      DateTime @default(now())
 
   @@index([invoiceId])
   @@index([hsnCode])
@@ -926,22 +928,22 @@ model InvoiceLine {
 /// Delivery service master: one courier can have many services (Land / Air).
 /// Customer rate is shown to shops; internal cost stays hidden (delivery margin).
 model DeliveryService {
-  id               String   @id @default(cuid())
+  id               String          @id @default(cuid())
   courierCompany   String
-  serviceName      String   // e.g. "Sri Raj Courier — Land"
-  serviceType      String   @default("LAND") // LAND / AIR / SURFACE / PICKUP
-  isActive         Boolean  @default(true)
-  customerRate     Decimal  @default(0) // per kg (0 = free pickup)
-  billingMethod    String   @default("PER_KG") // PER_KG / FLAT
-  flatCharge       Decimal  @default(0) // used when billingMethod = FLAT
-  minCharge        Decimal  @default(0)
-  minWeight        Decimal  @default(1) // minimum chargeable kg
-  weightRounding   String   @default("NEXT_1KG") // ACTUAL / NEXT_1KG / NEXT_0_5KG
-  internalCostRate Decimal  @default(0) // per kg cost paid to courier
-  internalMinCost  Decimal  @default(0)
+  serviceName      String // e.g. "Sri Raj Courier — Land"
+  serviceType      String          @default("LAND") // LAND / AIR / SURFACE / PICKUP
+  isActive         Boolean         @default(true)
+  customerRate     Decimal         @default(0) // per kg (0 = free pickup)
+  billingMethod    String          @default("PER_KG") // PER_KG / FLAT
+  flatCharge       Decimal         @default(0) // used when billingMethod = FLAT
+  minCharge        Decimal         @default(0)
+  minWeight        Decimal         @default(1) // minimum chargeable kg
+  weightRounding   String          @default("NEXT_1KG") // ACTUAL / NEXT_1KG / NEXT_0_5KG
+  internalCostRate Decimal         @default(0) // per kg cost paid to courier
+  internalMinCost  Decimal         @default(0)
   etaText          String? // "1–2 days"
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
   orders           Order[]
   deliveries       OrderDelivery[]
 
@@ -1078,42 +1080,42 @@ model ReturnTimelineEvent {
 }
 
 model CreditNote {
-  id               String        @id @default(cuid())
-  creditNoteNumber String        @unique
-  returnRequest    ReturnRequest @relation(fields: [returnRequestId], references: [id])
-  returnRequestId  String        @unique
-  user             User          @relation(fields: [userId], references: [id])
-  userId           String
+  id                    String                 @id @default(cuid())
+  creditNoteNumber      String                 @unique
+  returnRequest         ReturnRequest          @relation(fields: [returnRequestId], references: [id])
+  returnRequestId       String                 @unique
+  user                  User                   @relation(fields: [userId], references: [id])
+  userId                String
   /// Primary / display invoice (legacy + first allocation). Prefer allocations[] for audit.
-  invoice          Invoice?      @relation(fields: [invoiceId], references: [id])
-  invoiceId        String?
-  amount           Decimal
-  taxableAmount    Decimal       @default(0)
-  cgstAmount       Decimal       @default(0)
-  sgstAmount       Decimal       @default(0)
-  igstAmount       Decimal       @default(0)
-  reason           String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  invoice               Invoice?               @relation(fields: [invoiceId], references: [id])
+  invoiceId             String?
+  amount                Decimal
+  taxableAmount         Decimal                @default(0)
+  cgstAmount            Decimal                @default(0)
+  sgstAmount            Decimal                @default(0)
+  igstAmount            Decimal                @default(0)
+  reason                String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
   customerLedgerEntries CustomerLedgerEntry[]
   /// Per-invoice applications (Phase 4A). Empty for historical CNs issued before this table.
-  allocations      CreditNoteAllocation[]
+  allocations           CreditNoteAllocation[]
 }
 
 /// Durable per-invoice attribution for a credit note (multi-order returns).
 model CreditNoteAllocation {
-  id             String     @id @default(cuid())
-  creditNote     CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
-  creditNoteId   String
-  invoice        Invoice    @relation(fields: [invoiceId], references: [id])
-  invoiceId      String
+  id            String     @id @default(cuid())
+  creditNote    CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  creditNoteId  String
+  invoice       Invoice    @relation(fields: [invoiceId], references: [id])
+  invoiceId     String
   /// Tax-inclusive amount applied to this invoice's outstanding.
-  amount         Decimal
-  taxableAmount  Decimal    @default(0)
-  cgstAmount     Decimal    @default(0)
-  sgstAmount     Decimal    @default(0)
-  igstAmount     Decimal    @default(0)
-  createdAt      DateTime   @default(now())
+  amount        Decimal
+  taxableAmount Decimal    @default(0)
+  cgstAmount    Decimal    @default(0)
+  sgstAmount    Decimal    @default(0)
+  igstAmount    Decimal    @default(0)
+  createdAt     DateTime   @default(now())
 
   @@unique([creditNoteId, invoiceId])
   @@index([creditNoteId])
@@ -1193,30 +1195,30 @@ enum CatalogLeafStorage {
 /// RW-09 range attached to a product.
 /// Bounds describe coverage; leaves[] are the stock SKUs (1 band or N exact powers).
 model CatalogRange {
-  id            String            @id @default(cuid())
-  product       CatalogProduct    @relation(fields: [productId], references: [id], onDelete: Cascade)
-  productId     String
-  label         String
-  sphStart      Decimal
-  sphEnd        Decimal
-  cylStart      Decimal?
-  cylEnd        Decimal?
+  id          String             @id @default(cuid())
+  product     CatalogProduct     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId   String
+  label       String
+  sphStart    Decimal
+  sphEnd      Decimal
+  cylStart    Decimal?
+  cylEnd      Decimal?
   /// Kryptok / Progressive extras stored on each leaf as well.
-  add           Decimal?
-  axis          Int?
-  eye           Eye?
-  price         Decimal
-  costPrice     Decimal?
+  add         Decimal?
+  axis        Int?
+  eye         Eye?
+  price       Decimal
+  costPrice   Decimal?
   /// Count of linked leaves (exact powers or 1 for a legacy band).
-  powerCount    Int               @default(0)
-  leafStorage   CatalogLeafStorage @default(POWER_WISE)
+  powerCount  Int                @default(0)
+  leafStorage CatalogLeafStorage @default(POWER_WISE)
   /// Lens family for linked leaves (polymorphic with CatalogRangeLeaf.lensId).
-  lensType      LensType
+  lensType    LensType
   /// Representative leaf id (legacy band id, or first exact-power leaf). Optional when leaves[] is source of truth.
-  lensId        String?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  leaves        CatalogRangeLeaf[]
+  lensId      String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  leaves      CatalogRangeLeaf[]
 
   @@unique([productId, label])
   @@index([productId])
@@ -1226,14 +1228,14 @@ model CatalogRange {
 /// Maps a catalog range to one or more lens table rows (no cross-table FK).
 /// Unique (lensType, lensId) ensures a leaf belongs to at most one managed range.
 model CatalogRangeLeaf {
-  id                     String      @id @default(cuid())
-  range                  CatalogRange @relation(fields: [rangeId], references: [id], onDelete: Cascade)
-  rangeId                String
-  lensType               LensType
-  lensId                 String
+  id                    String       @id @default(cuid())
+  range                 CatalogRange @relation(fields: [rangeId], references: [id], onDelete: Cascade)
+  rangeId               String
+  lensType              LensType
+  lensId                String
   /// Set when product Hold/Archive disabled this leaf; cleared on unhold if we own the disable.
-  disabledByProductHold  Boolean     @default(false)
-  createdAt              DateTime    @default(now())
+  disabledByProductHold Boolean      @default(false)
+  createdAt             DateTime     @default(now())
 
   @@unique([lensType, lensId])
   @@unique([rangeId, lensId])
@@ -1300,15 +1302,15 @@ model LensFamily {
 }
 
 model LensBase {
-  id               String                 @id @default(cuid())
-  code             String                 @unique
-  name             String
-  isActive         Boolean                @default(true)
-  sortOrder        Int                    @default(0)
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
-  materialLinks    LensBaseMaterialLink[]
-  products         LensProduct[]
+  id            String                 @id @default(cuid())
+  code          String                 @unique
+  name          String
+  isActive      Boolean                @default(true)
+  sortOrder     Int                    @default(0)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  materialLinks LensBaseMaterialLink[]
+  products      LensProduct[]
 
   @@index([isActive, sortOrder])
 }
@@ -1368,6 +1370,24 @@ model LensColor {
   @@index([isActive, sortOrder])
 }
 
+/// RC-03: power-range attribute master (SPH/CYL bounds picked from stepped selects).
+/// Display label is derived (`-6.00/+2.00`); not stored.
+model LensPowerRange {
+  id        String        @id @default(cuid())
+  sphMin    Decimal       @db.Decimal(6, 2)
+  sphMax    Decimal       @db.Decimal(6, 2)
+  cylMin    Decimal       @db.Decimal(6, 2)
+  cylMax    Decimal       @db.Decimal(6, 2)
+  isActive  Boolean       @default(true)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  products  LensProduct[]
+
+  @@unique([sphMin, sphMax, cylMin, cylMax])
+  @@index([isActive, sortOrder])
+}
+
 /// Which materials are allowed under a given base (create-product cascade).
 model LensBaseMaterialLink {
   id         String       @id @default(cuid())
@@ -1382,16 +1402,21 @@ model LensBaseMaterialLink {
 
 /// Catalog SKU master: attributes + power range. Matrix cells are UI-only in this slice.
 model LensProduct {
-  id           String        @id @default(cuid())
-  skuCode      String        @unique
+  id           String          @id @default(cuid())
+  skuCode      String          @unique
   name         String
   familyId     String
   baseId       String
-  materialId   String
+  /// RC-03: optional — omitted from SKU/display when absent.
+  materialId   String?
   indexId      String?
   coatingId    String?
   colorId      String?
-  rangeType    String        @default("NORMAL")
+  /// RC-03: selected power-range master. Nullable in DB only so the migration applies
+  /// without a data migration; the service requires it on create. sph/cyl columns below
+  /// are copied from the master on write.
+  powerRangeId String?
+  rangeType    String          @default("NORMAL")
   sphMin       Decimal
   sphMax       Decimal
   cylMin       Decimal
@@ -1401,19 +1426,21 @@ model LensProduct {
   axis         Int?
   eye          String?
   defaultPrice Decimal?
-  isActive     Boolean       @default(true)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  family       LensFamily    @relation(fields: [familyId], references: [id])
-  base         LensBase      @relation(fields: [baseId], references: [id])
-  material     LensMaterial  @relation(fields: [materialId], references: [id])
-  index        LensIndex?    @relation(fields: [indexId], references: [id])
-  coating      LensCoating?  @relation(fields: [coatingId], references: [id])
-  color        LensColor?    @relation(fields: [colorId], references: [id])
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  family       LensFamily      @relation(fields: [familyId], references: [id])
+  base         LensBase        @relation(fields: [baseId], references: [id])
+  material     LensMaterial?   @relation(fields: [materialId], references: [id])
+  index        LensIndex?      @relation(fields: [indexId], references: [id])
+  coating      LensCoating?    @relation(fields: [coatingId], references: [id])
+  color        LensColor?      @relation(fields: [colorId], references: [id])
+  powerRange   LensPowerRange? @relation(fields: [powerRangeId], references: [id])
 
   @@index([familyId, isActive])
   @@index([baseId])
   @@index([materialId])
+  @@index([powerRangeId])
   @@index([isActive, updatedAt])
 }
 
@@ -1586,32 +1613,32 @@ model StockMovement {
 // --- Finance & GST Billing ---
 
 model CompanyFinanceSettings {
-  id                   String   @id @default("default")
-  legalName            String   @default("DrishX")
-  tradeName            String?
-  addressLine1         String?
-  addressLine2         String?
-  city                 String?
-  state                String   @default("Gujarat")
-  stateCode            String   @default("24")
-  pincode              String?
-  gstin                String?
-  pan                  String?
-  phone                String?
-  email                String?
-  invoiceSeriesPrefix  String   @default("INV")
-  creditNotePrefix     String   @default("CN")
-  purchaseBillPrefix   String   @default("PB")
-  defaultHsnCode       String   @default("9001")
-  defaultGstRatePercent Decimal @default(5)
-  paymentTermsDays     Int      @default(30)
-  bankName             String?
-  bankAccountName      String?
-  bankAccountNumber    String?
-  bankIfsc             String?
-  invoiceFooterNotes   String?
-  updatedAt            DateTime @updatedAt
-  createdAt            DateTime @default(now())
+  id                    String   @id @default("default")
+  legalName             String   @default("DrishX")
+  tradeName             String?
+  addressLine1          String?
+  addressLine2          String?
+  city                  String?
+  state                 String   @default("Gujarat")
+  stateCode             String   @default("24")
+  pincode               String?
+  gstin                 String?
+  pan                   String?
+  phone                 String?
+  email                 String?
+  invoiceSeriesPrefix   String   @default("INV")
+  creditNotePrefix      String   @default("CN")
+  purchaseBillPrefix    String   @default("PB")
+  defaultHsnCode        String   @default("9001")
+  defaultGstRatePercent Decimal  @default(5)
+  paymentTermsDays      Int      @default(30)
+  bankName              String?
+  bankAccountName       String?
+  bankAccountNumber     String?
+  bankIfsc              String?
+  invoiceFooterNotes    String?
+  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @default(now())
 }
 
 enum PaymentMode {
@@ -1641,23 +1668,23 @@ enum PartyLedgerEntryType {
 }
 
 model Payment {
-  id            String              @id @default(cuid())
-  paymentNumber String              @unique
-  customer      User                @relation("CustomerPayments", fields: [customerId], references: [id])
-  customerId    String
-  amount        Decimal
-  mode          PaymentMode
-  reference     String?
-  paidAt        DateTime            @default(now())
-  notes         String?
+  id                    String                @id @default(cuid())
+  paymentNumber         String                @unique
+  customer              User                  @relation("CustomerPayments", fields: [customerId], references: [id])
+  customerId            String
+  amount                Decimal
+  mode                  PaymentMode
+  reference             String?
+  paidAt                DateTime              @default(now())
+  notes                 String?
   /// Unallocated remainder (customer advance).
-  unallocatedAmount Decimal         @default(0)
-  claim         PaymentClaim?       @relation(fields: [claimId], references: [id])
-  claimId       String?             @unique
-  recordedById  String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  allocations   PaymentAllocation[]
+  unallocatedAmount     Decimal               @default(0)
+  claim                 PaymentClaim?         @relation(fields: [claimId], references: [id])
+  claimId               String?               @unique
+  recordedById          String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  allocations           PaymentAllocation[]
   customerLedgerEntries CustomerLedgerEntry[]
 
   @@index([customerId, paidAt])
@@ -1699,35 +1726,35 @@ model PaymentClaim {
 }
 
 model PaymentClaimItem {
-  id      String       @id @default(cuid())
-  claim   PaymentClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
-  claimId String
-  invoice Invoice      @relation(fields: [invoiceId], references: [id])
+  id        String       @id @default(cuid())
+  claim     PaymentClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claimId   String
+  invoice   Invoice      @relation(fields: [invoiceId], references: [id])
   invoiceId String
-  amount  Decimal?
+  amount    Decimal?
 
   @@unique([claimId, invoiceId])
 }
 
 model CustomerLedgerEntry {
-  id            String               @id @default(cuid())
-  customer      User                 @relation(fields: [customerId], references: [id])
-  customerId    String
-  entryType     PartyLedgerEntryType
+  id           String               @id @default(cuid())
+  customer     User                 @relation(fields: [customerId], references: [id])
+  customerId   String
+  entryType    PartyLedgerEntryType
   /// Positive = increases receivable (debit), negative = decreases (credit) when using signed amount.
   /// Prefer debitAmount / creditAmount for clarity.
-  debitAmount   Decimal              @default(0)
-  creditAmount  Decimal              @default(0)
-  balanceAfter  Decimal?
-  description   String?
-  occurredAt    DateTime             @default(now())
-  invoice       Invoice?             @relation(fields: [invoiceId], references: [id])
-  invoiceId     String?
-  payment       Payment?             @relation(fields: [paymentId], references: [id])
-  paymentId     String?
-  creditNote    CreditNote?          @relation(fields: [creditNoteId], references: [id])
-  creditNoteId  String?
-  createdAt     DateTime             @default(now())
+  debitAmount  Decimal              @default(0)
+  creditAmount Decimal              @default(0)
+  balanceAfter Decimal?
+  description  String?
+  occurredAt   DateTime             @default(now())
+  invoice      Invoice?             @relation(fields: [invoiceId], references: [id])
+  invoiceId    String?
+  payment      Payment?             @relation(fields: [paymentId], references: [id])
+  paymentId    String?
+  creditNote   CreditNote?          @relation(fields: [creditNoteId], references: [id])
+  creditNoteId String?
+  createdAt    DateTime             @default(now())
 
   @@index([customerId, occurredAt])
   @@index([invoiceId])
@@ -1742,75 +1769,75 @@ enum PurchaseBillStatus {
 }
 
 model Supplier {
-  id              String   @id @default(cuid())
-  name            String
-  tradeName       String?
-  gstin           String?
-  state           String?
-  stateCode       String?
-  address         String?
-  phone           String?
-  email           String?
+  id                 String                @id @default(cuid())
+  name               String
+  tradeName          String?
+  gstin              String?
+  state              String?
+  stateCode          String?
+  address            String?
+  phone              String?
+  email              String?
   /// RW-08 Phase C supplier profile. All optional so legacy rows stay valid.
   /// PROPRIETORSHIP | PARTNERSHIP | LLP | PRIVATE_LIMITED | PUBLIC_LIMITED | OTHER
   businessEntityType String?
-  contactPerson   String?
-  alternatePhone  String?
-  pan             String?
-  city            String?
-  pincode         String?
+  contactPerson      String?
+  alternatePhone     String?
+  pan                String?
+  city               String?
+  pincode            String?
   /// Dispatch / warehouse address when different from the registered address.
-  dispatchAddress String?
-  notes           String?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  purchaseBills   PurchaseBill[]
-  purchaseOrders  PurchaseOrder[]
-  goodsReceipts   GoodsReceipt[]
-  supplierPayments SupplierPayment[]
-  ledgerEntries   SupplierLedgerEntry[]
-  reorderRules    ReorderRule[]
+  dispatchAddress    String?
+  notes              String?
+  isActive           Boolean               @default(true)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  purchaseBills      PurchaseBill[]
+  purchaseOrders     PurchaseOrder[]
+  goodsReceipts      GoodsReceipt[]
+  supplierPayments   SupplierPayment[]
+  ledgerEntries      SupplierLedgerEntry[]
+  reorderRules       ReorderRule[]
 
   @@index([name])
   @@index([gstin])
 }
 
 model PurchaseBill {
-  id                 String             @id @default(cuid())
-  billNumber         String             @unique
-  supplierBillNumber String?
-  supplier           Supplier           @relation(fields: [supplierId], references: [id])
-  supplierId         String
-  billDate           DateTime           @default(now())
-  status             PurchaseBillStatus @default(DRAFT)
-  financialYear      String?
-  placeOfSupplyState String?
-  isInterState       Boolean            @default(false)
-  poReference        String?
-  grnReference       String?
-  mismatchWarning    String?
-  grossAmount        Decimal            @default(0)
-  discountAmount     Decimal            @default(0)
-  taxableAmount      Decimal            @default(0)
-  cgstAmount         Decimal            @default(0)
-  sgstAmount         Decimal            @default(0)
-  igstAmount         Decimal            @default(0)
-  roundingAdjustment Decimal            @default(0)
-  totalAmount        Decimal            @default(0)
-  amountPaid         Decimal            @default(0)
-  amountOutstanding  Decimal            @default(0)
-  notes              String?
+  id                  String                      @id @default(cuid())
+  billNumber          String                      @unique
+  supplierBillNumber  String?
+  supplier            Supplier                    @relation(fields: [supplierId], references: [id])
+  supplierId          String
+  billDate            DateTime                    @default(now())
+  status              PurchaseBillStatus          @default(DRAFT)
+  financialYear       String?
+  placeOfSupplyState  String?
+  isInterState        Boolean                     @default(false)
+  poReference         String?
+  grnReference        String?
+  mismatchWarning     String?
+  grossAmount         Decimal                     @default(0)
+  discountAmount      Decimal                     @default(0)
+  taxableAmount       Decimal                     @default(0)
+  cgstAmount          Decimal                     @default(0)
+  sgstAmount          Decimal                     @default(0)
+  igstAmount          Decimal                     @default(0)
+  roundingAdjustment  Decimal                     @default(0)
+  totalAmount         Decimal                     @default(0)
+  amountPaid          Decimal                     @default(0)
+  amountOutstanding   Decimal                     @default(0)
+  notes               String?
   /// Private storage object path of the supplier bill document (RW-08).
   documentStoragePath String?
   documentFileName    String?
   documentMimeType    String?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  lines              PurchaseBillLine[]
-  paymentAllocations SupplierPaymentAllocation[]
-  ledgerEntries      SupplierLedgerEntry[]
-  goodsReceipt       GoodsReceipt?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  lines               PurchaseBillLine[]
+  paymentAllocations  SupplierPaymentAllocation[]
+  ledgerEntries       SupplierLedgerEntry[]
+  goodsReceipt        GoodsReceipt?
 
   @@index([supplierId, status])
   @@index([status, billDate])
@@ -1838,19 +1865,19 @@ model PurchaseBillLine {
 }
 
 model SupplierPayment {
-  id                String   @id @default(cuid())
-  paymentNumber     String   @unique
-  supplier          Supplier @relation(fields: [supplierId], references: [id])
+  id                String                      @id @default(cuid())
+  paymentNumber     String                      @unique
+  supplier          Supplier                    @relation(fields: [supplierId], references: [id])
   supplierId        String
   amount            Decimal
   mode              PaymentMode
   reference         String?
-  paidAt            DateTime @default(now())
+  paidAt            DateTime                    @default(now())
   notes             String?
-  unallocatedAmount Decimal  @default(0)
-  recordedBy        User?    @relation("SupplierPaymentRecorder", fields: [recordedById], references: [id])
+  unallocatedAmount Decimal                     @default(0)
+  recordedBy        User?                       @relation("SupplierPaymentRecorder", fields: [recordedById], references: [id])
   recordedById      String?
-  createdAt         DateTime @default(now())
+  createdAt         DateTime                    @default(now())
   allocations       SupplierPaymentAllocation[]
   ledgerEntries     SupplierLedgerEntry[]
 
@@ -1895,16 +1922,16 @@ enum CashAccountType {
 }
 
 model CashAccount {
-  id           String          @id @default(cuid())
-  name         String
-  accountType  CashAccountType
-  employee     User?           @relation("EmployeeCashAccounts", fields: [employeeId], references: [id])
-  employeeId   String?
-  balance      Decimal         @default(0)
-  isActive     Boolean         @default(true)
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  ledgerEntries CashLedgerEntry[]
+  id              String            @id @default(cuid())
+  name            String
+  accountType     CashAccountType
+  employee        User?             @relation("EmployeeCashAccounts", fields: [employeeId], references: [id])
+  employeeId      String?
+  balance         Decimal           @default(0)
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  ledgerEntries   CashLedgerEntry[]
   expenseRequests ExpenseRequest[]
 
   @@index([accountType])
@@ -1940,29 +1967,29 @@ enum ExpenseDocType {
 }
 
 model ExpenseRequest {
-  id              String                @id @default(cuid())
-  employee        User                  @relation("ExpenseRequestEmployee", fields: [employeeId], references: [id])
-  employeeId      String
-  category        String
-  amount          Decimal
-  expenseDate     DateTime              @default(now())
-  description     String?
-  merchant        String?
-  billAvailable   Boolean               @default(true)
-  docType         ExpenseDocType        @default(WITH_BILL)
-  noBillReason    String?
-  attachmentUrl   String?
-  status          ExpenseApprovalStatus @default(PENDING)
-  cashAccount     CashAccount?          @relation(fields: [cashAccountId], references: [id])
-  cashAccountId   String?
+  id            String                @id @default(cuid())
+  employee      User                  @relation("ExpenseRequestEmployee", fields: [employeeId], references: [id])
+  employeeId    String
+  category      String
+  amount        Decimal
+  expenseDate   DateTime              @default(now())
+  description   String?
+  merchant      String?
+  billAvailable Boolean               @default(true)
+  docType       ExpenseDocType        @default(WITH_BILL)
+  noBillReason  String?
+  attachmentUrl String?
+  status        ExpenseApprovalStatus @default(PENDING)
+  cashAccount   CashAccount?          @relation(fields: [cashAccountId], references: [id])
+  cashAccountId String?
   /// PROCUREMENT posts to inventory path; OPERATING is P&L expense.
-  postingClass    String                @default("OPERATING")
-  reviewedBy      User?                 @relation("ExpenseRequestReviewer", fields: [reviewedById], references: [id])
-  reviewedById    String?
-  reviewedAt      DateTime?
-  rejectReason    String?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  postingClass  String                @default("OPERATING")
+  reviewedBy    User?                 @relation("ExpenseRequestReviewer", fields: [reviewedById], references: [id])
+  reviewedById  String?
+  reviewedAt    DateTime?
+  rejectReason  String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
 
   @@index([employeeId, status])
   @@index([status, expenseDate])
@@ -1977,23 +2004,23 @@ enum AccountType {
 }
 
 model ChartAccount {
-  id        String      @id @default(cuid())
-  code      String      @unique
-  name      String
+  id          String        @id @default(cuid())
+  code        String        @unique
+  name        String
   accountType AccountType
-  isSystem  Boolean     @default(true)
-  createdAt DateTime    @default(now())
-  lines     JournalLine[]
+  isSystem    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  lines       JournalLine[]
 }
 
 model JournalEntry {
-  id          String   @id @default(cuid())
-  entryNumber String   @unique
-  occurredAt  DateTime @default(now())
+  id          String        @id @default(cuid())
+  entryNumber String        @unique
+  occurredAt  DateTime      @default(now())
   memo        String?
   sourceType  String?
   sourceId    String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime      @default(now())
   lines       JournalLine[]
 
   @@index([sourceType, sourceId])
@@ -2024,14 +2051,14 @@ model InvoiceSequence {
 }
 
 model CashReconcileLog {
-  id              String   @id @default(cuid())
-  cashAccountId   String
-  systemBalance   Decimal
-  countedBalance  Decimal
-  difference      Decimal
-  notes           String?
-  actorUserId     String?
-  createdAt       DateTime @default(now())
+  id             String   @id @default(cuid())
+  cashAccountId  String
+  systemBalance  Decimal
+  countedBalance Decimal
+  difference     Decimal
+  notes          String?
+  actorUserId    String?
+  createdAt      DateTime @default(now())
 
   @@index([cashAccountId, createdAt])
 }
@@ -2040,31 +2067,31 @@ model CashReconcileLog {
 
 /// Company-wide loyalty program policy (singleton).
 model LoyaltySettings {
-  id                String   @id @default("default")
-  enabled           Boolean  @default(true)
+  id                  String   @id @default("default")
+  enabled             Boolean  @default(true)
   /// Rule "1 X Point = ₹1". Always 1 in Phase 1.
-  pointValue        Int      @default(1)
+  pointValue          Int      @default(1)
   /// Base earning % of net taxable value for full payment (on-time).
-  baseRatePct       Decimal  @default(0.5)
+  baseRatePct         Decimal  @default(0.5)
   /// Extra % for full advance payment (base + advance = maximum).
-  advanceBonusPct   Decimal  @default(1.0)
+  advanceBonusPct     Decimal  @default(1.0)
   /// Explicit full-payment rate (may equal base for non-advance). Kept for clarity.
-  fullPaymentRatePct Decimal @default(0.5)
+  fullPaymentRatePct  Decimal  @default(0.5)
   /// Minimum protected gross margin %. Below this, no points awarded (zero-point option).
-  minMarginPct      Decimal  @default(5)
+  minMarginPct        Decimal  @default(5)
   /// Max % of invoice taxable value that can be redeemed with points.
-  maxRedemptionPct  Decimal  @default(5)
+  maxRedemptionPct    Decimal  @default(5)
   /// Points expire this many days after activation.
-  expiryDays        Int      @default(365)
+  expiryDays          Int      @default(365)
   /// Minimum invoice taxable value required to earn points.
-  minInvoiceValue   Decimal  @default(0)
+  minInvoiceValue     Decimal  @default(0)
   /// Max points per invoice (0 = unlimited).
-  maxPointsPerInvoice Decimal @default(0)
+  maxPointsPerInvoice Decimal  @default(0)
   /// Award points on freight/shipping/handling charges.
-  freightEligible   Boolean  @default(false)
+  freightEligible     Boolean  @default(false)
   /// Fraud guard: duplicate invoice can never earn points twice.
-  updatedAt         DateTime @updatedAt
-  createdAt         DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdAt           DateTime @default(now())
 }
 
 enum LoyaltyTransactionType {
@@ -2088,43 +2115,43 @@ enum LoyaltyTransactionStatus {
 
 /// Per-customer running totals (1:1 with User).
 model LoyaltyWallet {
-  id             String  @id @default(cuid())
-  customer       User    @relation(fields: [customerId], references: [id])
-  customerId     String  @unique
-  availablePoints Decimal @default(0)
-  pendingPoints  Decimal @default(0)
-  totalEarned    Decimal @default(0)
-  totalRedeemed  Decimal @default(0)
-  totalExpired   Decimal @default(0)
-  totalReversed  Decimal @default(0)
-  updatedAt      DateTime @updatedAt
-  createdAt      DateTime @default(now())
+  id              String   @id @default(cuid())
+  customer        User     @relation(fields: [customerId], references: [id])
+  customerId      String   @unique
+  availablePoints Decimal  @default(0)
+  pendingPoints   Decimal  @default(0)
+  totalEarned     Decimal  @default(0)
+  totalRedeemed   Decimal  @default(0)
+  totalExpired    Decimal  @default(0)
+  totalReversed   Decimal  @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
 
   @@index([customerId])
 }
 
 /// Point movement ledger. Every point has a source.
 model LoyaltyTransaction {
-  id            String                    @id @default(cuid())
-  customer      User                      @relation(fields: [customerId], references: [id])
-  customerId    String
-  type          LoyaltyTransactionType
+  id              String                   @id @default(cuid())
+  customer        User                     @relation(fields: [customerId], references: [id])
+  customerId      String
+  type            LoyaltyTransactionType
   /// Positive = earn, negative = redeem/expire/reverse.
-  points        Decimal
-  balanceAfter  Decimal
-  status        LoyaltyTransactionStatus  @default(PENDING)
-  reason        String?
-  invoiceId     String?
-  orderId       String?
-  paymentId     String?
-  creditNoteId  String?
+  points          Decimal
+  balanceAfter    Decimal
+  status          LoyaltyTransactionStatus @default(PENDING)
+  reason          String?
+  invoiceId       String?
+  orderId         String?
+  paymentId       String?
+  creditNoteId    String?
   returnRequestId String?
   /// Who created this transaction (admin manual adjust, system, staff).
-  createdBy     User?                     @relation("LoyaltyCreatedBy", fields: [createdById], references: [id])
-  createdById   String?
-  expiresAt     DateTime?
-  activatedAt   DateTime?
-  createdAt     DateTime                  @default(now())
+  createdBy       User?                    @relation("LoyaltyCreatedBy", fields: [createdById], references: [id])
+  createdById     String?
+  expiresAt       DateTime?
+  activatedAt     DateTime?
+  createdAt       DateTime                 @default(now())
 
   @@index([customerId, createdAt])
   @@index([orderId])
@@ -2200,20 +2227,20 @@ enum ProcurementPriority {
 /// `lensId` is intentionally a plain string so one table serves all six lens
 /// families (SingleVision / Kryptok / Progressive / OriVision / Magnus / Bifocal).
 model ReorderRule {
-  id         String  @id @default(cuid())
-  lensType   LensType
-  lensId     String
+  id                  String    @id @default(cuid())
+  lensType            LensType
+  lensId              String
   /// Replenishment trigger line. Available stock at or below this raises a request.
-  minStock   Int     @default(0)
+  minStock            Int       @default(0)
   /// Desired level after replenishment. Required quantity = target - available - incoming.
-  targetStock Int
+  targetStock         Int
   /// When false this rule is documentation only — nothing is triggered automatically.
-  autoProcure Boolean @default(false)
+  autoProcure         Boolean   @default(false)
   preferredSupplierId String?
   preferredSupplier   Supplier? @relation(fields: [preferredSupplierId], references: [id], onDelete: SetNull)
   /// Minimum order quantity. Recommended quantity is rounded up to a MOQ multiple.
-  moq      Int?
-  isActive Boolean  @default(true)
+  moq                 Int?
+  isActive            Boolean   @default(true)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -2230,21 +2257,21 @@ model ReorderRule {
 /// Doubles as the "reorder event" record (PDF §9) — trigger reason, stock at
 /// trigger, minimum, target and required quantity are all stored inline.
 model ProcurementRequest {
-  id        String  @id @default(cuid())
+  id       String                   @id @default(cuid())
   /// Human-facing reference, e.g. PR-000125.
-  publicId  String  @unique
-  lensType  LensType
-  lensId    String
-  source    ProcurementRequestSource
-  status    ProcurementRequestStatus @default(OPEN)
-  priority  ProcurementPriority     @default(NORMAL)
+  publicId String                   @unique
+  lensType LensType
+  lensId   String
+  source   ProcurementRequestSource
+  status   ProcurementRequestStatus @default(OPEN)
+  priority ProcurementPriority      @default(NORMAL)
 
   /// Shortage that triggered this request.
   requiredQuantity  Int
   /// Quantity actually asked for (may be raised to an MOQ multiple).
   requestedQuantity Int
-  orderedQuantity   Int  @default(0)
-  receivedQuantity  Int  @default(0)
+  orderedQuantity   Int @default(0)
+  receivedQuantity  Int @default(0)
 
   /// Originating customer order, when source = ORDER_SHORTAGE (PDF §32).
   orderId String?
@@ -2271,7 +2298,7 @@ model ProcurementRequest {
   approvedAt   DateTime?
   approvedById String?
 
-  purchaseOrderLines PurchaseOrderLine[]
+  purchaseOrderLines       PurchaseOrderLine[]
   purchaseOrderAllocations PurchaseOrderAllocation[]
 
   @@index([lensType, lensId, status])
@@ -2293,18 +2320,18 @@ enum PurchaseOrderStatus {
 }
 
 model PurchaseOrder {
-  id               String              @id @default(cuid())
+  id               String                    @id @default(cuid())
   /// Human-facing reference, e.g. PO-2026-000001.
-  publicId         String              @unique
-  status           PurchaseOrderStatus @default(DRAFT)
+  publicId         String                    @unique
+  status           PurchaseOrderStatus       @default(DRAFT)
   supplierId       String
-  supplier         Supplier            @relation(fields: [supplierId], references: [id])
+  supplier         Supplier                  @relation(fields: [supplierId], references: [id])
   /// Warehouse stub — Main today; extensible later.
-  warehouseCode    String              @default("MAIN")
+  warehouseCode    String                    @default("MAIN")
   expectedDelivery DateTime?
   notes            String?
-  subtotal         Decimal             @default(0)
-  totalAmount      Decimal             @default(0)
+  subtotal         Decimal                   @default(0)
+  totalAmount      Decimal                   @default(0)
   createdById      String?
   approvedAt       DateTime?
   approvedById     String?
@@ -2318,8 +2345,8 @@ model PurchaseOrder {
   sentVia          String?
   sentTo           String?
   sentNote         String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
   lines            PurchaseOrderLine[]
   powerLocks       OpenPurchaseOrderPower[]
   allocations      PurchaseOrderAllocation[]
@@ -2330,9 +2357,9 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderLine {
-  id                   String              @id @default(cuid())
+  id                   String                    @id @default(cuid())
   purchaseOrderId      String
-  purchaseOrder        PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrder        PurchaseOrder             @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   lineNumber           Int
   lensType             LensType
   lensId               String
@@ -2342,13 +2369,13 @@ model PurchaseOrderLine {
   requiredQuantity     Int
   poQuantity           Int
   rate                 Decimal?
-  amount               Decimal             @default(0)
-  receivedQuantity     Int                 @default(0)
-  cancelledQuantity    Int                 @default(0)
+  amount               Decimal                   @default(0)
+  receivedQuantity     Int                       @default(0)
+  cancelledQuantity    Int                       @default(0)
   procurementRequestId String?
-  procurementRequest   ProcurementRequest? @relation(fields: [procurementRequestId], references: [id], onDelete: SetNull)
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
+  procurementRequest   ProcurementRequest?       @relation(fields: [procurementRequestId], references: [id], onDelete: SetNull)
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
   powerLock            OpenPurchaseOrderPower?
   allocations          PurchaseOrderAllocation[]
   goodsReceiptLines    GoodsReceiptLine[]
@@ -2361,21 +2388,21 @@ model PurchaseOrderLine {
 
 /// Exact PR→PO line allocation created on approve only. Cancel reverses these rows.
 model PurchaseOrderAllocation {
-  id                   String              @id @default(cuid())
+  id                   String             @id @default(cuid())
   purchaseOrderId      String
-  purchaseOrder        PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrder        PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   purchaseOrderLineId  String
-  purchaseOrderLine    PurchaseOrderLine   @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Cascade)
+  purchaseOrderLine    PurchaseOrderLine  @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Cascade)
   procurementRequestId String
-  procurementRequest   ProcurementRequest  @relation(fields: [procurementRequestId], references: [id], onDelete: Restrict)
+  procurementRequest   ProcurementRequest @relation(fields: [procurementRequestId], references: [id], onDelete: Restrict)
   quantity             Int
   /// Portion already reversed (cancel / close outstanding). Active = quantity − reversedQuantity.
-  reversedQuantity     Int                 @default(0)
+  reversedQuantity     Int                @default(0)
   /// Portion received via Confirm Receipt. Never reversible.
-  receivedQuantity     Int                 @default(0)
+  receivedQuantity     Int                @default(0)
   /// Set when fully reversed — prevents double-reverse of residual.
   reversedAt           DateTime?
-  createdAt            DateTime            @default(now())
+  createdAt            DateTime           @default(now())
 
   @@unique([purchaseOrderLineId, procurementRequestId])
   @@index([purchaseOrderId, reversedAt])
@@ -2400,66 +2427,66 @@ enum GoodsReceiptLineStatus {
 
 /// Goods receipt (GRN) — stock posts only when status = CONFIRMED.
 model GoodsReceipt {
-  id                String             @id @default(cuid())
-  publicId          String             @unique
-  purchaseOrderId   String
-  purchaseOrder     PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
-  status            GoodsReceiptStatus @default(DRAFT)
+  id               String                    @id @default(cuid())
+  publicId         String                    @unique
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder             @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  status           GoodsReceiptStatus        @default(DRAFT)
   /// Client/server idempotency key for Confirm Receipt (unique when set).
-  confirmationKey   String?            @unique
-  warehouseCode     String             @default("MAIN")
-  supplierId        String
-  supplier          Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  courier           String?
-  awb               String?
-  dispatchDate      DateTime?
-  packageCount      Int?
-  notes             String?
-  billStoragePath   String?
-  billFileName      String?
-  billMimeType      String?
-  excelStoragePath  String?
-  excelFileName     String?
-  excelMimeType     String?
-  purchaseBillId    String?            @unique
-  purchaseBill      PurchaseBill?      @relation(fields: [purchaseBillId], references: [id], onDelete: SetNull)
-  closeReason       String?
-  confirmedAt       DateTime?
-  confirmedById     String?
-  createdById       String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  lines             GoodsReceiptLine[]
-  billSummaries     GoodsReceiptBillSummary[]
+  confirmationKey  String?                   @unique
+  warehouseCode    String                    @default("MAIN")
+  supplierId       String
+  supplier         Supplier                  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  courier          String?
+  awb              String?
+  dispatchDate     DateTime?
+  packageCount     Int?
+  notes            String?
+  billStoragePath  String?
+  billFileName     String?
+  billMimeType     String?
+  excelStoragePath String?
+  excelFileName    String?
+  excelMimeType    String?
+  purchaseBillId   String?                   @unique
+  purchaseBill     PurchaseBill?             @relation(fields: [purchaseBillId], references: [id], onDelete: SetNull)
+  closeReason      String?
+  confirmedAt      DateTime?
+  confirmedById    String?
+  createdById      String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  lines            GoodsReceiptLine[]
+  billSummaries    GoodsReceiptBillSummary[]
 
   @@index([purchaseOrderId, status])
   @@index([status, createdAt])
 }
 
 model GoodsReceiptLine {
-  id                    String                 @id @default(cuid())
-  goodsReceiptId        String
-  goodsReceipt          GoodsReceipt           @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
-  purchaseOrderLineId   String?
-  purchaseOrderLine     PurchaseOrderLine?     @relation(fields: [purchaseOrderLineId], references: [id], onDelete: SetNull)
-  lensType              LensType?
-  lensId                String?
-  productLabel          String?
-  rangeLabel            String?
-  powerLabel            String?
-  orderedQuantity       Int                    @default(0)
-  previouslyReceived    Int                    @default(0)
-  outstandingBefore     Int                    @default(0)
-  deliveredQuantity     Int                    @default(0)
-  acceptedQuantity      Int                    @default(0)
-  damagedQuantity       Int                    @default(0)
-  shortQuantity         Int                    @default(0)
-  excessQuantity        Int                    @default(0)
-  lineStatus            GoodsReceiptLineStatus @default(PENDING)
+  id                  String                 @id @default(cuid())
+  goodsReceiptId      String
+  goodsReceipt        GoodsReceipt           @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderLineId String?
+  purchaseOrderLine   PurchaseOrderLine?     @relation(fields: [purchaseOrderLineId], references: [id], onDelete: SetNull)
+  lensType            LensType?
+  lensId              String?
+  productLabel        String?
+  rangeLabel          String?
+  powerLabel          String?
+  orderedQuantity     Int                    @default(0)
+  previouslyReceived  Int                    @default(0)
+  outstandingBefore   Int                    @default(0)
+  deliveredQuantity   Int                    @default(0)
+  acceptedQuantity    Int                    @default(0)
+  damagedQuantity     Int                    @default(0)
+  shortQuantity       Int                    @default(0)
+  excessQuantity      Int                    @default(0)
+  lineStatus          GoodsReceiptLineStatus @default(PENDING)
   /// KEEP_PENDING | MARK_DAMAGED | ACCEPT_SHORT | REJECT_EXTRA
-  actionCode            String?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
+  actionCode          String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
 
   @@index([goodsReceiptId])
   @@index([purchaseOrderLineId])

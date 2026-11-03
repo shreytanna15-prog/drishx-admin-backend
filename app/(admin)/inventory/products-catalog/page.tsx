@@ -16,6 +16,8 @@ import { SkuChip } from "@/components/catalog/sku-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -39,8 +41,6 @@ const labelClass =
   "text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)";
 const inputClass =
   "h-10 rounded-xl border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text) placeholder:text-(--brand-placeholder)";
-const selectClass =
-  "h-10 w-full rounded-xl border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text) outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 const errorBannerClass =
   "rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200";
 
@@ -155,72 +155,72 @@ export default function ProductsCatalogPage() {
             </label>
             <label className="w-36 space-y-1">
               <span className={labelClass}>Family</span>
-              <select
-                className={selectClass}
+              <AdminSelect
                 value={familyId}
-                onChange={(e) => {
-                  setFamilyId(e.target.value);
+                onValueChange={(v) => {
+                  setFamilyId(v);
                   setPage(1);
                 }}
-              >
-                <option value="">All</option>
-                {families.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.code}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "All" },
+                  ...families.map((f) => ({ value: f.id, label: f.code })),
+                ]}
+                placeholder="All"
+                size="sm"
+                triggerClassName="h-10 rounded-xl min-w-0"
+              />
             </label>
             <label className="w-36 space-y-1">
               <span className={labelClass}>Base</span>
-              <select
-                className={selectClass}
+              <AdminSelect
                 value={baseId}
-                onChange={(e) => {
-                  setBaseId(e.target.value);
+                onValueChange={(v) => {
+                  setBaseId(v);
                   setPage(1);
                 }}
-              >
-                <option value="">All</option>
-                {bases.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.code}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "All" },
+                  ...bases.map((b) => ({ value: b.id, label: b.code })),
+                ]}
+                placeholder="All"
+                size="sm"
+                triggerClassName="h-10 rounded-xl min-w-0"
+              />
             </label>
             <label className="w-40 space-y-1">
               <span className={labelClass}>Material</span>
-              <select
-                className={selectClass}
+              <AdminSelect
                 value={materialId}
-                onChange={(e) => {
-                  setMaterialId(e.target.value);
+                onValueChange={(v) => {
+                  setMaterialId(v);
                   setPage(1);
                 }}
-              >
-                <option value="">All</option>
-                {materials.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.code}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "All" },
+                  ...materials.map((m) => ({ value: m.id, label: m.code })),
+                ]}
+                placeholder="All"
+                size="sm"
+                triggerClassName="h-10 rounded-xl min-w-0"
+              />
             </label>
             <label className="w-36 space-y-1">
               <span className={labelClass}>Status</span>
-              <select
-                className={selectClass}
+              <AdminSelect
                 value={activeFilter}
-                onChange={(e) => {
-                  setActiveFilter(e.target.value as "all" | "true" | "false");
+                onValueChange={(v) => {
+                  setActiveFilter(v as "all" | "true" | "false");
                   setPage(1);
                 }}
-              >
-                <option value="all">All</option>
-                <option value="true">Active</option>
-                <option value="false">Inactive</option>
-              </select>
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "true", label: "Active" },
+                  { value: "false", label: "Inactive" },
+                ]}
+                placeholder="All"
+                size="sm"
+                triggerClassName="h-10 rounded-xl min-w-0"
+              />
             </label>
           </div>
 
@@ -284,7 +284,7 @@ export default function ProductsCatalogPage() {
             </Button>
           </div>
         ) : view === "list" ? (
-          <div className="rounded-2xl border border-(--brand-card-border)">
+          <AdminTable>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -338,7 +338,7 @@ export default function ProductsCatalogPage() {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </AdminTable>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((p) => (

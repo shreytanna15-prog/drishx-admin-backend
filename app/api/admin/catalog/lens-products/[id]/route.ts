@@ -52,15 +52,19 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       name: body.name != null ? String(body.name) : undefined,
       familyId: body.familyId,
       baseId: body.baseId,
-      materialId: body.materialId,
+      // null / "" clears material (optional); omitted keeps existing
+      materialId:
+        body.materialId !== undefined
+          ? body.materialId
+            ? String(body.materialId)
+            : null
+          : undefined,
       indexId: body.indexId,
       coatingId: body.coatingId,
       colorId: body.colorId,
+      powerRangeId:
+        body.powerRangeId !== undefined ? String(body.powerRangeId ?? "") : undefined,
       rangeType: body.rangeType,
-      sphMin: body.sphMin != null ? Number(body.sphMin) : undefined,
-      sphMax: body.sphMax != null ? Number(body.sphMax) : undefined,
-      cylMin: body.cylMin != null ? Number(body.cylMin) : undefined,
-      cylMax: body.cylMax != null ? Number(body.cylMax) : undefined,
       addMin: body.addMin !== undefined ? (body.addMin == null ? null : Number(body.addMin)) : undefined,
       addMax: body.addMax !== undefined ? (body.addMax == null ? null : Number(body.addMax)) : undefined,
       axis: body.axis !== undefined ? (body.axis == null ? null : Number(body.axis)) : undefined,

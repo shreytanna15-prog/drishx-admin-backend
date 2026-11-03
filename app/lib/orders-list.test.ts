@@ -181,16 +181,16 @@ describe("classifyOrdersListScope", () => {
       expected: "rx_lab",
     },
     {
-      name: "photo prescription (image, null notes) → rx_lab",
+      name: "legacy photo (image, null notes, no hold) → catalog (RC-02)",
       order: {
         warehouseHold: false,
         notes: null,
         orderImageUrl: "https://cdn.example/rx.jpg",
       },
-      expected: "rx_lab",
+      expected: "catalog",
     },
     {
-      name: "photo with warehouse hold → rx_lab",
+      name: "legacy photo still on warehouse hold → rx_lab",
       order: {
         warehouseHold: true,
         notes: null,
@@ -253,33 +253,18 @@ describe("catalogWhere NULL-safety", () => {
   });
 });
 
-describe("rxLabWhere photo arm is NULL-safe", () => {
-  it("photo branch uses notesDoesNotContainMarker (not bare NOT contains)", () => {
+describe("rxLabWhere is RX / hold only (RC-02)", () => {
+  it("has no orderImageUrl (photo) arm", () => {
     const where = rxLabWhere();
     assert.ok(where.OR && Array.isArray(where.OR));
-    const photoArm = where.OR.find(
-      (arm) =>
-        arm &&
-        typeof arm === "object" &&
-        "AND" in arm &&
-        Array.isArray(arm.AND)
-    ) as { AND: PrismaTypes.OrderWhereInput[] } | undefined;
-    assert.ok(photoArm, "expected photo AND arm");
-    const hasNullNotesArm = photoArm.AND.some(
-      (p) =>
-        p &&
-        typeof p === "object" &&
-        "OR" in p &&
-        Array.isArray(p.OR) &&
-        p.OR.some(
-          (arm) =>
-            arm &&
-            typeof arm === "object" &&
-            "notes" in arm &&
-            arm.notes === null
-        )
+    assert.equal(where.OR.length, 2);
+    assert.equal(JSON.stringify(where).includes("orderImageUrl"), false);
+    assert.deepEqual(where.OR[0], { warehouseHold: true });
+    assert.ok(
+      where.OR.some(
+        (arm) => arm && typeof arm === "object" && "notes" in arm
+      )
     );
-    assert.ok(hasNullNotesArm, "photo arm must tolerate notes: null");
   });
 });
 
