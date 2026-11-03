@@ -4,6 +4,8 @@ import {
   createLensProduct,
   LensProductServiceError,
   listLensProducts,
+  listLensProductVariants,
+  previewLensProductVariants,
 } from "../../../../lib/catalog/lens-product-service";
 
 function requireAdmin(req: NextRequest) {
@@ -15,7 +17,19 @@ function requireAdmin(req: NextRequest) {
   return { session: auth.session };
 }
 
-// GET /api/admin/catalog/lens-products
+function parsePowerRangeIds(body: unknown): string[] {
+  if (!body || typeof body !== "object") return [];
+  const raw = (body as { powerRangeIds?: unknown; powerRangeId?: unknown })
+    .powerRangeIds;
+  if (Array.isArray(raw)) {
+    return raw.map((id) => String(id ?? "").trim()).filter(Boolean);
+  }
+  const single = (body as { powerRangeId?: unknown }).powerRangeId;
+  if (single) return [String(single).trim()].filter(Boolean);
+  return [];
+}
+
+// GET /api/admin/catalog/lens-products?view=flat|grouped
 export async function GET(req: NextRequest) {
   const auth = requireAdmin(req);
   if (auth.error) return auth.error;
@@ -27,17 +41,27 @@ export async function GET(req: NextRequest) {
     if (isActiveRaw === "true") isActive = true;
     if (isActiveRaw === "false") isActive = false;
 
-    const result = await listLensProducts({
+    const view = (sp.get("view") ?? "flat").toLowerCase();
+    const common = {
       q: sp.get("q") ?? undefined,
       familyId: sp.get("familyId") ?? undefined,
       baseId: sp.get("baseId") ?? undefined,
       materialId: sp.get("materialId") ?? undefined,
-      powerRangeId: sp.get("powerRangeId") ?? undefined,
       isActive,
       page: Number(sp.get("page") ?? "1") || 1,
       limit: Number(sp.get("limit") ?? "20") || 20,
+    };
+
+    if (view === "grouped") {
+      const result = await listLensProducts(common);
+      return NextResponse.json({ ...result, view: "grouped" });
+    }
+
+    const result = await listLensProductVariants({
+      ...common,
+      powerRangeId: sp.get("powerRangeId") ?? undefined,
     });
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, view: "flat" });
   } catch (error) {
     console.error("GET /api/admin/catalog/lens-products", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -45,27 +69,34 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/admin/catalog/lens-products
+// body.preview === true → preview only
 export async function POST(req: NextRequest) {
   const auth = requireAdmin(req);
   if (auth.error) return auth.error;
 
   try {
     const body = await req.json();
+    const powerRangeIds = parsePowerRangeIds(body);
+
+    if (body?.preview === true) {
+      const preview = await previewLensProductVariants({
+        familyId: String(body.familyId ?? ""),
+        baseId: String(body.baseId ?? ""),
+        materialId: body.materialId ? String(body.materialId) : null,
+        indexId: String(body.indexId ?? ""),
+        colorId: String(body.colorId ?? ""),
+        powerRangeIds,
+      });
+      return NextResponse.json({ preview });
+    }
+
     const product = await createLensProduct({
-      // skuCode is generated server-side from attribute codes + range
-      name: String(body.name ?? ""),
       familyId: String(body.familyId ?? ""),
       baseId: String(body.baseId ?? ""),
       materialId: body.materialId ? String(body.materialId) : null,
-      indexId: body.indexId ?? null,
-      coatingId: body.coatingId ?? null,
-      colorId: body.colorId ?? null,
-      powerRangeId: String(body.powerRangeId ?? ""),
-      rangeType: body.rangeType,
-      addMin: body.addMin != null ? Number(body.addMin) : null,
-      addMax: body.addMax != null ? Number(body.addMax) : null,
-      axis: body.axis != null ? Number(body.axis) : null,
-      eye: body.eye ?? null,
+      indexId: String(body.indexId ?? ""),
+      colorId: String(body.colorId ?? ""),
+      powerRangeIds,
       defaultPrice: body.defaultPrice != null ? Number(body.defaultPrice) : null,
       isActive: body.isActive,
       actorUserId: auth.session.userId,

@@ -270,10 +270,8 @@ Change — product catalog architecture (critical)
 
 ### Current state
 
-- Flat `LensProduct`: attributes + inline range + typed `name` + SKU from `buildLensProductSkuCode` (`FAMILY-BASE-MATERIAL-…`).  
-- RC-03 target still describes one product row per range (select one power range).  
-- Admin pain: same attribute combo + second range means re-picking every attribute.  
-- Only ~2 test products; no stock/PO/order FKs to `LensProduct` yet.
+- **Shipped (admin):** parent `LensProduct` + `LensProductVariant`; power-range masters (RC-03); Material optional; coating out of identity; auto SKU/name; create multi-range + preview; parent detail Add range; flat + expandable grouped list.  
+- No stock/PO/order FKs on variants yet (stock-management follow-on).
 
 ### Locked behaviour
 
@@ -344,15 +342,15 @@ No migration. Delete ~2 test products; recreate under parent + variants.
 
 ### Acceptance
 
-- [ ] Parent = attributes once; multiple power ranges = multiple variants without re-picking attrs  
-- [ ] Variant SKU matches locked format (no coating; all families; encoded power)  
-- [ ] Variant name fully auto with `-6.00/+2.00`; no typed name on create  
-- [ ] Same parent + two ranges ⇒ two unique SKUs/names; each own price/matrix path  
-- [ ] Existing parent reuse when attrs match; Add power range works  
-- [ ] Catalog flat + grouped views (server pagination / expand)  
-- [ ] Coating not required for product identity  
-- [ ] Test products deleted/recreated; no migration  
-- [ ] `product-catalog` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC  
+- [x] Parent = attributes once; multiple power ranges = multiple variants without re-picking attrs  
+- [x] Variant SKU matches locked format (no coating; all families; encoded power)  
+- [x] Variant name fully auto with `-6.00/+2.00`; no typed name on create  
+- [x] Same parent + two ranges ⇒ two unique SKUs/names; each own price/matrix path  
+- [x] Existing parent reuse when attrs match; Add power range works  
+- [x] Catalog flat + grouped views (server pagination / expand)  
+- [x] Coating not required for product identity  
+- [x] Test products deleted/recreated under parent+variants (cutover; schema migrate for new tables)  
+- [x] `product-catalog` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC  
 
 ### Suggested first PR
 

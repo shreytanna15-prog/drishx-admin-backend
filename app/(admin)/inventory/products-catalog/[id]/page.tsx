@@ -6,16 +6,26 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
+import { AdminTable } from "@/components/admin-table";
+import { PowerRangeMultiSelect } from "@/components/catalog/catalog-field";
 import { SkuChip } from "@/components/catalog/sku-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { AdminApiError } from "@/app/lib/admin-api";
 import {
+  addLensProductVariantsRequest,
   fetchLensProduct,
-  steppedPowerRange,
-  updateLensProductRequest,
   type LensProduct,
 } from "@/app/lib/admin-lens-catalog";
+import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
 
 const CATALOG_HREF = "/inventory/products-catalog";
 
@@ -26,17 +36,20 @@ function errorMessage(err: unknown, fallback: string) {
   return err instanceof AdminApiError ? err.message : fallback;
 }
 
-function formatPower(n: number) {
-  return n.toFixed(2);
-}
-
-export default function LensProductDetailPage() {
+export default function LensProductParentDetailPage() {
   const params = useParams();
   const id = typeof params.id === "string" ? params.id : "";
   const [product, setProduct] = useState<LensProduct | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [toggleBusy, setToggleBusy] = useState(false);
+  const [addIds, setAddIds] = useState<string[]>([]);
+  const [addBusy, setAddBusy] = useState(false);
+
+  const { data: powerRangeData } = useGetPowerRanges({ activeOnly: true });
+  const powerRanges = useMemo(
+    () => powerRangeData?.items ?? [],
+    [powerRangeData]
+  );
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -57,36 +70,31 @@ export default function LensProductDetailPage() {
     void load();
   }, [load]);
 
-  const sphValues = useMemo(
-    () =>
-      product ? steppedPowerRange(product.sphMin, product.sphMax) : [],
-    [product]
-  );
-  const cylValues = useMemo(
-    () =>
-      product ? steppedPowerRange(product.cylMin, product.cylMax) : [],
+  const usedRangeIds = useMemo(
+    () => new Set(product?.variants.map((v) => v.powerRangeId) ?? []),
     [product]
   );
 
-  async function toggleActive() {
-    if (!product) return;
-    setToggleBusy(true);
+  async function addRanges() {
+    if (!product || addIds.length === 0) return;
+    setAddBusy(true);
     setError("");
     try {
-      const res = await updateLensProductRequest(product.id, {
-        isActive: !product.isActive,
+      const res = await addLensProductVariantsRequest(product.id, {
+        powerRangeIds: addIds,
       });
       setProduct(res.product);
+      setAddIds([]);
     } catch (err) {
-      setError(errorMessage(err, "Failed to update status."));
+      setError(errorMessage(err, "Failed to add power ranges."));
     } finally {
-      setToggleBusy(false);
+      setAddBusy(false);
     }
   }
 
   if (loading) {
     return (
-      <AdminPage title="Product" subtitle="Loading…">
+      <AdminPage title="Product parent" subtitle="Loading…">
         <DetailSkeleton />
       </AdminPage>
     );
@@ -94,12 +102,12 @@ export default function LensProductDetailPage() {
 
   if (!product) {
     return (
-      <AdminPage title="Product" subtitle="Not found">
+      <AdminPage title="Product parent" subtitle="Not found">
         {error ? <div className={errorBannerClass}>{error}</div> : null}
         <Button asChild variant="outline" className="mt-4 h-9 rounded-xl">
           <Link href={CATALOG_HREF}>
-            <ArrowLeft className="mr-1 size-4" />
-            Back to catalog
+            <ArrowLeft className="size-4" />
+            Back
           </Link>
         </Button>
       </AdminPage>
@@ -108,166 +116,140 @@ export default function LensProductDetailPage() {
 
   return (
     <AdminPage
-      title={product.name}
-      subtitle={product.attributeSummary}
+      title={product.attributeSummary}
+      subtitle={`Parent · ${product.variantCount} variant(s)`}
     >
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button asChild variant="outline" className="h-9 rounded-xl">
-            <Link href={CATALOG_HREF}>
-              <ArrowLeft className="mr-1 size-4" />
-              Back to catalog
-            </Link>
-          </Button>
-          <div className="flex items-center gap-2">
-            <Badge
-              variant="outline"
-              className={
-                product.isActive
-                  ? "border-emerald-500/40 text-emerald-700"
-                  : "border-zinc-400/40 text-zinc-500"
-              }
-            >
-              {product.isActive ? "Active" : "Inactive"}
-            </Badge>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 rounded-xl"
-              disabled={toggleBusy}
-              onClick={() => void toggleActive()}
-            >
-              {toggleBusy ? (
-                <Loader2 className="mr-1 size-4 animate-spin" />
-              ) : null}
-              {product.isActive ? "Deactivate" : "Activate"}
-            </Button>
-          </div>
-        </div>
-
-        {error ? <div className={errorBannerClass}>{error}</div> : null}
-
-        <div className="rounded-2xl border border-(--brand-card-border) bg-(--brand-input-bg)/40 p-4">
-          <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <dt className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
-                SKU
-              </dt>
-              <dd className="mt-0.5">
-                <SkuChip sku={product.skuCode} />
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
-                Attributes
-              </dt>
-              <dd>{product.attributeSummary}</dd>
-            </div>
-            <div>
-              <dt className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
-                Range
-              </dt>
-              <dd className="leading-snug">
-                {product.powerRange ? (
-                  <div className="font-mono font-bold">
-                    {product.powerRange.label}
-                  </div>
-                ) : null}
-                <div>
-                  SPH {product.sphMin}…{product.sphMax}
-                </div>
-                <div>
-                  CYL {product.cylMin}…{product.cylMax}
-                  {product.rangeType !== "NORMAL" ? (
-                    <span className="ml-1 text-(--brand-text-muted)">
-                      ({product.rangeType})
-                    </span>
-                  ) : null}
-                </div>
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
-                Price
-              </dt>
-              <dd>
-                {product.defaultPrice != null
-                  ? product.defaultPrice.toFixed(2)
-                  : "—"}
-              </dd>
-            </div>
-            {(product.addMin != null ||
-              product.addMax != null ||
-              product.axis != null ||
-              product.eye) && (
-              <div className="sm:col-span-2">
-                <dt className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
-                  KT / V2 extras
-                </dt>
-                <dd>
-                  {[
-                    product.addMin != null || product.addMax != null
-                      ? `ADD ${product.addMin ?? "—"}…${product.addMax ?? "—"}`
-                      : null,
-                    product.axis != null ? `AXIS ${product.axis}` : null,
-                    product.eye ? `EYE ${product.eye}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </dd>
-              </div>
-            )}
-          </dl>
-        </div>
-
-        <div>
-          <h2 className="mb-2 text-sm font-bold text-(--brand-text)">
-            Power matrix (SPH × CYL)
-          </h2>
-          <p className="mb-3 text-xs text-(--brand-text-muted)">
-            Cells show Current / Threshold / Target placeholders. Live stock is
-            out of scope for this slice. {sphValues.length} SPH ×{" "}
-            {cylValues.length} CYL = {sphValues.length * cylValues.length}{" "}
-            cells.
-          </p>
-          <div className="max-h-[70vh] overflow-auto rounded-2xl border border-(--brand-card-border)">
-            <table className="min-w-full border-collapse text-xs">
-              <thead>
-                <tr>
-                  <th className="sticky left-0 top-0 z-30 border-b border-r border-(--brand-card-border) bg-(--brand-card) px-2 py-2 text-left font-bold">
-                    SPH \\ CYL
-                  </th>
-                  {cylValues.map((cyl) => (
-                    <th
-                      key={cyl}
-                      className="sticky top-0 z-20 border-b border-(--brand-card-border) bg-(--brand-card) px-2 py-2 text-center font-bold whitespace-nowrap"
-                    >
-                      {formatPower(cyl)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sphValues.map((sph) => (
-                  <tr key={sph}>
-                    <th className="sticky left-0 z-10 border-r border-b border-(--brand-card-border) bg-(--brand-card) px-2 py-1.5 text-left font-semibold whitespace-nowrap">
-                      {formatPower(sph)}
-                    </th>
-                    {cylValues.map((cyl) => (
-                      <td
-                        key={`${sph}-${cyl}`}
-                        className="border-b border-(--brand-card-border) px-2 py-1.5 text-center font-mono text-(--brand-text-muted) whitespace-nowrap"
-                      >
-                        _ / _ / _
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Button asChild variant="ghost" className="h-9 gap-1.5 px-2">
+          <Link href={CATALOG_HREF}>
+            <ArrowLeft className="size-4" />
+            Catalog
+          </Link>
+        </Button>
+        <Badge
+          variant="outline"
+          className={
+            product.isActive
+              ? "border-emerald-500/40 text-emerald-300"
+              : "border-(--brand-card-border) text-(--brand-text-muted)"
+          }
+        >
+          {product.isActive ? "Active" : "Inactive"}
+        </Badge>
       </div>
+
+      {error ? <div className={`${errorBannerClass} mb-4`}>{error}</div> : null}
+
+      <section className="mb-6 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+        <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+          Attributes
+        </h2>
+        <dl className="grid gap-2 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-(--brand-label)">Family</dt>
+            <dd className="font-semibold">{product.family.code}</dd>
+          </div>
+          <div>
+            <dt className="text-(--brand-label)">Base</dt>
+            <dd className="font-semibold">{product.base.code}</dd>
+          </div>
+          <div>
+            <dt className="text-(--brand-label)">Material</dt>
+            <dd className="font-semibold">{product.material?.code ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-(--brand-label)">Index</dt>
+            <dd className="font-semibold">{product.index.code}</dd>
+          </div>
+          <div>
+            <dt className="text-(--brand-label)">Color</dt>
+            <dd className="font-semibold">
+              {product.color.name || product.color.code}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="mb-6">
+        <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+          Variants
+        </h2>
+        <AdminTable>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>SKU</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Range</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Open</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {product.variants.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-(--brand-text-muted)">
+                    No variants yet.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                product.variants.map((v) => (
+                  <TableRow key={v.id}>
+                    <TableCell>
+                      <SkuChip sku={v.skuCode} />
+                    </TableCell>
+                    <TableCell className="max-w-[16rem] whitespace-normal">
+                      {v.name}
+                    </TableCell>
+                    <TableCell>{v.rangeLabel}</TableCell>
+                    <TableCell>
+                      {v.isActive ? "Active" : "Inactive"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild size="sm" variant="outline" className="h-8 rounded-lg">
+                        <Link href={`${CATALOG_HREF}/variants/${v.id}`}>
+                          Matrix
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </AdminTable>
+      </section>
+
+      <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
+        <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+          Add power range
+        </h2>
+        <PowerRangeMultiSelect
+          options={powerRanges.map((r) => ({
+            id: r.id,
+            label: r.label,
+            cylSummary: r.cylSummary,
+            disabled: usedRangeIds.has(r.id),
+          }))}
+          selectedIds={addIds}
+          onChange={setAddIds}
+        />
+        <Button
+          type="button"
+          className="mt-4 h-9 rounded-xl bg-(--brand-primary) px-3 font-bold text-black"
+          disabled={addBusy || addIds.length === 0}
+          onClick={() => void addRanges()}
+        >
+          {addBusy ? (
+            <>
+              <Loader2 className="size-4 animate-spin" />
+              Adding…
+            </>
+          ) : (
+            "Add selected ranges"
+          )}
+        </Button>
+      </section>
     </AdminPage>
   );
 }

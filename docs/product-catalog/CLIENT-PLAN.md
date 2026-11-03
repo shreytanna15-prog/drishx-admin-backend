@@ -3,7 +3,7 @@
 **Document type:** Product catalog / SKU master plan  
 **Repos:** Admin panel (primary). Shared backend APIs.  
 **Hierarchy reference:** [CLIENT-HIERARCHY-CONFIRMATION.md](../product-catalog-hierarchy/CLIENT-HIERARCHY-CONFIRMATION.md) (approved)  
-**Status:** Oct baseline (Attributes + create + list/grid + matrix) **shipped**. Target updated for **[RC-03](../requested-changes.md#rc-03--product-catalog-optional-material--power-range-as-attribute)** (power range as attribute; Material optional) and **[RC-04](../requested-changes.md#rc-04--product-catalog-parent--variants-new-skuname-builders)** (parent + variants; new SKU/name). More catalog RCs may follow in [`../requested-changes.md`](../requested-changes.md).
+**Status:** Oct baseline **shipped**. **[RC-03](../requested-changes.md#rc-03--product-catalog-optional-material--power-range-as-attribute)** + **[RC-04](../requested-changes.md#rc-04--product-catalog-parent--variants-new-skuname-builders)** **shipped** (power-range masters; Material optional; parent + variants; auto SKU/name; flat + expandable grouped list). More catalog RCs may follow in [`../requested-changes.md`](../requested-changes.md).
 
 ---
 
@@ -50,7 +50,7 @@ Each variant is a fully separate sellable line (own SKU, name, price, matrix; fu
 
 ## 3. How it works today vs after
 
-| Today (Oct baseline) | After (RC-03 + RC-04 target) |
+| Before (Oct baseline) | Now (RC-03 + RC-04 shipped) |
 |-------|--------|
 | Flat product = attrs + typed range numbers + typed name | Parent = attrs; variants = power-range masters |
 | Re-create whole product for a second range | Same parent → **Add power range** (multi-select on create) |
@@ -297,14 +297,14 @@ Two separate sellable products; Admin did not re-enter PG/BR/1.56/KT/Green for t
 - [x] Catalog list / grid + matrix `_ / _ / _`
 - [x] Legacy stock / orders unchanged by Oct slice
 
-### Target (RC-03 + RC-04 — not done until implemented)
+### Shipped (RC-03 + RC-04)
 
-- [ ] Power range Attributes tab (selects; `-6.00/+2.00` label; −40…+8 steps)
-- [ ] Material optional; coating not product identity
-- [ ] Parent + multi power-range variants; Add range without re-picking attrs
-- [ ] Auto SKU + auto name (locked formats); no typed name
-- [ ] Flat + grouped catalog views (server pagination)
-- [ ] Test products deleted and recreated (no migration)
+- [x] Power range Attributes tab (selects; `-6.00/+2.00` label; −40…+8 steps)
+- [x] Material optional; coating not product identity
+- [x] Parent + multi power-range variants; Add range without re-picking attrs
+- [x] Auto SKU + auto name (locked formats); no typed name
+- [x] Flat + grouped catalog views (server pagination; expand parent → variants)
+- [x] Test cutover: delete old flat products / recreate under parent + variants (schema migrate for parent/variant tables; no data-preservation migration of old SKU rows)
 
 ---
 

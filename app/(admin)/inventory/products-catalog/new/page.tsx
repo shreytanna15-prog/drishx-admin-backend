@@ -5,28 +5,31 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
-import { SkuChip } from "@/components/catalog/sku-chip";
+import {
+  CatalogSelectField,
+  PowerRangeMultiSelect,
+} from "@/components/catalog/catalog-field";
+import { VariantPreviewTable } from "@/components/catalog/variant-preview-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AdminSelect } from "@/components/admin-select";
 import { AdminApiError } from "@/app/lib/admin-api";
 import {
   createLensProductRequest,
   fetchAttributeCompatibility,
   fetchLensAttributes,
+  previewLensProductRequest,
   type LensAttribute,
+  type VariantPreview,
 } from "@/app/lib/admin-lens-catalog";
 import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
-import { buildLensProductSkuCode } from "@/app/lib/catalog/lens-product-sku";
+import type { AdminSelectOption } from "@/components/admin-select";
 
 const CATALOG_HREF = "/inventory/products-catalog";
 
-const labelClass =
+const catalogLabelClass =
   "text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)";
 const inputClass =
-  "h-10 rounded-xl border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text) placeholder:text-(--brand-placeholder)";
-const selectTriggerClass =
-  "h-10 rounded-xl border-(--brand-input-border) bg-(--brand-input-bg) min-w-0";
+  "h-10 rounded-xl border-(--brand-input-border) bg-(--brand-input-bg) text-(--brand-text)";
 const errorBannerClass =
   "rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200";
 
@@ -34,55 +37,45 @@ function errorMessage(err: unknown, fallback: string) {
   return err instanceof AdminApiError ? err.message : fallback;
 }
 
-type FormState = {
-  name: string;
-  familyId: string;
-  baseId: string;
-  materialId: string;
-  indexId: string;
-  coatingId: string;
-  colorId: string;
-  rangeType: string;
-  powerRangeId: string;
-  addMin: string;
-  addMax: string;
-  axis: string;
-  eye: string;
-  defaultPrice: string;
-};
-
-const EMPTY: FormState = {
-  name: "",
-  familyId: "",
-  baseId: "",
-  materialId: "",
-  indexId: "",
-  coatingId: "",
-  colorId: "",
-  rangeType: "NORMAL",
-  powerRangeId: "",
-  addMin: "",
-  addMax: "",
-  axis: "",
-  eye: "",
-  defaultPrice: "",
-};
+function toOptions(
+  items: LensAttribute[],
+  emptyLabel?: string
+): AdminSelectOption[] {
+  const opts = items.map((a) => ({
+    value: a.id,
+    label: `${a.code} — ${a.name}`,
+  }));
+  return emptyLabel ? [{ value: "", label: emptyLabel }, ...opts] : opts;
+}
 
 export default function NewLensProductPage() {
   const router = useRouter();
-  const [form, setForm] = useState<FormState>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [families, setFamilies] = useState<LensAttribute[]>([]);
   const [bases, setBases] = useState<LensAttribute[]>([]);
   const [materials, setMaterials] = useState<LensAttribute[]>([]);
   const [indexes, setIndexes] = useState<LensAttribute[]>([]);
-  const [coatings, setCoatings] = useState<LensAttribute[]>([]);
   const [colors, setColors] = useState<LensAttribute[]>([]);
   const [allowedMaterialIds, setAllowedMaterialIds] = useState<Set<string>>(
     new Set()
   );
   const [attrsLoading, setAttrsLoading] = useState(true);
+
+  const [familyId, setFamilyId] = useState("");
+  const [baseId, setBaseId] = useState("");
+  const [materialId, setMaterialId] = useState("");
+  const [indexId, setIndexId] = useState("");
+  const [colorId, setColorId] = useState("");
+  const [powerRangeIds, setPowerRangeIds] = useState<string[]>([]);
+  const [defaultPrice, setDefaultPrice] = useState("");
+  const [preview, setPreview] = useState<{
+    baseCode: string;
+    existingParentId: string | null;
+    variants: VariantPreview[];
+  } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+
   const {
     data: powerRangeData,
     loading: powerRangesLoading,
@@ -97,19 +90,17 @@ export default function NewLensProductPage() {
     void (async () => {
       setAttrsLoading(true);
       try {
-        const [f, b, m, i, c, col] = await Promise.all([
+        const [f, b, m, i, col] = await Promise.all([
           fetchLensAttributes("family", { activeOnly: true }),
           fetchLensAttributes("base", { activeOnly: true }),
           fetchLensAttributes("material", { activeOnly: true }),
           fetchLensAttributes("index", { activeOnly: true }),
-          fetchLensAttributes("coating", { activeOnly: true }),
           fetchLensAttributes("color", { activeOnly: true }),
         ]);
         setFamilies(f.items);
         setBases(b.items);
         setMaterials(m.items);
         setIndexes(i.items);
-        setCoatings(c.items);
         setColors(col.items);
       } catch (err) {
         setError(errorMessage(err, "Failed to load attributes."));
@@ -120,108 +111,95 @@ export default function NewLensProductPage() {
   }, []);
 
   useEffect(() => {
-    if (!form.baseId) {
+    if (!baseId) {
       setAllowedMaterialIds(new Set());
       return;
     }
     void (async () => {
       try {
-        const res = await fetchAttributeCompatibility(form.baseId);
-        const ids = new Set(
-          res.bases
-            .flatMap((b) => b.materials)
-            .filter((m) => m.isActive)
-            .map((m) => m.id)
-        );
-        setAllowedMaterialIds(ids);
-        setForm((prev) =>
-          prev.materialId && !ids.has(prev.materialId)
-            ? { ...prev, materialId: "" }
-            : prev
+        const res = await fetchAttributeCompatibility(baseId);
+        const row = res.bases.find((x) => x.baseId === baseId);
+        setAllowedMaterialIds(
+          new Set((row?.materials ?? []).filter((m) => m.isActive).map((m) => m.id))
         );
       } catch {
-        setAllowedMaterialIds(new Set(materials.map((m) => m.id)));
+        setAllowedMaterialIds(new Set());
       }
     })();
-  }, [form.baseId, materials]);
+  }, [baseId]);
+
+  useEffect(() => {
+    if (materialId && allowedMaterialIds.size > 0 && !allowedMaterialIds.has(materialId)) {
+      setMaterialId("");
+    }
+  }, [allowedMaterialIds, materialId]);
 
   const materialOptions = useMemo(() => {
-    if (!form.baseId) return [];
-    return materials.filter((m) => allowedMaterialIds.has(m.id));
-  }, [materials, allowedMaterialIds, form.baseId]);
+    const filtered =
+      allowedMaterialIds.size > 0
+        ? materials.filter((m) => allowedMaterialIds.has(m.id))
+        : materials;
+    return toOptions(filtered, "None (optional)");
+  }, [materials, allowedMaterialIds]);
 
-  const selectedFamily = families.find((f) => f.id === form.familyId);
-  const showKtFields =
-    selectedFamily?.code === "KT" || selectedFamily?.code === "V2";
+  const canPreview =
+    Boolean(familyId && baseId && indexId && colorId) &&
+    powerRangeIds.length > 0;
 
-  const generatedSku = useMemo(() => {
-    const family = families.find((f) => f.id === form.familyId);
-    const base = bases.find((b) => b.id === form.baseId);
-    const material = materials.find((m) => m.id === form.materialId);
-    const range = powerRanges.find((r) => r.id === form.powerRangeId);
-    if (!family || !base || !range) return "";
-    const { sphMin, sphMax, cylMin, cylMax } = range;
-    try {
-      return buildLensProductSkuCode({
-        familyCode: family.code,
-        baseCode: base.code,
-        materialCode: material?.code ?? null,
-        indexCode: indexes.find((i) => i.id === form.indexId)?.code ?? null,
-        coatingCode:
-          coatings.find((c) => c.id === form.coatingId)?.code ?? null,
-        colorCode: colors.find((c) => c.id === form.colorId)?.code ?? null,
-        sphMin,
-        sphMax,
-        cylMin,
-        cylMax,
-        rangeType: form.rangeType,
-      });
-    } catch {
-      return "";
+  useEffect(() => {
+    if (!canPreview) {
+      setPreview(null);
+      return;
     }
-  }, [
-    families,
-    bases,
-    materials,
-    indexes,
-    coatings,
-    colors,
-    form.familyId,
-    form.baseId,
-    form.materialId,
-    form.indexId,
-    form.coatingId,
-    form.colorId,
-    form.powerRangeId,
-    powerRanges,
-    form.rangeType,
-  ]);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void (async () => {
+        setPreviewBusy(true);
+        try {
+          const res = await previewLensProductRequest({
+            familyId,
+            baseId,
+            materialId: materialId || null,
+            indexId,
+            colorId,
+            powerRangeIds,
+          });
+          if (!cancelled) setPreview(res.preview);
+        } catch {
+          if (!cancelled) setPreview(null);
+        } finally {
+          if (!cancelled) setPreviewBusy(false);
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [canPreview, familyId, baseId, materialId, indexId, colorId, powerRangeIds]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
     setError("");
+    if (!familyId || !baseId || !indexId || !colorId) {
+      setError("Family, base, index, and color are required.");
+      return;
+    }
+    if (powerRangeIds.length === 0) {
+      setError("Select at least one power range.");
+      return;
+    }
+    setBusy(true);
     try {
-      const body: Record<string, unknown> = {
-        name: form.name.trim(),
-        familyId: form.familyId,
-        baseId: form.baseId,
-        materialId: form.materialId || null,
-        indexId: form.indexId || null,
-        coatingId: form.coatingId || null,
-        colorId: form.colorId || null,
-        rangeType: form.rangeType,
-        powerRangeId: form.powerRangeId,
-        defaultPrice:
-          form.defaultPrice.trim() === "" ? null : Number(form.defaultPrice),
-      };
-      if (showKtFields) {
-        body.addMin = form.addMin.trim() === "" ? null : Number(form.addMin);
-        body.addMax = form.addMax.trim() === "" ? null : Number(form.addMax);
-        body.axis = form.axis.trim() === "" ? null : Number(form.axis);
-        body.eye = form.eye || null;
-      }
-      const res = await createLensProductRequest(body);
+      const res = await createLensProductRequest({
+        familyId,
+        baseId,
+        materialId: materialId || null,
+        indexId,
+        colorId,
+        powerRangeIds,
+        defaultPrice: defaultPrice.trim() ? Number(defaultPrice) : null,
+      });
       router.push(`${CATALOG_HREF}/${res.product.id}`);
     } catch (err) {
       setError(errorMessage(err, "Failed to create product."));
@@ -230,266 +208,135 @@ export default function NewLensProductPage() {
     }
   }
 
-  function set<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
   return (
     <AdminPage
-      title="Create product"
-      subtitle="Pick attributes and a power range. SKU is generated automatically."
+      title="New product"
+      subtitle="Pick attributes once, then one or more power ranges → variants"
     >
-      <form onSubmit={onSubmit} className="mx-auto max-w-3xl space-y-6">
-        <Button asChild variant="outline" className="h-9 rounded-xl">
+      <div className="mb-4">
+        <Button asChild variant="ghost" className="h-9 gap-1.5 px-2">
           <Link href={CATALOG_HREF}>
-            <ArrowLeft className="mr-1 size-4" />
+            <ArrowLeft className="size-4" />
             Back to catalog
           </Link>
         </Button>
+      </div>
 
-        {error ? <div className={errorBannerClass}>{error}</div> : null}
-        {attrsLoading ? (
-          <p className="text-sm text-(--brand-text-muted)">Loading attributes…</p>
-        ) : null}
+      {error ? <div className={`${errorBannerClass} mb-4`}>{error}</div> : null}
+      {powerRangesError ? (
+        <div className={`${errorBannerClass} mb-4`}>
+          {powerRangesError.message}
+        </div>
+      ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="space-y-1 sm:col-span-2">
-            <span className={labelClass}>Product name</span>
+      <form
+        onSubmit={(e) => void onSubmit(e)}
+        className="grid max-w-4xl gap-5 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5 shadow-(--brand-card-shadow) sm:p-6"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <CatalogSelectField
+            label="Family"
+            required
+            value={familyId}
+            onValueChange={setFamilyId}
+            options={toOptions(families)}
+            disabled={attrsLoading}
+            placeholder="Select family"
+          />
+          <CatalogSelectField
+            label="Base"
+            required
+            value={baseId}
+            onValueChange={setBaseId}
+            options={toOptions(bases)}
+            disabled={attrsLoading}
+            placeholder="Select base"
+          />
+          <CatalogSelectField
+            label="Material"
+            value={materialId}
+            onValueChange={setMaterialId}
+            options={materialOptions}
+            disabled={attrsLoading || !baseId}
+            placeholder="Optional"
+            hint={!baseId ? "Select a base first for compatible materials." : undefined}
+          />
+          <CatalogSelectField
+            label="Index"
+            required
+            value={indexId}
+            onValueChange={setIndexId}
+            options={toOptions(indexes)}
+            disabled={attrsLoading}
+            placeholder="Select index"
+          />
+          <CatalogSelectField
+            label="Color"
+            required
+            value={colorId}
+            onValueChange={setColorId}
+            options={toOptions(colors)}
+            disabled={attrsLoading}
+            placeholder="Select color"
+          />
+          <label className="grid gap-1.5">
+            <span className={catalogLabelClass}>Default price (₹)</span>
             <Input
+              value={defaultPrice}
+              onChange={(e) => setDefaultPrice(e.target.value)}
               className={inputClass}
-              required
-              value={form.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="Hard Coat Single Vision +"
-            />
-          </label>
-          <div className="space-y-1">
-            <span className={labelClass}>SKU (auto)</span>
-            <div className="flex min-h-10 items-center" aria-live="polite">
-              {generatedSku ? (
-                <SkuChip sku={generatedSku} />
-              ) : (
-                <span className="text-sm text-(--brand-text-muted)">
-                  Select Family, Base + power range
-                </span>
-              )}
-            </div>
-          </div>
-          <label className="space-y-1">
-            <span className={labelClass}>Default price (optional)</span>
-            <Input
-              className={inputClass}
-              value={form.defaultPrice}
-              onChange={(e) => set("defaultPrice", e.target.value)}
-              placeholder="0"
+              inputMode="decimal"
+              placeholder="Optional — applied to new variants"
             />
           </label>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <label className="space-y-1">
-            <span className={labelClass}>Family *</span>
-            <AdminSelect
-              value={form.familyId}
-              onValueChange={(v) => set("familyId", v)}
-              options={[
-                { value: "", label: "Select…" },
-                ...families.map((f) => ({
-                  value: f.id,
-                  label: `${f.code} — ${f.name}`,
-                })),
-              ]}
-              placeholder="Select…"
-              triggerClassName={selectTriggerClass}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className={labelClass}>Base *</span>
-            <AdminSelect
-              value={form.baseId}
-              onValueChange={(v) => set("baseId", v)}
-              options={[
-                { value: "", label: "Select…" },
-                ...bases.map((b) => ({
-                  value: b.id,
-                  label: `${b.code} — ${b.name}`,
-                })),
-              ]}
-              placeholder="Select…"
-              triggerClassName={selectTriggerClass}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className={labelClass}>Material (optional)</span>
-            <AdminSelect
-              value={form.materialId}
-              disabled={!form.baseId}
-              onValueChange={(v) => set("materialId", v)}
-              options={[
-                {
-                  value: "",
-                  label: form.baseId ? "None" : "Pick base first",
-                },
-                ...materialOptions.map((m) => ({
-                  value: m.id,
-                  label: `${m.code} — ${m.name}`,
-                })),
-              ]}
-              placeholder="None"
-              triggerClassName={selectTriggerClass}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className={labelClass}>Index</span>
-            <AdminSelect
-              value={form.indexId}
-              onValueChange={(v) => set("indexId", v)}
-              options={[
-                { value: "", label: "None" },
-                ...indexes.map((i) => ({ value: i.id, label: i.code })),
-              ]}
-              placeholder="None"
-              triggerClassName={selectTriggerClass}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className={labelClass}>Coating</span>
-            <AdminSelect
-              value={form.coatingId}
-              onValueChange={(v) => set("coatingId", v)}
-              options={[
-                { value: "", label: "None" },
-                ...coatings.map((c) => ({
-                  value: c.id,
-                  label: `${c.code} — ${c.name}`,
-                })),
-              ]}
-              placeholder="None"
-              triggerClassName={selectTriggerClass}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className={labelClass}>Color (tint)</span>
-            <AdminSelect
-              value={form.colorId}
-              onValueChange={(v) => set("colorId", v)}
-              options={[
-                { value: "", label: "None" },
-                ...colors.map((c) => ({
-                  value: c.id,
-                  label: `${c.code} — ${c.name}`,
-                })),
-              ]}
-              placeholder="None"
-              triggerClassName={selectTriggerClass}
-            />
-          </label>
+        <PowerRangeMultiSelect
+          options={powerRanges.map((r) => ({
+            id: r.id,
+            label: r.label,
+            cylSummary: r.cylSummary,
+          }))}
+          selectedIds={powerRangeIds}
+          onChange={setPowerRangeIds}
+          disabled={powerRangesLoading}
+        />
+
+        <div className="grid gap-2">
+          <span className={catalogLabelClass}>
+            Variant preview {previewBusy ? "(updating…)" : ""}
+          </span>
+          <VariantPreviewTable
+            rows={preview?.variants ?? []}
+            existingParentHint={
+              preview?.existingParentId
+                ? "Matching parent already exists — save will add these ranges to it."
+                : null
+            }
+          />
         </div>
 
-        <div className="space-y-3 rounded-2xl border border-(--brand-card-border) bg-(--brand-input-bg)/40 p-4">
-          <p className="text-sm font-bold text-(--brand-text)">Power range</p>
-          <p className="text-xs text-(--brand-text-muted)">
-            Pick an active power range from Attributes → Power range. Its SPH/CYL
-            bounds drive the matrix and the SKU.
-          </p>
-          {powerRangesError ? (
-            <div className={errorBannerClass}>
-              {powerRangesError.message || "Failed to load power ranges."}
-            </div>
-          ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1">
-              <span className={labelClass}>Power range *</span>
-              <AdminSelect
-                value={form.powerRangeId}
-                disabled={powerRangesLoading}
-                onValueChange={(v) => set("powerRangeId", v)}
-                options={[
-                  {
-                    value: "",
-                    label: powerRangesLoading
-                      ? "Loading…"
-                      : powerRanges.length === 0
-                        ? "No active power ranges"
-                        : "Select…",
-                  },
-                  ...powerRanges.map((r) => ({
-                    value: r.id,
-                    label: `${r.label} (${r.cylSummary})`,
-                  })),
-                ]}
-                placeholder="Select…"
-                triggerClassName={selectTriggerClass}
-              />
-            </label>
-            <label className="space-y-1">
-              <span className={labelClass}>Range type</span>
-              <AdminSelect
-                value={form.rangeType}
-                onValueChange={(v) => set("rangeType", v)}
-                options={[
-                  { value: "NORMAL", label: "NORMAL" },
-                  { value: "CROSS", label: "CROSS" },
-                ]}
-                placeholder="Range type"
-                triggerClassName={selectTriggerClass}
-              />
-            </label>
-          </div>
-
-          {showKtFields ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="space-y-1">
-                <span className={labelClass}>ADD min</span>
-                <Input
-                  className={inputClass}
-                  value={form.addMin}
-                  onChange={(e) => set("addMin", e.target.value)}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className={labelClass}>ADD max</span>
-                <Input
-                  className={inputClass}
-                  value={form.addMax}
-                  onChange={(e) => set("addMax", e.target.value)}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className={labelClass}>AXIS</span>
-                <Input
-                  className={inputClass}
-                  value={form.axis}
-                  onChange={(e) => set("axis", e.target.value)}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className={labelClass}>EYE</span>
-                <AdminSelect
-                  value={form.eye}
-                  onValueChange={(v) => set("eye", v)}
-                  options={[
-                    { value: "", label: "None" },
-                    { value: "LEFT", label: "LEFT" },
-                    { value: "RIGHT", label: "RIGHT" },
-                    { value: "BOTH", label: "BOTH" },
-                  ]}
-                  placeholder="None"
-                  triggerClassName={selectTriggerClass}
-                />
-              </label>
-            </div>
-          ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="submit"
+            disabled={busy || attrsLoading}
+            className="h-10 rounded-xl bg-(--brand-primary) px-4 font-bold text-black"
+          >
+            {busy ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Saving…
+              </>
+            ) : preview?.existingParentId ? (
+              "Add ranges to existing parent"
+            ) : (
+              "Create parent + variants"
+            )}
+          </Button>
+          <Button asChild type="button" variant="outline" className="h-10 rounded-xl">
+            <Link href={CATALOG_HREF}>Cancel</Link>
+          </Button>
         </div>
-
-        <Button
-          type="submit"
-          disabled={busy || attrsLoading || powerRangesLoading}
-          className="h-11 rounded-xl bg-(--brand-primary) px-6 font-bold text-black"
-        >
-          {busy ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-          Create product
-        </Button>
       </form>
     </AdminPage>
   );

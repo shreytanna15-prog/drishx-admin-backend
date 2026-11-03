@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Grid3x3,
+  LayoutGrid,
   LayoutList,
   Plus,
   Search,
@@ -32,6 +33,7 @@ import {
   fetchLensProducts,
   type LensAttribute,
   type LensProduct,
+  type LensProductVariant,
 } from "@/app/lib/admin-lens-catalog";
 import { cn } from "@/lib/utils";
 
@@ -48,10 +50,14 @@ function errorMessage(err: unknown, fallback: string) {
   return err instanceof AdminApiError ? err.message : fallback;
 }
 
-type ViewMode = "list" | "grid";
+function isVariant(
+  row: LensProduct | LensProductVariant
+): row is LensProductVariant {
+  return "skuCode" in row && "productId" in row;
+}
 
 export default function ProductsCatalogPage() {
-  const [view, setView] = useState<ViewMode>("list");
+  const [listView, setListView] = useState<"flat" | "grouped">("flat");
   const [q, setQ] = useState("");
   const [qDraft, setQDraft] = useState("");
   const [familyId, setFamilyId] = useState("");
@@ -61,7 +67,9 @@ export default function ProductsCatalogPage() {
     "all"
   );
   const [page, setPage] = useState(1);
-  const [items, setItems] = useState<LensProduct[]>([]);
+  const [items, setItems] = useState<Array<LensProduct | LensProductVariant>>(
+    []
+  );
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -69,6 +77,10 @@ export default function ProductsCatalogPage() {
   const [families, setFamilies] = useState<LensAttribute[]>([]);
   const [bases, setBases] = useState<LensAttribute[]>([]);
   const [materials, setMaterials] = useState<LensAttribute[]>([]);
+  /** RC-04 / CLIENT-PLAN: grouped view expands parents → variants */
+  const [expandedParentIds, setExpandedParentIds] = useState<Set<string>>(
+    () => new Set()
+  );
 
   useEffect(() => {
     void (async () => {
@@ -92,6 +104,7 @@ export default function ProductsCatalogPage() {
     setError("");
     try {
       const res = await fetchLensProducts({
+        view: listView,
         q: q || undefined,
         familyId: familyId || undefined,
         baseId: baseId || undefined,
@@ -112,7 +125,7 @@ export default function ProductsCatalogPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, familyId, baseId, materialId, activeFilter, page]);
+  }, [q, familyId, baseId, materialId, activeFilter, page, listView]);
 
   useEffect(() => {
     void load();
@@ -126,7 +139,7 @@ export default function ProductsCatalogPage() {
   return (
     <AdminPage
       title="Products & catalog"
-      subtitle="SKU master products from attributes + power range. Open a product to see the SPH × CYL matrix (placeholders)."
+      subtitle="Parents hold attributes; variants are sellable SKUs (one per power range)."
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -141,7 +154,7 @@ export default function ProductsCatalogPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") applySearch();
                   }}
-                  placeholder="SKU, name, coating…"
+                  placeholder="SKU, name, attributes…"
                 />
                 <Button
                   type="button"
@@ -230,25 +243,32 @@ export default function ProductsCatalogPage() {
                 type="button"
                 className={cn(
                   "rounded-lg px-3 py-1.5 text-sm font-bold",
-                  view === "list"
+                  listView === "flat"
                     ? "bg-(--brand-primary) text-black"
                     : "text-(--brand-text-muted)"
                 )}
-                onClick={() => setView("list")}
+                onClick={() => {
+                  setListView("flat");
+                  setPage(1);
+                }}
               >
-                <LayoutList className="inline size-4" /> List
+                <LayoutList className="inline size-4" /> Flat
               </button>
               <button
                 type="button"
                 className={cn(
                   "rounded-lg px-3 py-1.5 text-sm font-bold",
-                  view === "grid"
+                  listView === "grouped"
                     ? "bg-(--brand-primary) text-black"
                     : "text-(--brand-text-muted)"
                 )}
-                onClick={() => setView("grid")}
+                onClick={() => {
+                  setListView("grouped");
+                  setPage(1);
+                  setExpandedParentIds(new Set());
+                }}
               >
-                <Grid3x3 className="inline size-4" /> Grid
+                <LayoutGrid className="inline size-4" /> Grouped
               </button>
             </div>
             <Button
@@ -273,8 +293,8 @@ export default function ProductsCatalogPage() {
               No catalog products yet
             </p>
             <p className="mt-1 text-sm text-(--brand-text-muted)">
-              Create a product from attributes and a power range, or seed
-              attributes first under Inventory → Attributes.
+              Create a parent from attributes and attach one or more power
+              ranges as variants.
             </p>
             <Button
               asChild
@@ -283,7 +303,7 @@ export default function ProductsCatalogPage() {
               <Link href="/inventory/products-catalog/new">Create product</Link>
             </Button>
           </div>
-        ) : view === "list" ? (
+        ) : listView === "flat" ? (
           <AdminTable>
             <Table>
               <TableHeader>
@@ -296,42 +316,33 @@ export default function ProductsCatalogPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map((p) => (
-                  <TableRow key={p.id} className="cursor-pointer hover:bg-(--brand-input-bg)/50">
+                {items.filter(isVariant).map((v) => (
+                  <TableRow key={v.id}>
                     <TableCell className="align-top">
                       <Link
-                        href={`/inventory/products-catalog/${p.id}`}
+                        href={`/inventory/products-catalog/variants/${v.id}`}
                         className="font-semibold text-(--brand-text) hover:underline"
                       >
-                        {p.name}
+                        {v.name}
                       </Link>
                     </TableCell>
-                    <TableCell className="align-middle">
-                      <SkuChip sku={p.skuCode} />
+                    <TableCell>
+                      <SkuChip sku={v.skuCode} />
                     </TableCell>
-                    <TableCell className="align-middle whitespace-normal text-sm text-(--brand-text-muted)">
-                      {p.attributeSummary}
+                    <TableCell className="whitespace-normal text-sm text-(--brand-text-muted)">
+                      {v.product.attributeSummary}
                     </TableCell>
-                    <TableCell className="align-middle whitespace-normal text-sm text-(--brand-text)">
-                      <div className="flex flex-col gap-1 text-xs tabular-nums leading-normal">
-                        <span>
-                          SPH {p.sphMin}…{p.sphMax}
-                        </span>
-                        <span>
-                          CYL {p.cylMin}…{p.cylMax}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="align-middle">
+                    <TableCell className="text-sm">{v.rangeLabel}</TableCell>
+                    <TableCell>
                       <Badge
                         variant="outline"
                         className={
-                          p.isActive
-                            ? "h-7 overflow-visible border-emerald-500/40 text-emerald-700"
-                            : "h-7 overflow-visible border-zinc-400/40 text-zinc-500"
+                          v.isActive
+                            ? "border-emerald-500/40 text-emerald-700"
+                            : "border-zinc-400/40 text-zinc-500"
                         }
                       >
-                        {p.isActive ? "Active" : "Inactive"}
+                        {v.isActive ? "Active" : "Inactive"}
                       </Badge>
                     </TableCell>
                   </TableRow>
@@ -340,41 +351,147 @@ export default function ProductsCatalogPage() {
             </Table>
           </AdminTable>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {items.map((p) => (
-              <Link
-                key={p.id}
-                href={`/inventory/products-catalog/${p.id}`}
-                className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4 transition hover:border-(--brand-primary)/50"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-bold text-(--brand-text)">{p.name}</p>
-                  <Badge
-                    variant="outline"
-                    className={
-                      p.isActive
-                        ? "border-emerald-500/40 text-emerald-700"
-                        : "border-zinc-400/40 text-zinc-500"
-                    }
-                  >
-                    {p.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                </div>
-                <SkuChip sku={p.skuCode} className="mt-1" />
-                <p className="mt-2 text-sm text-(--brand-text-muted)">
-                  {p.attributeSummary}
-                </p>
-                <div className="mt-1 text-xs leading-snug tabular-nums text-(--brand-text-muted)">
-                  <div>
-                    SPH {p.sphMin}…{p.sphMax}
-                  </div>
-                  <div>
-                    CYL {p.cylMin}…{p.cylMax}
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+          <AdminTable>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead>Parent</TableHead>
+                  <TableHead>Attributes</TableHead>
+                  <TableHead>Variants</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items
+                  .filter((row): row is LensProduct => !isVariant(row))
+                  .flatMap((p) => {
+                    const open = expandedParentIds.has(p.id);
+                    const parentRow = (
+                      <TableRow key={p.id}>
+                        <TableCell className="w-10 pr-0">
+                          <button
+                            type="button"
+                            className="inline-flex size-8 items-center justify-center rounded-lg text-(--brand-text-muted) hover:bg-(--brand-input-bg) hover:text-(--brand-text)"
+                            aria-expanded={open}
+                            aria-label={
+                              open
+                                ? "Collapse variants"
+                                : "Expand variants"
+                            }
+                            onClick={() => {
+                              setExpandedParentIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(p.id)) next.delete(p.id);
+                                else next.add(p.id);
+                                return next;
+                              });
+                            }}
+                          >
+                            {open ? (
+                              <ChevronDown className="size-4" />
+                            ) : (
+                              <ChevronRight className="size-4" />
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            href={`/inventory/products-catalog/${p.id}`}
+                            className="font-semibold hover:underline"
+                          >
+                            {p.attributeSummary}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-sm text-(--brand-text-muted)">
+                          {p.family.code} · {p.base.code}
+                          {p.material ? ` · ${p.material.code}` : ""}
+                        </TableCell>
+                        <TableCell>{p.variantCount}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              p.isActive
+                                ? "border-emerald-500/40 text-emerald-700"
+                                : "border-zinc-400/40 text-zinc-500"
+                            }
+                          >
+                            {p.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                    if (!open) return [parentRow];
+                    const variantRows =
+                      (p.variants ?? []).length === 0
+                        ? [
+                            <TableRow
+                              key={`${p.id}-empty`}
+                              className="bg-(--brand-input-bg)/40"
+                            >
+                              <TableCell />
+                              <TableCell
+                                colSpan={4}
+                                className="text-sm text-(--brand-text-muted)"
+                              >
+                                No variants on this parent.
+                              </TableCell>
+                            </TableRow>,
+                          ]
+                        : (p.variants ?? []).map((v) => (
+                            <TableRow
+                              key={v.id}
+                              className="bg-(--brand-input-bg)/40"
+                            >
+                              <TableCell />
+                              <TableCell className="pl-6">
+                                <div className="flex flex-col gap-1">
+                                  <Link
+                                    href={`/inventory/products-catalog/variants/${v.id}`}
+                                    className="font-semibold hover:underline"
+                                  >
+                                    {v.name}
+                                  </Link>
+                                  <SkuChip sku={v.skuCode} />
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm text-(--brand-text-muted)">
+                                {v.rangeLabel}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  asChild
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 rounded-lg"
+                                >
+                                  <Link
+                                    href={`/inventory/products-catalog/variants/${v.id}`}
+                                  >
+                                    Matrix
+                                  </Link>
+                                </Button>
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    v.isActive
+                                      ? "border-emerald-500/40 text-emerald-700"
+                                      : "border-zinc-400/40 text-zinc-500"
+                                  }
+                                >
+                                  {v.isActive ? "Active" : "Inactive"}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ));
+                    return [parentRow, ...variantRows];
+                  })}
+              </TableBody>
+            </Table>
+          </AdminTable>
         )}
 
         {!loading && items.length > 0 ? (

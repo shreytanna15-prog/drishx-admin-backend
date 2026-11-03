@@ -1,18 +1,14 @@
 /**
- * Prep catalog for presentation: delete QA junk, ensure one clean demo product
- * with auto-generated SKU. Prints demo product id + sku for browser SS.
+ * Prep catalog for presentation: wipe products, create one parent + variant demo.
  */
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
-import { createRequire } from "node:module";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
-// Build SKU the same way as the app (via compiled/tsx path not available in plain mjs —
-// mirror sanitize/encode here for the demo create assertion).
 function sanitize(code) {
   return code.trim().toUpperCase().replace(/\./g, "P").replace(/[^A-Z0-9]+/g, "");
 }
@@ -23,74 +19,55 @@ function encodePower(value) {
   const body = Number.isInteger(abs) ? String(abs) : String(abs).replace(".", "P");
   return `${sign}${body}`;
 }
-function buildSku({ family, base, material, index, sphMin, sphMax, cylMin, cylMax }) {
-  const tokens = [sanitize(family), sanitize(base), sanitize(material)];
-  if (index) tokens.push(sanitize(index));
-  tokens.push(`S${encodePower(sphMin)}T${encodePower(sphMax)}`);
-  tokens.push(`C${encodePower(cylMin)}T${encodePower(cylMax)}`);
+function buildBase({ material, base, index, family, color }) {
+  const tokens = [];
+  if (material) tokens.push(sanitize(material));
+  tokens.push(sanitize(base), sanitize(index), sanitize(family));
+  if (color) tokens.push(sanitize(color));
   return tokens.join("-");
+}
+function buildSku(parts, bounds) {
+  return [
+    buildBase(parts),
+    `S${encodePower(bounds.sphMin)}T${encodePower(bounds.sphMax)}`,
+    `C${encodePower(bounds.cylMin)}T${encodePower(bounds.cylMax)}`,
+  ].join("-");
 }
 
 async function main() {
-  // Clean slate for presentation (attributes stay; products rebuild as demo only)
-  const existing = await prisma.lensProduct.findMany({
-    select: { id: true, skuCode: true, name: true },
-  });
-  if (existing.length) {
+  const existing = await prisma.lensProduct.count();
+  if (existing) {
     await prisma.lensProduct.deleteMany({});
-    console.log(`Deleted ${existing.length} existing products:`);
-    for (const j of existing) console.log(`  - ${j.skuCode} (${j.name})`);
+    console.log(`Deleted ${existing} parent product(s) (variants cascade).`);
   } else {
     console.log("Catalog already empty.");
   }
 
-  const [family, base, material, index] = await Promise.all([
+  const [family, base, material, index, color] = await Promise.all([
     prisma.lensFamily.findUnique({ where: { code: "SV" } }),
     prisma.lensBase.findUnique({ where: { code: "HC" } }),
     prisma.lensMaterial.findUnique({ where: { code: "PLAIN" } }),
     prisma.lensIndex.findUnique({ where: { code: "1.56" } }),
+    prisma.lensColor.findFirst({ where: { isActive: true } }),
   ]);
-  if (!family || !base || !material || !index) {
-    throw new Error("Missing SV/HC/PLAIN/1.56 seed attributes");
+  if (!family || !base || !material || !index || !color) {
+    throw new Error("Missing SV/HC/PLAIN/1.56/color seed attributes");
   }
 
-  // Presentation demo: classic plus band so matrix looks good
   const sphMin = 0;
   const sphMax = 2;
   const cylMin = 0;
   const cylMax = 1;
-  const expectedSku = buildSku({
-    family: "SV",
-    base: "HC",
+  const codeParts = {
     material: "PLAIN",
+    base: "HC",
     index: "1.56",
-    sphMin,
-    sphMax,
-    cylMin,
-    cylMax,
-  });
-
-  // Remove any existing product with this exact combo/range or same sku
-  await prisma.lensProduct.deleteMany({
-    where: {
-      OR: [
-        { skuCode: expectedSku },
-        {
-          familyId: family.id,
-          baseId: base.id,
-          materialId: material.id,
-          indexId: index.id,
-          coatingId: null,
-          colorId: null,
-          rangeType: "NORMAL",
-          sphMin,
-          sphMax,
-          cylMin,
-          cylMax,
-        },
-      ],
-    },
-  });
+    family: "SV",
+    color: color.code,
+  };
+  const baseCode = buildBase(codeParts);
+  const expectedSku = buildSku(codeParts, { sphMin, sphMax, cylMin, cylMax });
+  const name = `PLAIN 1.56 SV HC ${color.code} +0.00/+2.00`;
 
   const powerRange = await prisma.lensPowerRange.upsert({
     where: {
@@ -100,38 +77,37 @@ async function main() {
     create: { sphMin, sphMax, cylMin, cylMax },
   });
 
-  const demo = await prisma.lensProduct.create({
+  const parent = await prisma.lensProduct.create({
     data: {
-      skuCode: expectedSku,
-      name: "Hard Coat Single Vision +",
+      baseCode,
       familyId: family.id,
       baseId: base.id,
       materialId: material.id,
       indexId: index.id,
-      powerRangeId: powerRange.id,
-      rangeType: "NORMAL",
-      sphMin,
-      sphMax,
-      cylMin,
-      cylMax,
+      colorId: color.id,
       isActive: true,
-      defaultPrice: 450,
+      variants: {
+        create: {
+          powerRangeId: powerRange.id,
+          skuCode: expectedSku,
+          name,
+          sphMin,
+          sphMax,
+          cylMin,
+          cylMax,
+          defaultPrice: 450,
+          isActive: true,
+        },
+      },
     },
+    include: { variants: true },
   });
 
-  const remaining = await prisma.lensProduct.findMany({
-    orderBy: { createdAt: "desc" },
-    select: { id: true, skuCode: true, name: true },
-    take: 20,
-  });
-
-  console.log("\nDemo product ready:");
-  console.log(`  id:  ${demo.id}`);
-  console.log(`  sku: ${demo.skuCode}`);
-  console.log(`  name: ${demo.name}`);
-  console.log(`  url: /inventory/products-catalog/${demo.id}`);
-  console.log(`\nCatalog now (${remaining.length} shown):`);
-  for (const p of remaining) console.log(`  - ${p.skuCode} · ${p.name}`);
+  console.log("\nDemo parent ready:");
+  console.log(`  parent id: ${parent.id}`);
+  console.log(`  variant:   ${parent.variants[0].skuCode}`);
+  console.log(`  name:      ${parent.variants[0].name}`);
+  console.log(`  url:       /inventory/products-catalog/${parent.id}`);
 }
 
 main()

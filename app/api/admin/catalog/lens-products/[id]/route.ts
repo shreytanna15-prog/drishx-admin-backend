@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionOrUnauthorized } from "../../../../../lib/session-auth";
 import {
+  addLensProductVariants,
   getLensProduct,
   LensProductServiceError,
-  updateLensProduct,
 } from "../../../../../lib/catalog/lens-product-service";
 
 function requireAdmin(req: NextRequest) {
@@ -17,7 +17,7 @@ function requireAdmin(req: NextRequest) {
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// GET /api/admin/catalog/lens-products/:id
+// GET /api/admin/catalog/lens-products/:id  (parent + variants)
 export async function GET(req: NextRequest, ctx: Ctx) {
   const auth = requireAdmin(req);
   if (auth.error) return auth.error;
@@ -38,44 +38,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   }
 }
 
-// PATCH /api/admin/catalog/lens-products/:id
-export async function PATCH(req: NextRequest, ctx: Ctx) {
+// POST /api/admin/catalog/lens-products/:id  — add power-range variants
+export async function POST(req: NextRequest, ctx: Ctx) {
   const auth = requireAdmin(req);
   if (auth.error) return auth.error;
 
   try {
     const { id } = await ctx.params;
     const body = await req.json();
-    const product = await updateLensProduct({
-      id,
-      skuCode: body.skuCode != null ? String(body.skuCode) : undefined,
-      name: body.name != null ? String(body.name) : undefined,
-      familyId: body.familyId,
-      baseId: body.baseId,
-      // null / "" clears material (optional); omitted keeps existing
-      materialId:
-        body.materialId !== undefined
-          ? body.materialId
-            ? String(body.materialId)
-            : null
-          : undefined,
-      indexId: body.indexId,
-      coatingId: body.coatingId,
-      colorId: body.colorId,
-      powerRangeId:
-        body.powerRangeId !== undefined ? String(body.powerRangeId ?? "") : undefined,
-      rangeType: body.rangeType,
-      addMin: body.addMin !== undefined ? (body.addMin == null ? null : Number(body.addMin)) : undefined,
-      addMax: body.addMax !== undefined ? (body.addMax == null ? null : Number(body.addMax)) : undefined,
-      axis: body.axis !== undefined ? (body.axis == null ? null : Number(body.axis)) : undefined,
-      eye: body.eye,
-      defaultPrice:
-        body.defaultPrice !== undefined
-          ? body.defaultPrice == null
-            ? null
-            : Number(body.defaultPrice)
-          : undefined,
-      isActive: body.isActive,
+    const powerRangeIds = Array.isArray(body?.powerRangeIds)
+      ? body.powerRangeIds.map((x: unknown) => String(x ?? "").trim()).filter(Boolean)
+      : [];
+    const product = await addLensProductVariants({
+      productId: id,
+      powerRangeIds,
+      defaultPrice: body.defaultPrice != null ? Number(body.defaultPrice) : null,
       actorUserId: auth.session.userId,
     });
     return NextResponse.json({ product });
@@ -86,7 +63,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         { status: error.status }
       );
     }
-    console.error("PATCH /api/admin/catalog/lens-products/:id", error);
+    console.error("POST /api/admin/catalog/lens-products/:id", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

@@ -223,12 +223,12 @@ export async function updateLensPowerRange(
     if (changed) {
       // Products copy bounds + encode them in SKU at write time; changing a used range
       // would leave stale SKUs. Create a new range instead.
-      const inUse = await prisma.lensProduct.count({
+      const inUse = await prisma.lensProductVariant.count({
         where: { powerRangeId: id },
       });
       if (inUse > 0) {
         throw new LensPowerRangeServiceError(
-          `This power range is used by ${inUse} product(s); bounds cannot be changed. Create a new range instead.`,
+          `This power range is used by ${inUse} variant(s); bounds cannot be changed. Create a new range instead.`,
           409,
           "RANGE_IN_USE"
         );

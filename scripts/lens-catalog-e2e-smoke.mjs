@@ -112,10 +112,20 @@ async function main() {
     token,
     "/api/admin/catalog/attributes/material?activeOnly=true"
   );
+  const { json: indexes } = await api(
+    token,
+    "/api/admin/catalog/attributes/index?activeOnly=true"
+  );
+  const { json: colors } = await api(
+    token,
+    "/api/admin/catalog/attributes/color?activeOnly=true"
+  );
   const family = families.items.find((f) => f.code === "SV");
   const base = bases.items.find((b) => b.code === "HC");
   const material = materials.items.find((m) => m.code === "PLAIN");
-  assert(family && base && material, "missing SV/HC/PLAIN");
+  const index = indexes.items.find((i) => i.code === "1.56");
+  const color = colors.items?.[0];
+  assert(family && base && material && index && color, "missing SV/HC/PLAIN/1.56/color");
 
   // Unique range so leftover browser-QA products with same combo don't 409.
   // Bounds must sit on the stepped grid (0.25 up to +4); keep within 0 .. 3.
@@ -153,29 +163,36 @@ async function main() {
     {
       method: "POST",
       body: JSON.stringify({
-        name: "E2E Smoke Product",
         familyId: family.id,
         baseId: base.id,
         materialId: material.id,
-        powerRangeId,
+        indexId: index.id,
+        colorId: color.id,
+        powerRangeIds: [powerRangeId],
+        defaultPrice: 100,
       }),
     }
   );
   assert(createRes.status === 201, `create ${createRes.status} ${JSON.stringify(createJson)}`);
   const productId = createJson.product.id;
-  const sku = createJson.product.skuCode;
+  const variants = createJson.product.variants || [];
+  assert(variants.length === 1, "expected one variant");
+  const sku = variants[0].skuCode;
   assert(
-    typeof sku === "string" && sku.startsWith("SV-HC-PLAIN-S"),
+    typeof sku === "string" && sku.includes("PLAIN-HC-1P56-SV"),
     `unexpected auto SKU: ${sku}`
   );
-  console.log(`✓ create product ${sku}`);
+  console.log(`✓ create parent+variant ${sku}`);
 
   const { res: listRes, json: listJson } = await api(
     token,
     `/api/admin/catalog/lens-products?q=${encodeURIComponent(sku)}`
   );
   assert(listRes.ok, `list ${listRes.status}`);
-  assert(listJson.items.some((p) => p.id === productId), "created product not in list");
+  const flatHit =
+    listJson.items?.some((p) => p.id === productId || p.productId === productId) ||
+    listJson.groups?.some((g) => g.id === productId);
+  assert(flatHit, "created product not in list");
   console.log("✓ list contains product");
 
   const { res: getRes, json: getJson } = await api(
@@ -183,7 +200,7 @@ async function main() {
     `/api/admin/catalog/lens-products/${productId}`
   );
   assert(getRes.ok, `get ${getRes.status}`);
-  assert(getJson.product.skuCode === sku, "sku mismatch");
+  assert(getJson.product.variants?.some((v) => v.skuCode === sku), "sku mismatch");
   console.log("✓ get product detail");
 
   // cleanup

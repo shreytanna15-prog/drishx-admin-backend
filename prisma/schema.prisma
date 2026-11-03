@@ -1345,14 +1345,14 @@ model LensIndex {
 }
 
 model LensCoating {
-  id        String        @id @default(cuid())
-  code      String        @unique
+  id        String   @id @default(cuid())
+  code      String   @unique
   name      String
-  isActive  Boolean       @default(true)
-  sortOrder Int           @default(0)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  products  LensProduct[]
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  /// RC-04: coating is not product identity; master kept for Attributes UI only.
 
   @@index([isActive, sortOrder])
 }
@@ -1373,16 +1373,16 @@ model LensColor {
 /// RC-03: power-range attribute master (SPH/CYL bounds picked from stepped selects).
 /// Display label is derived (`-6.00/+2.00`); not stored.
 model LensPowerRange {
-  id        String        @id @default(cuid())
-  sphMin    Decimal       @db.Decimal(6, 2)
-  sphMax    Decimal       @db.Decimal(6, 2)
-  cylMin    Decimal       @db.Decimal(6, 2)
-  cylMax    Decimal       @db.Decimal(6, 2)
-  isActive  Boolean       @default(true)
-  sortOrder Int           @default(0)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  products  LensProduct[]
+  id       String               @id @default(cuid())
+  sphMin   Decimal              @db.Decimal(6, 2)
+  sphMax   Decimal              @db.Decimal(6, 2)
+  cylMin   Decimal              @db.Decimal(6, 2)
+  cylMax   Decimal              @db.Decimal(6, 2)
+  isActive Boolean              @default(true)
+  sortOrder Int                 @default(0)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  variants  LensProductVariant[]
 
   @@unique([sphMin, sphMax, cylMin, cylMax])
   @@index([isActive, sortOrder])
@@ -1400,46 +1400,60 @@ model LensBaseMaterialLink {
   @@index([materialId])
 }
 
-/// Catalog SKU master: attributes + power range. Matrix cells are UI-only in this slice.
+/// RC-04 parent: attribute combination only (no sellable SKU). Variants hold SKU/name/price.
 model LensProduct {
-  id           String          @id @default(cuid())
-  skuCode      String          @unique
-  name         String
-  familyId     String
-  baseId       String
-  /// RC-03: optional — omitted from SKU/display when absent.
-  materialId   String?
-  indexId      String?
-  coatingId    String?
-  colorId      String?
-  /// RC-03: selected power-range master. Nullable in DB only so the migration applies
-  /// without a data migration; the service requires it on create. sph/cyl columns below
-  /// are copied from the master on write.
-  powerRangeId String?
-  rangeType    String          @default("NORMAL")
-  sphMin       Decimal
-  sphMax       Decimal
-  cylMin       Decimal
-  cylMax       Decimal
+  id         String               @id @default(cuid())
+  /// Internal base code without power segment (not shown in Admin UI).
+  baseCode   String               @unique
+  familyId   String
+  baseId     String
+  /// Optional — omitted from SKU/name when absent.
+  materialId String?
+  indexId    String
+  colorId    String
+  isActive   Boolean              @default(true)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  family     LensFamily           @relation(fields: [familyId], references: [id])
+  base       LensBase             @relation(fields: [baseId], references: [id])
+  material   LensMaterial?        @relation(fields: [materialId], references: [id])
+  index      LensIndex            @relation(fields: [indexId], references: [id])
+  color      LensColor            @relation(fields: [colorId], references: [id])
+  variants   LensProductVariant[]
+
+  @@unique([familyId, baseId, materialId, indexId, colorId])
+  @@index([familyId, isActive])
+  @@index([baseId])
+  @@index([materialId])
+  @@index([isActive, updatedAt])
+}
+
+/// RC-04 sellable unit: parent + one power-range master. Own SKU, name, price, matrix.
+model LensProductVariant {
+  id           String         @id @default(cuid())
+  productId    String
+  powerRangeId String
+  skuCode      String         @unique
+  name         String         @unique
+  rangeType    String         @default("NORMAL")
+  /// Copied from power-range master for matrix UI.
+  sphMin       Decimal        @db.Decimal(6, 2)
+  sphMax       Decimal        @db.Decimal(6, 2)
+  cylMin       Decimal        @db.Decimal(6, 2)
+  cylMax       Decimal        @db.Decimal(6, 2)
   addMin       Decimal?
   addMax       Decimal?
   axis         Int?
   eye          String?
   defaultPrice Decimal?
-  isActive     Boolean         @default(true)
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  family       LensFamily      @relation(fields: [familyId], references: [id])
-  base         LensBase        @relation(fields: [baseId], references: [id])
-  material     LensMaterial?   @relation(fields: [materialId], references: [id])
-  index        LensIndex?      @relation(fields: [indexId], references: [id])
-  coating      LensCoating?    @relation(fields: [coatingId], references: [id])
-  color        LensColor?      @relation(fields: [colorId], references: [id])
-  powerRange   LensPowerRange? @relation(fields: [powerRangeId], references: [id])
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  product      LensProduct    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  powerRange   LensPowerRange @relation(fields: [powerRangeId], references: [id])
 
-  @@index([familyId, isActive])
-  @@index([baseId])
-  @@index([materialId])
+  @@unique([productId, powerRangeId])
+  @@index([productId, isActive])
   @@index([powerRangeId])
   @@index([isActive, updatedAt])
 }

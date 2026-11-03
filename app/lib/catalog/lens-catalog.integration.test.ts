@@ -44,7 +44,7 @@ async function ensureRange(b: {
 describe("lens catalog integration", { skip: !RUN }, () => {
   before(async () => {
     const { prisma } = await import("@/app/lib/prisma");
-    await prisma.lensProduct.deleteMany({
+    await prisma.lensProductVariant.deleteMany({
       where: { skuCode: { startsWith: "E2E-" } },
     });
     await prisma.lensCoating.deleteMany({
@@ -112,7 +112,7 @@ describe("lens catalog integration", { skip: !RUN }, () => {
     assert.ok(!activeAfter.some((c) => c.id === created.id));
   });
 
-  it("creates LensProduct with compatible base/material and rejects bad material", async () => {
+  it("creates parent+variant with compatible base/material and rejects bad material", async () => {
     const { prisma } = await import("@/app/lib/prisma");
     const {
       createLensProduct,
@@ -127,15 +127,16 @@ describe("lens catalog integration", { skip: !RUN }, () => {
     });
     assert.ok(admin);
 
-    const [family, baseHc, materialPlain, materialPoly, index] =
+    const [family, baseHc, materialPlain, materialPoly, index, color] =
       await Promise.all([
         prisma.lensFamily.findUnique({ where: { code: "SV" } }),
         prisma.lensBase.findUnique({ where: { code: "HC" } }),
         prisma.lensMaterial.findUnique({ where: { code: "PLAIN" } }),
         prisma.lensMaterial.findUnique({ where: { code: "POLY" } }),
         prisma.lensIndex.findUnique({ where: { code: "1.56" } }),
+        prisma.lensColor.findFirst({ where: { isActive: true } }),
       ]);
-    assert.ok(family && baseHc && materialPlain && materialPoly && index);
+    assert.ok(family && baseHc && materialPlain && materialPoly && index && color);
 
     const smallRange = await ensureRange({
       sphMin: 0,
@@ -147,12 +148,12 @@ describe("lens catalog integration", { skip: !RUN }, () => {
     await assert.rejects(
       () =>
         createLensProduct({
-          name: "Should fail POLY under HC",
           familyId: family.id,
           baseId: baseHc.id,
           materialId: materialPoly.id,
           indexId: index.id,
-          powerRangeId: smallRange.id,
+          colorId: color.id,
+          powerRangeIds: [smallRange.id],
           actorUserId: admin.id,
         }),
       (err: unknown) =>
@@ -163,7 +164,17 @@ describe("lens catalog integration", { skip: !RUN }, () => {
     const { buildLensProductSkuCode } = await import(
       "@/app/lib/catalog/lens-product-sku"
     );
-    // Unique band per run so duplicate-combo guard does not collide
+    // Isolate from leftover browser/e2e parents with the same attrs.
+    await prisma.lensProduct.deleteMany({
+      where: {
+        familyId: family.id,
+        baseId: baseHc.id,
+        materialId: materialPlain.id,
+        indexId: index.id,
+        colorId: color.id,
+      },
+    });
+
     const sphMax = 0.25 + (RUN_TAG % 10) * 0.25;
     const range = await ensureRange({
       sphMin: 0,
@@ -172,42 +183,47 @@ describe("lens catalog integration", { skip: !RUN }, () => {
       cylMax: 0.5,
     });
     const product = await createLensProduct({
-      name: "E2E HC Plain SV",
       familyId: family.id,
       baseId: baseHc.id,
       materialId: materialPlain.id,
       indexId: index.id,
-      powerRangeId: range.id,
+      colorId: color.id,
+      powerRangeIds: [range.id],
       actorUserId: admin.id,
     });
     createdProductIds.push(product.id);
-    assert.equal(product.powerRangeId, range.id);
+    assert.equal(product.variants.length, 1);
+    assert.equal(product.variants[0].powerRangeId, range.id);
 
     const expectedSku = buildLensProductSkuCode({
       familyCode: "SV",
       baseCode: "HC",
       materialCode: "PLAIN",
       indexCode: index.code,
+      colorCode: color.code,
       sphMin: 0,
       sphMax,
       cylMin: 0,
       cylMax: 0.5,
     });
-    assert.equal(product.skuCode, expectedSku);
+    assert.equal(product.variants[0].skuCode, expectedSku);
     assert.match(product.attributeSummary, /SV/);
     assert.match(product.attributeSummary, /HC/);
+    // CLIENT-PLAN name uses color display name, not SKU token alone.
+    assert.match(product.variants[0].name, new RegExp(color.name, "i"));
 
     const fetched = await getLensProduct(product.id);
     assert.equal(fetched.id, product.id);
-    assert.equal(fetched.skuCode, expectedSku);
+    assert.equal(fetched.variants[0].skuCode, expectedSku);
 
+    const v = fetched.variants[0];
     const cells =
-      steppedRange(fetched.sphMin, fetched.sphMax).length *
-      steppedRange(fetched.cylMin, fetched.cylMax).length;
+      steppedRange(v.sphMin, v.sphMax).length *
+      steppedRange(v.cylMin, v.cylMax).length;
     assert.ok(cells >= 3, `expected matrix cells, got ${cells}`);
   });
 
-  it("rejects duplicate attribute combo + range", async () => {
+  it("rejects duplicate parent+range; second range adds another variant", async () => {
     const { prisma } = await import("@/app/lib/prisma");
     const {
       createLensProduct,
@@ -219,23 +235,25 @@ describe("lens catalog integration", { skip: !RUN }, () => {
       select: { id: true },
     });
     assert.ok(admin);
-    const [family, base, material] = await Promise.all([
+    const [family, base, material, index, color] = await Promise.all([
       prisma.lensFamily.findUnique({ where: { code: "SV" } }),
       prisma.lensBase.findUnique({ where: { code: "BRC" } }),
       prisma.lensMaterial.findUnique({ where: { code: "PLAIN" } }),
+      prisma.lensIndex.findUnique({ where: { code: "1.56" } }),
+      prisma.lensColor.findFirst({ where: { isActive: true } }),
     ]);
-    assert.ok(family && base && material);
+    assert.ok(family && base && material && index && color);
 
-    // Unique band per run
     const sphMin = -6 - (RUN_TAG % 5);
     const sphMax = sphMin + 2;
     const range = await ensureRange({ sphMin, sphMax, cylMin: -2, cylMax: 0 });
     const first = await createLensProduct({
-      name: "Dup A",
       familyId: family.id,
       baseId: base.id,
       materialId: material.id,
-      powerRangeId: range.id,
+      indexId: index.id,
+      colorId: color.id,
+      powerRangeIds: [range.id],
       actorUserId: admin.id,
     });
     createdProductIds.push(first.id);
@@ -243,19 +261,19 @@ describe("lens catalog integration", { skip: !RUN }, () => {
     await assert.rejects(
       () =>
         createLensProduct({
-          name: "Dup B",
           familyId: family.id,
           baseId: base.id,
           materialId: material.id,
-          powerRangeId: range.id,
+          indexId: index.id,
+          colorId: color.id,
+          powerRangeIds: [range.id],
           actorUserId: admin.id,
         }),
       (err: unknown) =>
         err instanceof LensProductServiceError &&
-        err.code === "DUPLICATE_COMBO_RANGE"
+        err.code === "DUPLICATE_VARIANT"
     );
 
-    // Same attrs + a different power range is a different product / SKU.
     const widerRange = await ensureRange({
       sphMin,
       sphMax: sphMax + 2,
@@ -263,18 +281,21 @@ describe("lens catalog integration", { skip: !RUN }, () => {
       cylMax: 0,
     });
     const second = await createLensProduct({
-      name: "Dup C (wider range)",
       familyId: family.id,
       baseId: base.id,
       materialId: material.id,
-      powerRangeId: widerRange.id,
+      indexId: index.id,
+      colorId: color.id,
+      powerRangeIds: [widerRange.id],
       actorUserId: admin.id,
     });
-    createdProductIds.push(second.id);
-    assert.notEqual(second.skuCode, first.skuCode);
+    assert.equal(second.id, first.id);
+    assert.equal(second.variants.length, 2);
+    const skus = second.variants.map((v) => v.skuCode);
+    assert.equal(new Set(skus).size, 2);
   });
 
-  it("allows product without material and omits it from the SKU", async () => {
+  it("allows parent without material and omits it from variant SKU", async () => {
     const { prisma } = await import("@/app/lib/prisma");
     const { createLensProduct } = await import(
       "@/app/lib/catalog/lens-product-service"
@@ -284,11 +305,13 @@ describe("lens catalog integration", { skip: !RUN }, () => {
       select: { id: true },
     });
     assert.ok(admin);
-    const [family, base] = await Promise.all([
+    const [family, base, index, color] = await Promise.all([
       prisma.lensFamily.findUnique({ where: { code: "SV" } }),
       prisma.lensBase.findUnique({ where: { code: "BRC" } }),
+      prisma.lensIndex.findUnique({ where: { code: "1.56" } }),
+      prisma.lensColor.findFirst({ where: { isActive: true } }),
     ]);
-    assert.ok(family && base);
+    assert.ok(family && base && index && color);
 
     const sphMin = -8 - (RUN_TAG % 5);
     const range = await ensureRange({
@@ -298,17 +321,18 @@ describe("lens catalog integration", { skip: !RUN }, () => {
       cylMax: 0,
     });
     const product = await createLensProduct({
-      name: "E2E no material",
       familyId: family.id,
       baseId: base.id,
       materialId: null,
-      powerRangeId: range.id,
+      indexId: index.id,
+      colorId: color.id,
+      powerRangeIds: [range.id],
       actorUserId: admin.id,
     });
     createdProductIds.push(product.id);
     assert.equal(product.materialId, null);
     assert.equal(product.material, null);
-    assert.ok(product.skuCode.startsWith("SV-BRC-S"));
+    assert.ok(product.variants[0].skuCode.startsWith("BRC-1P56-SV-"));
   });
 
   it("creates / lists a power range via the service", async () => {
