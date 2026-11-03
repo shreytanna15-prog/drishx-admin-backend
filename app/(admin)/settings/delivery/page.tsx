@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AdminPage } from "@/components/admin-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 
 type DeliveryService = {
@@ -211,12 +212,18 @@ export default function DeliverySettingsPage() {
             </div>
             <div>
               <label className={labelClass}>Service type</label>
-              <select className={inputClass} value={form.serviceType} onChange={(e) => set("serviceType", e.target.value)}>
-                <option value="LAND">LAND</option>
-                <option value="AIR">AIR</option>
-                <option value="SURFACE">SURFACE</option>
-                <option value="PICKUP">PICKUP</option>
-              </select>
+              <AdminSelect
+                value={form.serviceType}
+                onValueChange={(v) => set("serviceType", v)}
+                options={[
+                  { value: "LAND", label: "LAND" },
+                  { value: "AIR", label: "AIR" },
+                  { value: "SURFACE", label: "SURFACE" },
+                  { value: "PICKUP", label: "PICKUP" },
+                ]}
+                placeholder="Service type"
+                triggerClassName={inputClass}
+              />
             </div>
             <div>
               <label className={labelClass}>ETA text</label>
@@ -232,11 +239,17 @@ export default function DeliverySettingsPage() {
             </div>
             <div>
               <label className={labelClass}>Weight rounding</label>
-              <select className={inputClass} value={form.weightRounding} onChange={(e) => set("weightRounding", e.target.value)}>
-                <option value="NEXT_1KG">Round up to next kg</option>
-                <option value="NEXT_0_5KG">Round to 0.5 kg</option>
-                <option value="ACTUAL">Actual weight</option>
-              </select>
+              <AdminSelect
+                value={form.weightRounding}
+                onValueChange={(v) => set("weightRounding", v)}
+                options={[
+                  { value: "NEXT_1KG", label: "Round up to next kg" },
+                  { value: "NEXT_0_5KG", label: "Round to 0.5 kg" },
+                  { value: "ACTUAL", label: "Actual weight" },
+                ]}
+                placeholder="Weight rounding"
+                triggerClassName={inputClass}
+              />
             </div>
             <div>
               <label className={labelClass}>Minimum chargeable weight (kg)</label>
@@ -244,10 +257,16 @@ export default function DeliverySettingsPage() {
             </div>
             <div>
               <label className={labelClass}>Billing method</label>
-              <select className={inputClass} value={form.billingMethod} onChange={(e) => set("billingMethod", e.target.value)}>
-                <option value="PER_KG">Per kg</option>
-                <option value="FLAT">Flat (e.g. free pickup)</option>
-              </select>
+              <AdminSelect
+                value={form.billingMethod}
+                onValueChange={(v) => set("billingMethod", v)}
+                options={[
+                  { value: "PER_KG", label: "Per kg" },
+                  { value: "FLAT", label: "Flat (e.g. free pickup)" },
+                ]}
+                placeholder="Billing method"
+                triggerClassName={inputClass}
+              />
             </div>
             <div>
               <label className={labelClass}>Flat charge (₹, if FLAT)</label>

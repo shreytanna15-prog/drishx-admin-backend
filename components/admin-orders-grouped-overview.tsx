@@ -7,6 +7,7 @@ import { LayoutGrid, List } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import {
   ListSkeleton,
@@ -47,9 +48,6 @@ import {
   useProgressiveList,
 } from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
-
-const selectClass =
-  "h-10 rounded-lg border border-(--brand-card-border) bg-(--brand-card) px-3 text-sm text-(--brand-text) [&>option]:bg-(--brand-card) [&>option]:text-(--brand-text)";
 
 type GroupMode = "date" | "customer";
 
@@ -267,6 +265,47 @@ export function AdminOrdersGroupedOverview() {
     return sum + (Number.isFinite(n) ? n : 0);
   }, 0);
 
+  const statusFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All statuses" },
+      ...ORDER_STATUS_FILTERS.map((s) => ({
+        value: s,
+        label: formatStatus(s),
+      })),
+    ],
+    []
+  );
+
+  const assigneeFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All assignees" },
+      { value: "__unassigned__", label: "Unassigned" },
+      ...employees.map((emp) => ({
+        value: emp.id,
+        label: emp.name?.trim() || emp.email,
+      })),
+    ],
+    [employees]
+  );
+
+  const groupSortOptions = useMemo(
+    () =>
+      ORDER_GROUP_SORT_OPTIONS.map((opt) => ({
+        value: opt.id,
+        label: opt.label,
+      })),
+    []
+  );
+
+  const lineSortOptions = useMemo(
+    () =>
+      ORDER_LINE_SORT_OPTIONS.map((opt) => ({
+        value: opt.id,
+        label: opt.label,
+      })),
+    []
+  );
+
   return (
     <>
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -323,54 +362,47 @@ export function AdminOrdersGroupedOverview() {
       </div>
 
       <div className="mb-4 grid gap-2 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        <select
-          className={selectClass}
+        <AdminSelect
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
+          onValueChange={setStatus}
+          options={statusFilterOptions}
+          placeholder="All statuses"
+          size="sm"
           aria-label="Filter by status"
-        >
-          <option value="">All statuses</option>
-          {ORDER_STATUS_FILTERS.map((s) => (
-            <option key={s} value={s}>
-              {formatStatus(s)}
-            </option>
-          ))}
-        </select>
-        <select
-          className={selectClass}
+        />
+        <AdminSelect
           value={lineType}
-          onChange={(e) => setLineType(e.target.value)}
+          onValueChange={setLineType}
+          options={[
+            { value: "", label: "All line types" },
+            { value: "RETAIL", label: "Retail" },
+            { value: "WHOLESALE", label: "Wholesale" },
+          ]}
+          placeholder="All line types"
+          size="sm"
           aria-label="Filter by line type"
-        >
-          <option value="">All line types</option>
-          <option value="RETAIL">Retail</option>
-          <option value="WHOLESALE">Wholesale</option>
-        </select>
-        <select
-          className={selectClass}
+        />
+        <AdminSelect
           value={orderKind}
-          onChange={(e) => setOrderKind(e.target.value)}
+          onValueChange={setOrderKind}
+          options={[
+            { value: "", label: "All kinds" },
+            { value: "RETAIL", label: "Catalog retail" },
+            { value: "WHOLESALE", label: "Wholesale" },
+            { value: "COLOR", label: "Color lens" },
+          ]}
+          placeholder="All kinds"
+          size="sm"
           aria-label="Filter by order kind"
-        >
-          <option value="">All kinds</option>
-          <option value="RETAIL">Catalog retail</option>
-          <option value="WHOLESALE">Wholesale</option>
-          <option value="COLOR">Color lens</option>
-        </select>
-        <select
-          className={selectClass}
+        />
+        <AdminSelect
           value={assigneeId}
-          onChange={(e) => setAssigneeId(e.target.value)}
+          onValueChange={setAssigneeId}
+          options={assigneeFilterOptions}
+          placeholder="All assignees"
+          size="sm"
           aria-label="Filter by assignee"
-        >
-          <option value="">All assignees</option>
-          <option value="__unassigned__">Unassigned</option>
-          {employees.map((emp) => (
-            <option key={emp.id} value={emp.id}>
-              {emp.name?.trim() || emp.email}
-            </option>
-          ))}
-        </select>
+        />
         <Input
           type="date"
           value={dateFrom}
@@ -385,30 +417,22 @@ export function AdminOrdersGroupedOverview() {
           className="h-10 border-(--brand-input-border) bg-(--brand-input-bg)"
           aria-label="To date"
         />
-        <select
-          className={selectClass}
+        <AdminSelect
           value={groupSort}
-          onChange={(e) => setGroupSort(e.target.value as OrderGroupSort)}
+          onValueChange={(v) => setGroupSort(v as OrderGroupSort)}
+          options={groupSortOptions}
+          placeholder="Sort groups"
+          size="sm"
           aria-label="Sort groups"
-        >
-          {ORDER_GROUP_SORT_OPTIONS.map((opt) => (
-            <option key={opt.id} value={opt.id}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <select
-          className={selectClass}
+        />
+        <AdminSelect
           value={lineSort}
-          onChange={(e) => setLineSort(e.target.value as OrderLineSort)}
+          onValueChange={(v) => setLineSort(v as OrderLineSort)}
+          options={lineSortOptions}
+          placeholder="Sort lines inside groups"
+          size="sm"
           aria-label="Sort lines inside groups"
-        >
-          {ORDER_LINE_SORT_OPTIONS.map((opt) => (
-            <option key={opt.id} value={opt.id}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        />
       </div>
 
       {error ? (

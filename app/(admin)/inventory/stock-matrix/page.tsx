@@ -18,6 +18,7 @@ import { AdminConfirmDialog } from "@/components/admin-confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import {
   cellKey,
@@ -339,11 +340,9 @@ export default function StockMatrixPage() {
       <div className="mb-4 grid gap-3 rounded-xl border border-(--brand-card-border) bg-(--brand-card) p-3 sm:grid-cols-2 lg:grid-cols-5">
         <label className="space-y-1 text-xs text-(--brand-text-muted)">
           <span>Category</span>
-          <select
-            className={SELECT_CLASS}
+          <AdminSelect
             value={category}
-            onChange={(e) => {
-              const value = e.target.value;
+            onValueChange={(value) => {
               changeFilter(() => {
                 setCategory(value);
                 setBrand("");
@@ -351,69 +350,70 @@ export default function StockMatrixPage() {
                 setCoating("");
               });
             }}
-          >
-            <option value="">All categories</option>
-            {options?.categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "All categories" },
+              ...(options?.categories.map((c) => ({ value: c, label: c })) ??
+                []),
+            ]}
+            placeholder="All categories"
+            size="sm"
+            triggerClassName={SELECT_CLASS}
+          />
         </label>
         <label className="space-y-1 text-xs text-(--brand-text-muted)">
           <span>Product / brand</span>
-          <select
-            className={SELECT_CLASS}
+          <AdminSelect
             value={brand}
-            onChange={(e) => {
-              const value = e.target.value;
+            onValueChange={(value) => {
               changeFilter(() => setBrand(value));
             }}
-          >
-            <option value="">All products</option>
-            {options?.brands.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "All products" },
+              ...(options?.brands.map((b) => ({ value: b, label: b })) ?? []),
+            ]}
+            placeholder="All products"
+            size="sm"
+            triggerClassName={SELECT_CLASS}
+          />
         </label>
         <label className="space-y-1 text-xs text-(--brand-text-muted)">
           <span>Index</span>
-          <select
-            className={SELECT_CLASS}
+          <AdminSelect
             value={index}
             disabled={!options?.indexes.length}
-            onChange={(e) => {
-              const value = e.target.value;
+            onValueChange={(value) => {
               changeFilter(() => setIndex(value));
             }}
-          >
-            <option value="">{options?.indexes.length ? "All indexes" : "Not applicable"}</option>
-            {options?.indexes.map((i) => (
-              <option key={i} value={i}>
-                {i}
-              </option>
-            ))}
-          </select>
+            options={[
+              {
+                value: "",
+                label: options?.indexes.length
+                  ? "All indexes"
+                  : "Not applicable",
+              },
+              ...(options?.indexes.map((i) => ({ value: i, label: i })) ?? []),
+            ]}
+            placeholder="All indexes"
+            size="sm"
+            triggerClassName={SELECT_CLASS}
+          />
         </label>
         <label className="space-y-1 text-xs text-(--brand-text-muted)">
           <span>Coating</span>
-          <select
-            className={SELECT_CLASS}
+          <AdminSelect
             value={coating}
-            onChange={(e) => {
-              const value = e.target.value;
+            onValueChange={(value) => {
               changeFilter(() => setCoating(value));
             }}
-          >
-            <option value="">All coatings</option>
-            {options?.coatings.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "All coatings" },
+              ...(options?.coatings.map((c) => ({ value: c, label: c })) ??
+                []),
+            ]}
+            placeholder="All coatings"
+            size="sm"
+            triggerClassName={SELECT_CLASS}
+          />
         </label>
         <label className="space-y-1 text-xs text-(--brand-text-muted)">
           <span>Search</span>

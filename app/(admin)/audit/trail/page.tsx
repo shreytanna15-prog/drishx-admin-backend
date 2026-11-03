@@ -123,9 +123,7 @@ export default function AuditTrailPage() {
       {loading ? (
         <TableSkeleton compact columns={6} rows={8} />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4">
-          <AuditTrailTable items={items} />
-        </div>
+        <AuditTrailTable items={items} />
       )}
 
       <div className="mt-4 flex items-center gap-3">

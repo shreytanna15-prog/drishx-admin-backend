@@ -10,6 +10,7 @@ import {
   formatAuditDate,
   type SystemErrorRow,
 } from "@/app/lib/admin-audit";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -58,7 +59,7 @@ export default function AuditErrorsPage() {
       {loading ? (
         <TableSkeleton compact columns={5} rows={8} />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4">
+        <AdminTable className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="border-(--brand-card-border) hover:bg-transparent">
@@ -85,7 +86,7 @@ export default function AuditErrorsPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </AdminTable>
       )}
     </AdminPage>
   );

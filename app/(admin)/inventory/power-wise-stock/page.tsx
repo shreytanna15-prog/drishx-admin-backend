@@ -7,6 +7,8 @@ import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -393,7 +395,7 @@ export default function PowerWiseStockPage() {
       {loading ? (
         <TableSkeleton compact columns={9} rows={8} />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+        <AdminTable>
           <Table>
             <TableHeader>
               <TableRow className="border-(--brand-card-border) hover:bg-transparent">
@@ -440,7 +442,7 @@ export default function PowerWiseStockPage() {
               )}
             </TableBody>
           </Table>
-        </div>
+        </AdminTable>
       )}
     </AdminPage>
   );
@@ -550,19 +552,21 @@ function RuleRow({
         </label>
       </TableCell>
       <TableCell>
-        <select
+        <AdminSelect
           value={row.draft.preferredSupplierId}
-          onChange={(e) => onChange({ preferredSupplierId: e.target.value })}
+          onValueChange={(v) => onChange({ preferredSupplierId: v })}
           disabled={!canEdit}
-          className="h-9 rounded-lg border border-(--brand-input-border) bg-(--brand-input-bg) px-2 text-sm text-(--brand-text)"
-        >
-          <option value="">—</option>
-          {suppliers.map((supplier) => (
-            <option key={supplier.id} value={supplier.id}>
-              {supplier.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: "", label: "—" },
+            ...suppliers.map((supplier) => ({
+              value: supplier.id,
+              label: supplier.name,
+            })),
+          ]}
+          placeholder="—"
+          size="sm"
+          triggerClassName="h-9 min-w-[8rem] rounded-lg px-2"
+        />
       </TableCell>
       <TableCell>
         <NumInput

@@ -9,6 +9,7 @@ import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 
 type Supplier = { id: string; name: string; gstin: string | null; state: string | null };
 type Bill = {
@@ -215,17 +216,12 @@ export default function PurchasesPage() {
           className="space-y-3 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4"
         >
           <p className="text-sm font-semibold">Post purchase bill</p>
-          <select
-            className="w-full rounded-md border border-(--brand-card-border) bg-transparent px-3 py-2 text-sm"
+          <AdminSelect
             value={supplierId}
-            onChange={(e) => setSupplierId(e.target.value)}
-          >
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+            onValueChange={setSupplierId}
+            options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+            placeholder="Select supplier"
+          />
           <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
           <div className="flex gap-2">
             <Input value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Qty" />

@@ -28,6 +28,7 @@ import {
   isOrderTrackingStatus,
 } from "@/app/lib/order-status-transitions";
 import { CardGridSkeleton } from "@/components/admin-skeletons";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -434,11 +435,14 @@ export function AdminDashboard() {
             </article>
           </section>
 
-          <section className="admin-dash-table-wrap">
-            <div className="admin-dash-table-head">
-              <h2 className="admin-dash-panel-title">Recent orders</h2>
-              <p className="admin-dash-panel-copy">Latest eight across the company</p>
-            </div>
+          <AdminTable
+            toolbar={
+              <div className="w-full">
+                <h2 className="admin-dash-panel-title">Recent orders</h2>
+                <p className="admin-dash-panel-copy">Latest eight across the company</p>
+              </div>
+            }
+          >
             {data.recentOrders.length === 0 ? (
               <p className="admin-dash-empty">No orders yet.</p>
             ) : (
@@ -482,7 +486,7 @@ export function AdminDashboard() {
                 </TableBody>
               </Table>
             )}
-          </section>
+          </AdminTable>
 
           <section>
             <p className="admin-dash-eyebrow" style={{ marginBottom: "0.55rem" }}>

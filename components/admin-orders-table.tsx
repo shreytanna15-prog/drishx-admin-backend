@@ -15,6 +15,8 @@ import {
 } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -56,9 +58,6 @@ import type { AdminEmployee } from "@/app/lib/admin-employees";
 import { useGetOrders } from "@/app/lib/modules/orders/query/use-get-orders";
 import { useInfiniteScrollSentinel } from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
-
-const selectClass =
-  "h-10 rounded-lg border border-(--brand-card-border) bg-(--brand-card) px-3 text-sm text-(--brand-text) [&>option]:bg-(--brand-card) [&>option]:text-(--brand-text)";
 
 const PAGE_SIZE = 30;
 
@@ -303,6 +302,49 @@ function AdminOrdersTableImpl({
     deps: [items.length, page, hasMore, listUi.isPending],
   });
 
+  const statusFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All statuses" },
+      ...ORDER_STATUS_FILTERS.map((s) => ({
+        value: s,
+        label: formatStatus(s),
+      })),
+    ],
+    []
+  );
+
+  const lineTypeFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All line types" },
+      { value: "RETAIL", label: "Retail" },
+      { value: "WHOLESALE", label: "Wholesale" },
+    ],
+    []
+  );
+
+  const orderKindFilterOptions = useMemo(() => {
+    const opts = [
+      { value: "", label: "All kinds" },
+      { value: "RETAIL", label: "Catalog retail" },
+      { value: "WHOLESALE", label: "Wholesale" },
+      ...(hideRxOrderKind ? [] : [{ value: "RX", label: "RX" }]),
+      { value: "COLOR", label: "Color lens" },
+    ];
+    return opts;
+  }, [hideRxOrderKind]);
+
+  const assigneeFilterOptions = useMemo(
+    () => [
+      { value: "", label: "All assignees" },
+      { value: "__unassigned__", label: "Unassigned" },
+      ...employees.map((emp) => ({
+        value: emp.id,
+        label: emp.name?.trim() || emp.email,
+      })),
+    ],
+    [employees]
+  );
+
   return (
     <>
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -331,53 +373,40 @@ function AdminOrdersTableImpl({
 
       {showFilters ? (
         <div className="mb-4 grid gap-2 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <select
-            className={selectClass}
+          <AdminSelect
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="">All statuses</option>
-            {ORDER_STATUS_FILTERS.map((s) => (
-              <option key={s} value={s}>
-                {formatStatus(s)}
-              </option>
-            ))}
-          </select>
-          <select
-            className={selectClass}
+            onValueChange={setStatus}
+            options={statusFilterOptions}
+            placeholder="All statuses"
+            size="sm"
+            aria-label="Filter by status"
+          />
+          <AdminSelect
             value={lineType}
-            onChange={(e) => setLineType(e.target.value)}
-          >
-            <option value="">All line types</option>
-            <option value="RETAIL">Retail</option>
-            <option value="WHOLESALE">Wholesale</option>
-          </select>
+            onValueChange={setLineType}
+            options={lineTypeFilterOptions}
+            placeholder="All line types"
+            size="sm"
+            aria-label="Filter by line type"
+          />
           {hideOrderKindFilter ? null : (
-            <select
-              className={selectClass}
+            <AdminSelect
               value={orderKind}
-              onChange={(e) => setOrderKind(e.target.value)}
-            >
-              <option value="">All kinds</option>
-              <option value="RETAIL">Catalog retail</option>
-              <option value="WHOLESALE">Wholesale</option>
-              {hideRxOrderKind ? null : <option value="RX">RX</option>}
-              <option value="COLOR">Color lens</option>
-            </select>
+              onValueChange={setOrderKind}
+              options={orderKindFilterOptions}
+              placeholder="All kinds"
+              size="sm"
+              aria-label="Filter by order kind"
+            />
           )}
-          <select
-            className={selectClass}
+          <AdminSelect
             value={assigneeId}
-            onChange={(e) => setAssigneeId(e.target.value)}
-          >
-            <option value="">All assignees</option>
-            <option value="__unassigned__">Unassigned</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.name?.trim() || emp.email}
-              </option>
-            ))}
-          </select>
+            onValueChange={setAssigneeId}
+            options={assigneeFilterOptions}
+            placeholder="All assignees"
+            size="sm"
+            aria-label="Filter by assignee"
+          />
           <Input
             type="date"
             value={dateFrom}
@@ -409,12 +438,11 @@ function AdminOrdersTableImpl({
       {listUi.showPendingPlaceholder ? (
         <TableSkeleton compact columns={colSpan} rows={8} />
       ) : (
-        <div
-          className={
-            listUi.showStaleContent
-              ? "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow) opacity-55 transition-opacity"
-              : "overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow) transition-opacity"
-          }
+        <AdminTable
+          className={cn(
+            listUi.showStaleContent && "opacity-55 transition-opacity",
+            listUi.isPending && "transition-opacity"
+          )}
           aria-busy={listUi.isPending || undefined}
         >
           <Table>
@@ -570,7 +598,7 @@ function AdminOrdersTableImpl({
               )}
             </TableBody>
           </Table>
-        </div>
+        </AdminTable>
       )}
     </>
   );

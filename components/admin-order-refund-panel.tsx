@@ -5,6 +5,7 @@ import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import { formatMoney } from "@/app/lib/admin-orders";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 
 const fieldLabelClass =
   "block text-xs font-semibold text-(--brand-label)";
@@ -172,18 +173,15 @@ export function AdminOrderRefundPanel({ orderId }: { orderId: string }) {
             <label htmlFor="refund-mode" className={fieldLabelClass}>
               Mode
             </label>
-            <select
+            <AdminSelect
               id="refund-mode"
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
               value={mode}
-              onChange={(e) => setMode(e.target.value as (typeof MODES)[number])}
-            >
-              {MODES.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => setMode(v as (typeof MODES)[number])}
+              options={MODES.map((m) => ({ value: m, label: m }))}
+              placeholder="Mode"
+              size="sm"
+              triggerClassName="h-9 min-w-0"
+            />
           </div>
           <div className="space-y-1">
             <label htmlFor="refund-paidAt" className={fieldLabelClass}>

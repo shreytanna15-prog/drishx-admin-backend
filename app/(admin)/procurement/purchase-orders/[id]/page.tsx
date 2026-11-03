@@ -22,6 +22,8 @@ import { AdminConfirmDialog } from "@/components/admin-confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -531,7 +533,7 @@ export default function PurchaseOrderDetailPage() {
       ) : null}
 
       {tab === "items" ? (
-        <div className="overflow-x-auto rounded-lg border border-(--brand-card-border)">
+        <AdminTable className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -569,7 +571,7 @@ export default function PurchaseOrderDetailPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </AdminTable>
       ) : null}
 
       {tab === "documents" ? (
@@ -598,7 +600,7 @@ export default function PurchaseOrderDetailPage() {
                 No shipments received yet.
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-(--brand-card-border)">
+              <AdminTable className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -682,7 +684,7 @@ export default function PurchaseOrderDetailPage() {
                     ))}
                   </TableBody>
                 </Table>
-              </div>
+              </AdminTable>
             )}
           </section>
         </div>
@@ -780,13 +782,15 @@ export default function PurchaseOrderDetailPage() {
         </div>
         <label className="block text-sm">
           <span className="text-(--brand-text-muted)">Reason</span>
-          <select className={FIELD_CLASS} value={closeReason} onChange={(e) => setCloseReason(e.target.value)}>
-            {CLOSE_OUTSTANDING_REASONS.map((code) => (
-              <option key={code} value={code}>
-                {closeReasonLabel(code)}
-              </option>
-            ))}
-          </select>
+          <AdminSelect
+            value={closeReason}
+            onValueChange={setCloseReason}
+            options={CLOSE_OUTSTANDING_REASONS.map((code) => ({
+              value: code,
+              label: closeReasonLabel(code),
+            }))}
+            triggerClassName={FIELD_CLASS}
+          />
         </label>
         <label className="block text-sm">
           <span className="text-(--brand-text-muted)">Detail{closeReason === "OTHER" ? " (required)" : " (optional)"}</span>
@@ -826,17 +830,15 @@ export default function PurchaseOrderDetailPage() {
         ) : null}
         <label className="block text-sm">
           <span className="text-(--brand-text-muted)">Sent via</span>
-          <select
-            className={FIELD_CLASS}
+          <AdminSelect
             value={sentChannel}
-            onChange={(e) => setSentChannel(e.target.value as PoSentChannel)}
-          >
-            {PO_SENT_CHANNELS.map((channel) => (
-              <option key={channel} value={channel}>
-                {PO_SENT_CHANNEL_LABELS[channel]}
-              </option>
-            ))}
-          </select>
+            onValueChange={(v) => setSentChannel(v as PoSentChannel)}
+            options={PO_SENT_CHANNELS.map((channel) => ({
+              value: channel,
+              label: PO_SENT_CHANNEL_LABELS[channel],
+            }))}
+            triggerClassName={FIELD_CLASS}
+          />
         </label>
         <label className="block text-sm">
           <span className="text-(--brand-text-muted)">

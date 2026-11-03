@@ -9,6 +9,8 @@ import { AdminConfirmDialog } from "@/components/admin-confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -360,7 +362,7 @@ export default function ReceiveGoodsPage() {
             )}
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-(--brand-card-border)">
+          <AdminTable className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -442,28 +444,30 @@ export default function ReceiveGoodsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <select
-                        className="h-9 rounded-md border border-(--brand-card-border) bg-(--brand-card) px-2 text-sm"
+                      <AdminSelect
                         value={line.actionCode ?? "KEEP_PENDING"}
                         disabled={receipt.status === "CONFIRMED"}
-                        onChange={(e) =>
-                          updateLine(line.id, { actionCode: e.target.value })
+                        onValueChange={(v) =>
+                          updateLine(line.id, { actionCode: v })
                         }
-                      >
-                        <option value="KEEP_PENDING">Keep pending</option>
-                        <option value="MARK_DAMAGED">Mark damaged</option>
-                        <option value="ACCEPT_SHORT">Accept short</option>
-                        <option value="REJECT_EXTRA">Reject excess</option>
-                      </select>
+                        options={[
+                          { value: "KEEP_PENDING", label: "Keep pending" },
+                          { value: "MARK_DAMAGED", label: "Mark damaged" },
+                          { value: "ACCEPT_SHORT", label: "Accept short" },
+                          { value: "REJECT_EXTRA", label: "Reject excess" },
+                        ]}
+                        size="sm"
+                        triggerClassName="h-9 min-w-[9rem] rounded-md px-2"
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </AdminTable>
 
           {receipt.billSummaries.length > 0 ? (
-            <div className="overflow-x-auto rounded-lg border border-(--brand-card-border)">
+            <AdminTable className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -505,12 +509,11 @@ export default function ReceiveGoodsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <select
-                          className="h-9 rounded-md border border-(--brand-card-border) bg-(--brand-card) px-2 text-sm"
+                        <AdminSelect
                           value={row.resolution ?? ""}
                           disabled={row.difference === 0}
                           aria-label={`Resolution for ${row.productLabel}`}
-                          onChange={(e) =>
+                          onValueChange={(v) =>
                             setReceipt((prev) =>
                               prev
                                 ? {
@@ -519,7 +522,7 @@ export default function ReceiveGoodsPage() {
                                       b.id === row.id
                                         ? {
                                             ...b,
-                                            resolution: e.target.value || null,
+                                            resolution: v || null,
                                           }
                                         : b
                                     ),
@@ -527,19 +530,28 @@ export default function ReceiveGoodsPage() {
                                 : prev
                             )
                           }
-                        >
-                          <option value="">Unresolved</option>
-                          <option value="BILL_CORRECTION">Bill correction</option>
-                          <option value="EXCEL_CORRECTION">Excel correction</option>
-                          <option value="ACCEPT_EXCEL">Accept Excel</option>
-                          <option value="KEEP_PENDING">Keep pending</option>
-                        </select>
+                          options={[
+                            { value: "", label: "Unresolved" },
+                            {
+                              value: "BILL_CORRECTION",
+                              label: "Bill correction",
+                            },
+                            {
+                              value: "EXCEL_CORRECTION",
+                              label: "Excel correction",
+                            },
+                            { value: "ACCEPT_EXCEL", label: "Accept Excel" },
+                            { value: "KEEP_PENDING", label: "Keep pending" },
+                          ]}
+                          size="sm"
+                          triggerClassName="h-9 min-w-[9rem] rounded-md px-2"
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            </div>
+            </AdminTable>
           ) : null}
 
           <div className="flex flex-wrap gap-2">

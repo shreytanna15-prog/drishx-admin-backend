@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { AdminCreateReturnPanel } from "@/components/admin-create-return-panel";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import { invalidateListCache } from "@/app/lib/admin-cache";
@@ -21,8 +22,6 @@ import {
 } from "@/app/lib/admin-orders";
 import type { AdminEmployee } from "@/app/lib/admin-employees";
 
-const selectClass =
-  "h-10 w-full rounded-lg border border-(--brand-card-border) bg-(--brand-card) px-3 text-sm text-(--brand-text) [&>option]:bg-(--brand-card) [&>option]:text-(--brand-text)";
 const labelClass = "mb-1 block text-xs font-semibold text-(--brand-label)";
 const textareaClass =
   "min-h-20 w-full rounded-lg border border-(--brand-card-border) bg-transparent px-3 py-2 text-sm text-(--brand-text)";
@@ -50,6 +49,15 @@ export function AdminOrderControlPanel({
     [order.status]
   );
 
+  const statusSelectOptions = useMemo(
+    () =>
+      statusOptions.map((s) => ({
+        value: s,
+        label: formatStatus(s),
+      })),
+    [statusOptions]
+  );
+
   const [nextStatus, setNextStatus] = useState(order.status);
   const [pickedQuantity, setPickedQuantity] = useState(
     String(order.pickedQuantity ?? 0)
@@ -74,6 +82,28 @@ export function AdminOrderControlPanel({
     order.delivery?.actualWeight != null ? String(order.delivery.actualWeight) : ""
   );
   const [weightReason, setWeightReason] = useState("");
+
+  const assigneeSelectOptions = useMemo(
+    () => [
+      { value: "", label: "Unassigned" },
+      ...employees.map((emp) => ({
+        value: emp.id,
+        label: `${emp.name?.trim() || emp.email}${!emp.isActive ? " (inactive)" : ""}`,
+      })),
+    ],
+    [employees]
+  );
+
+  const deliveryServiceOptions = useMemo(
+    () => [
+      { value: "", label: "No service selected" },
+      ...deliveryServices.map((s) => ({
+        value: s.id,
+        label: `${s.serviceName} — ₹${s.customerRate}/kg${s.etaText ? ` · ${s.etaText}` : ""}`,
+      })),
+    ],
+    [deliveryServices]
+  );
 
   const [editQty, setEditQty] = useState(String(order.quantity));
   const [editUnitPrice, setEditUnitPrice] = useState(String(order.unitPrice));
@@ -515,18 +545,13 @@ export function AdminOrderControlPanel({
         <div className="mb-5 grid gap-3 border-b border-(--brand-card-border) pb-5 sm:grid-cols-2">
           <div>
             <label className={labelClass}>Change status</label>
-            <select
-              className={selectClass}
+            <AdminSelect
               value={nextStatus}
-              onChange={(e) => setNextStatus(e.target.value)}
+              onValueChange={setNextStatus}
+              options={statusSelectOptions}
+              placeholder="Select status"
               disabled={!statusOptions.length}
-            >
-              {statusOptions.map((s) => (
-                <option key={s} value={s}>
-                  {formatStatus(s)}
-                </option>
-              ))}
-            </select>
+            />
           </div>
           {nextStatus === "CANCELLED" ? (
             <div>
@@ -587,22 +612,15 @@ export function AdminOrderControlPanel({
       <div className="mb-5 grid gap-3 border-b border-(--brand-card-border) pb-5 sm:grid-cols-[1fr_auto]">
         <div>
           <label className={labelClass}>Reassign employee</label>
-          <select
-            className={selectClass}
+          <AdminSelect
             value={assigneeId}
-            onChange={(e) => setAssigneeId(e.target.value)}
-          >
-            <option value="">Unassigned</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.name?.trim() || emp.email}
-                {!emp.isActive ? " (inactive)" : ""}
-              </option>
-            ))}
-          </select>
+            onValueChange={setAssigneeId}
+            options={assigneeSelectOptions}
+            placeholder="Unassigned"
+          />
           {isAdminHeldWarehouseOrder(order) ? (
             <p className="mt-1.5 text-xs text-(--brand-text-muted)">
-              Assignment alone does not show this RX/photo order to warehouse
+              Assignment alone does not show this RX order to warehouse
               staff. Release to warehouse when ready.
             </p>
           ) : null}
@@ -712,18 +730,12 @@ export function AdminOrderControlPanel({
       <div className="mb-5 grid gap-3 border-b border-(--brand-card-border) pb-5">
         <div>
           <label className={labelClass}>Delivery service</label>
-          <select
-            className={selectClass}
+          <AdminSelect
             value={deliveryServiceId}
-            onChange={(e) => setDeliveryServiceId(e.target.value)}
-          >
-            <option value="">No service selected</option>
-            {deliveryServices.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.serviceName} — ₹{s.customerRate}/kg{s.etaText ? ` · ${s.etaText}` : ""}
-              </option>
-            ))}
-          </select>
+            onValueChange={setDeliveryServiceId}
+            options={deliveryServiceOptions}
+            placeholder="No service selected"
+          />
         </div>
         {order.delivery ? (
           <p className="text-sm text-(--brand-text)">

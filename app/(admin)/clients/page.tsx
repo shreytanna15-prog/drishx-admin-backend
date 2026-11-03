@@ -10,6 +10,8 @@ import { InfiniteScrollSentinel } from "@/components/infinite-scroll-sentinel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -361,7 +363,7 @@ function ClientsPageContent() {
     }
 
     return (
-      <div className="overflow-hidden rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+      <AdminTable>
         <Table>
           <TableHeader>
             <TableRow>
@@ -434,7 +436,7 @@ function ClientsPageContent() {
             ))}
           </TableBody>
         </Table>
-      </div>
+      </AdminTable>
     );
   }
 
@@ -454,7 +456,7 @@ function ClientsPageContent() {
     }
 
     return (
-      <div className="overflow-x-auto rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+      <AdminTable>
         <Table>
           <TableHeader>
             <TableRow>
@@ -539,7 +541,7 @@ function ClientsPageContent() {
             ))}
           </TableBody>
         </Table>
-      </div>
+      </AdminTable>
     );
   }
 
@@ -599,32 +601,36 @@ function ClientsPageContent() {
 
         {tab === "approved" ? (
           <div className="flex flex-wrap gap-2">
-            <select
+            <AdminSelect
               value={accountActionFilter}
-              onChange={(e) => setAccountActionFilter(e.target.value)}
-              className="h-9 rounded-lg border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
+              onValueChange={setAccountActionFilter}
+              size="sm"
               aria-label="Filter by account action"
-            >
-              <option value="">All account actions</option>
-              {ACCOUNT_ACTIONS.map((a) => (
-                <option key={a} value={a}>
-                  {formatAccountAction(a)}
-                </option>
-              ))}
-            </select>
-            <select
+              placeholder="All account actions"
+              triggerClassName="w-[12rem]"
+              options={[
+                { value: "", label: "All account actions" },
+                ...ACCOUNT_ACTIONS.map((a) => ({
+                  value: a,
+                  label: formatAccountAction(a),
+                })),
+              ]}
+            />
+            <AdminSelect
               value={tierCodeFilter}
-              onChange={(e) => setTierCodeFilter(e.target.value)}
-              className="h-9 rounded-lg border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
+              onValueChange={setTierCodeFilter}
+              size="sm"
               aria-label="Filter by pricing tier"
-            >
-              <option value="">All tiers</option>
-              {TIER_CODES.map((code) => (
-                <option key={code} value={code}>
-                  Tier {code}
-                </option>
-              ))}
-            </select>
+              placeholder="All tiers"
+              triggerClassName="w-[10rem]"
+              options={[
+                { value: "", label: "All tiers" },
+                ...TIER_CODES.map((code) => ({
+                  value: code,
+                  label: `Tier ${code}`,
+                })),
+              ]}
+            />
           </div>
         ) : null}
       </div>

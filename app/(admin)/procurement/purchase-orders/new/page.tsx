@@ -17,6 +17,8 @@ import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -499,7 +501,7 @@ function NewPurchaseOrderInner() {
                 : "No queue items match this filter."}
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-(--brand-card-border)">
+            <AdminTable className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -561,7 +563,7 @@ function NewPurchaseOrderInner() {
                   })}
                 </TableBody>
               </Table>
-            </div>
+            </AdminTable>
           )}
 
           <div className="flex flex-wrap justify-end gap-2">
@@ -593,24 +595,29 @@ function NewPurchaseOrderInner() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <label className="block space-y-1.5 text-sm">
               <span className="text-(--brand-text-muted)">Supplier *</span>
-              <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className={SELECT_CLASS}>
-                {!supplierId ? <option value="">Select supplier</option> : null}
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+              <AdminSelect
+                value={supplierId}
+                onValueChange={setSupplierId}
+                options={[
+                  ...(supplierId ? [] : [{ value: "", label: "Select supplier" }]),
+                  ...suppliers.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+                placeholder="Select supplier"
+                triggerClassName={SELECT_CLASS}
+              />
             </label>
             <label className="block space-y-1.5 text-sm">
               <span className="text-(--brand-text-muted)">Warehouse</span>
-              <select value={warehouseCode} onChange={(e) => setWarehouseCode(e.target.value)} className={SELECT_CLASS}>
-                {warehouseCodes.map((code) => (
-                  <option key={code} value={code}>
-                    {code === "MAIN" ? "Main Warehouse" : code}
-                  </option>
-                ))}
-              </select>
+              <AdminSelect
+                value={warehouseCode}
+                onValueChange={setWarehouseCode}
+                options={warehouseCodes.map((code) => ({
+                  value: code,
+                  label: code === "MAIN" ? "Main Warehouse" : code,
+                }))}
+                placeholder="Warehouse"
+                triggerClassName={SELECT_CLASS}
+              />
             </label>
             <label className="block space-y-1.5 text-sm">
               <span className="text-(--brand-text-muted)">Expected delivery</span>
@@ -641,7 +648,7 @@ function NewPurchaseOrderInner() {
               No lines yet. Add items from the reorder queue or import an Excel file.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-(--brand-card-border)">
+            <AdminTable className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -720,7 +727,7 @@ function NewPurchaseOrderInner() {
                   })}
                 </TableBody>
               </Table>
-            </div>
+            </AdminTable>
           )}
 
           <div className="flex flex-col gap-3 rounded-xl border border-(--brand-card-border) bg-(--brand-card) p-4 sm:flex-row sm:items-center sm:justify-between">

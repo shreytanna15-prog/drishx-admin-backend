@@ -25,6 +25,7 @@ import { DetailSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { EntityTimeline } from "@/components/audit/entity-timeline";
 
 function ReturnOrderContextBlock({
@@ -111,15 +112,6 @@ const STOCK_OPTIONS = [
   { value: "SEND_TO_IMPORTER", label: "Send to importer" },
   { value: "SCRAP", label: "Scrap" },
 ] as const;
-
-/** Dark-theme friendly native select (options need solid bg + readable text). */
-const selectClass =
-  "h-10 w-full rounded-lg border border-(--brand-card-border) bg-(--brand-input-bg,#0b0f14) px-3 text-sm text-(--brand-text) [color-scheme:dark]";
-
-const optionStyle = {
-  backgroundColor: "#0f1620",
-  color: "#eaf0fa",
-} as const;
 
 const DECIDABLE_STATUSES = new Set([
   "SUBMITTED",
@@ -487,36 +479,32 @@ export default function ReturnDetailPage() {
                   <span className="text-xs font-semibold text-(--brand-text-muted)">
                     Assign employee (required for approval)
                   </span>
-                  <select
+                  <AdminSelect
                     value={assignedEmployeeId}
-                    onChange={(e) => setAssignedEmployeeId(e.target.value)}
-                    className={selectClass}
-                  >
-                    <option value="" style={optionStyle}>
-                      Select employee…
-                    </option>
-                    {activeEmployees.map((employee) => (
-                      <option key={employee.id} value={employee.id} style={optionStyle}>
-                        {employee.name || employee.email}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setAssignedEmployeeId}
+                    options={[
+                      { value: "", label: "Select employee…" },
+                      ...activeEmployees.map((employee) => ({
+                        value: employee.id,
+                        label: employee.name || employee.email,
+                      })),
+                    ]}
+                    placeholder="Select employee…"
+                  />
                 </label>
                 <label className="block space-y-1">
                   <span className="text-xs font-semibold text-(--brand-text-muted)">
                     Stock disposition
                   </span>
-                  <select
+                  <AdminSelect
                     value={stockDisposition}
-                    onChange={(e) => setStockDisposition(e.target.value)}
-                    className={selectClass}
-                  >
-                    {STOCK_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value} style={optionStyle}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setStockDisposition}
+                    options={STOCK_OPTIONS.map((option) => ({
+                      value: option.value,
+                      label: option.label,
+                    }))}
+                    placeholder="Stock disposition"
+                  />
                 </label>
                 <label className="block space-y-1">
                   <span className="text-xs font-semibold text-(--brand-text-muted)">
@@ -586,20 +574,18 @@ export default function ReturnDetailPage() {
                   <span className="text-xs font-semibold text-(--brand-text-muted)">
                     Employee
                   </span>
-                  <select
+                  <AdminSelect
                     value={reassignEmployeeId}
-                    onChange={(e) => setReassignEmployeeId(e.target.value)}
-                    className={selectClass}
-                  >
-                    <option value="" style={optionStyle}>
-                      Select employee…
-                    </option>
-                    {activeEmployees.map((employee) => (
-                      <option key={employee.id} value={employee.id} style={optionStyle}>
-                        {employee.name || employee.email}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setReassignEmployeeId}
+                    options={[
+                      { value: "", label: "Select employee…" },
+                      ...activeEmployees.map((employee) => ({
+                        value: employee.id,
+                        label: employee.name || employee.email,
+                      })),
+                    ]}
+                    placeholder="Select employee…"
+                  />
                 </label>
                 <Button disabled={submitting} onClick={() => void reassignEmployee()}>
                   {request.assignedEmployee ? "Reassign" : "Assign"}

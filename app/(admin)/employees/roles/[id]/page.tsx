@@ -10,6 +10,7 @@ import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AdminSelect } from "@/components/admin-select";
 import { Input } from "@/components/ui/input";
 
 type Member = {
@@ -311,18 +312,19 @@ export default function StaffRoleDetailPage() {
               Members
             </h2>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <select
+              <AdminSelect
                 value={assignId}
-                onChange={(event) => setAssignId(event.target.value)}
-                className="h-11 flex-1 rounded-xl border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
-              >
-                <option value="">Assign an employee…</option>
-                {unassigned.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.name || employee.email}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setAssignId}
+                options={[
+                  { value: "", label: "Assign an employee…" },
+                  ...unassigned.map((employee) => ({
+                    value: employee.id,
+                    label: employee.name || employee.email,
+                  })),
+                ]}
+                placeholder="Assign an employee…"
+                triggerClassName="h-11 flex-1 rounded-xl min-w-0"
+              />
               <Button
                 type="button"
                 disabled={!assignId || saving}

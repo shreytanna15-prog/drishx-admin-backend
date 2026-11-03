@@ -10,6 +10,7 @@ import {
   formatAuditDate,
   type SecurityEventRow,
 } from "@/app/lib/admin-audit";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -55,7 +56,7 @@ export default function AuditSecurityPage() {
       {loading ? (
         <TableSkeleton compact columns={6} rows={8} />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4">
+        <AdminTable className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="border-(--brand-card-border) hover:bg-transparent">
@@ -82,7 +83,7 @@ export default function AuditSecurityPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </AdminTable>
       )}
     </AdminPage>
   );

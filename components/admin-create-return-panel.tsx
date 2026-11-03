@@ -14,11 +14,9 @@ import {
 } from "@/app/lib/admin-orders";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { cn } from "@/lib/utils";
 
-const selectClass =
-  "h-10 w-full rounded-lg border border-(--brand-card-border) bg-(--brand-input-bg,#0b0f14) px-3 text-sm text-(--brand-text) [color-scheme:dark]";
-const optionStyle = { backgroundColor: "#0f1620", color: "#eaf0fa" } as const;
 const labelClass = "mb-1 block text-xs font-semibold text-(--brand-label)";
 const textareaClass =
   "min-h-20 w-full rounded-lg border border-(--brand-card-border) bg-(--brand-input-bg,#0b0f14) px-3 py-2 text-sm text-(--brand-text)";
@@ -502,20 +500,17 @@ export function AdminCreateReturnPanel({
           <div className="mb-4 grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className={labelClass}>Request type</span>
-              <select
-                className={selectClass}
+              <AdminSelect
                 value={requestType}
-                onChange={(e) =>
-                  setRequestType(e.target.value as "RETURN" | "REPLACEMENT")
+                onValueChange={(v) =>
+                  setRequestType(v as "RETURN" | "REPLACEMENT")
                 }
-              >
-                <option value="RETURN" style={optionStyle}>
-                  Return (credit path)
-                </option>
-                <option value="REPLACEMENT" style={optionStyle}>
-                  Replacement
-                </option>
-              </select>
+                options={[
+                  { value: "RETURN", label: "Return (credit path)" },
+                  { value: "REPLACEMENT", label: "Replacement" },
+                ]}
+                placeholder="Request type"
+              />
             </label>
             <label className="block sm:col-span-2">
               <span className={labelClass}>Notes for customer / internal</span>
@@ -593,21 +588,19 @@ export function AdminCreateReturnPanel({
                       </label>
                       <label className="block sm:col-span-2">
                         <span className={labelClass}>Reason</span>
-                        <select
-                          className={selectClass}
+                        <AdminSelect
                           value={state.reason}
-                          onChange={(e) =>
+                          onValueChange={(v) =>
                             updateItem(order.id, {
-                              reason: e.target.value as ReturnReason,
+                              reason: v as ReturnReason,
                             })
                           }
-                        >
-                          {RETURN_REASONS.map((reason) => (
-                            <option key={reason} value={reason} style={optionStyle}>
-                              {formatStatus(reason)}
-                            </option>
-                          ))}
-                        </select>
+                          options={RETURN_REASONS.map((reason) => ({
+                            value: reason,
+                            label: formatStatus(reason),
+                          }))}
+                          placeholder="Reason"
+                        />
                       </label>
                       {isReplacement ? (
                         <>

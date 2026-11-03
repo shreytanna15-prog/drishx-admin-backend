@@ -7,6 +7,7 @@ import type { AdminEmployee } from "@/app/lib/admin-employees";
 import { AdminModal } from "@/components/admin-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 
 type AddEmployeeModalProps = {
   open: boolean;
@@ -184,18 +185,16 @@ export function AddEmployeeModal({
             <span className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
               Role
             </span>
-            <select
+            <AdminSelect
               value={staffRoleId}
-              onChange={(e) => setStaffRoleId(e.target.value)}
-              className="h-11 w-full rounded-xl border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
-            >
-              <option value="">Full operations (default)</option>
-              {roles.map((role) => (
-                <option key={role.id} value={role.id}>
-                  {role.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={setStaffRoleId}
+              options={[
+                { value: "", label: "Full operations (default)" },
+                ...roles.map((role) => ({ value: role.id, label: role.name })),
+              ]}
+              placeholder="Full operations (default)"
+              triggerClassName="h-11 rounded-xl border-(--brand-input-border) bg-(--brand-input-bg)"
+            />
           </label>
 
           <div className="mt-2 flex gap-2 border-t border-(--brand-card-border) pt-4">

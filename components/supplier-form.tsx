@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import {
   createSupplierRequest,
   SupplierApiError,
@@ -364,19 +365,20 @@ export function SupplierForm({
           </div>
           <div className="space-y-1.5">
             <FieldLabel field="businessEntityType">Business entity</FieldLabel>
-            <select
+            <AdminSelect
               {...fieldProps("businessEntityType")}
               value={form.businessEntityType}
-              onChange={(e) => setField("businessEntityType", e.target.value)}
-              className={selectClass}
-            >
-              <option value="">Not specified</option>
-              {SUPPLIER_ENTITY_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => setField("businessEntityType", v)}
+              options={[
+                { value: "", label: "Not specified" },
+                ...SUPPLIER_ENTITY_TYPES.map((t) => ({
+                  value: t.value,
+                  label: t.label,
+                })),
+              ]}
+              placeholder="Not specified"
+              disabled={submitting}
+            />
             <FieldError field="businessEntityType" error={errorFor("businessEntityType")} />
           </div>
         </div>
@@ -419,24 +421,25 @@ export function SupplierForm({
           </div>
           <div className="space-y-1.5">
             <FieldLabel field="state">State</FieldLabel>
-            <select
+            <AdminSelect
               {...fieldProps("state")}
               value={legacyStateValue ?? findStateByName(form.state)?.name ?? ""}
-              onChange={(e) => setField("state", e.target.value)}
-              className={selectClass}
-            >
-              <option value="">Not specified</option>
-              {legacyStateValue ? (
-                <option value={legacyStateValue}>
-                  {legacyStateValue} (unrecognised — please reselect)
-                </option>
-              ) : null}
-              {INDIAN_STATES.map((s) => (
-                <option key={s.code} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => setField("state", v)}
+              options={[
+                { value: "", label: "Not specified" },
+                ...(legacyStateValue
+                  ? [
+                      {
+                        value: legacyStateValue,
+                        label: `${legacyStateValue} (unrecognised — please reselect)`,
+                      },
+                    ]
+                  : []),
+                ...INDIAN_STATES.map((s) => ({ value: s.name, label: s.name })),
+              ]}
+              placeholder="Not specified"
+              disabled={submitting}
+            />
             <FieldError field="state" error={errorFor("state")} />
           </div>
           <div className="space-y-1.5">

@@ -5,6 +5,7 @@ import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 
 type AlternatePowerSettings = {
@@ -320,22 +321,29 @@ export default function SettingsPage() {
                 <label className="mb-1 block text-xs font-semibold text-(--brand-label)">
                   Timezone
                 </label>
-                <select
+                <AdminSelect
                   value={dispatchCutoff.timezone}
-                  onChange={(e) =>
+                  onValueChange={(timezone) =>
                     setDispatchCutoff({
                       ...dispatchCutoff,
-                      timezone: e.target.value,
+                      timezone,
                     })
                   }
-                  className="h-10 w-full rounded-lg border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
-                >
-                  <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
-                  <option value="Asia/Dubai">Asia/Dubai (GST)</option>
-                  <option value="UTC">UTC</option>
-                  <option value="America/New_York">America/New_York (EST)</option>
-                  <option value="Europe/London">Europe/London (GMT/BST)</option>
-                </select>
+                  options={[
+                    { value: "Asia/Kolkata", label: "Asia/Kolkata (IST)" },
+                    { value: "Asia/Dubai", label: "Asia/Dubai (GST)" },
+                    { value: "UTC", label: "UTC" },
+                    {
+                      value: "America/New_York",
+                      label: "America/New_York (EST)",
+                    },
+                    {
+                      value: "Europe/London",
+                      label: "Europe/London (GMT/BST)",
+                    },
+                  ]}
+                  placeholder="Timezone"
+                />
               </div>
               <div className="sm:col-span-2">
                 <p className="mb-3 text-[11px] text-(--brand-muted)">

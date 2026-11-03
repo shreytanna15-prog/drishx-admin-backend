@@ -29,6 +29,7 @@ import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 
 const AXIS_OPTIONS = [90, 180, 45, 135, -45, -135] as const;
 
@@ -413,26 +414,28 @@ function AddLensForm({
                     : "Choose a managed coating filter chip."
               }
             >
-              <select
+              <AdminSelect
                 id="admin-add-product-coating"
                 value={coating}
-                onChange={(e) => setCoating(e.target.value)}
+                onValueChange={setCoating}
                 disabled={coatingsLoading || coatingOptions.length === 0}
-                className={selectClass}
-              >
-                <option value="">
-                  {coatingsLoading
-                    ? "Loading…"
-                    : coatingOptions.length === 0
-                      ? "No coatings available"
-                      : "Select coating"}
-                </option>
-                {coatingOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  {
+                    value: "",
+                    label: coatingsLoading
+                      ? "Loading…"
+                      : coatingOptions.length === 0
+                        ? "No coatings available"
+                        : "Select coating",
+                  },
+                  ...coatingOptions.map((option) => ({
+                    value: option,
+                    label: option,
+                  })),
+                ]}
+                placeholder="Select coating"
+                triggerClassName={selectClass}
+              />
             </Field>
           </div>
 
@@ -592,55 +595,58 @@ function AddLensForm({
 
                 {isProg ? (
                   <Field id="power-eye" label="Eye">
-                    <select
+                    <AdminSelect
                       id="power-eye"
-                      className={selectClass}
                       value={eye}
-                      onChange={(e) => {
-                        const v = e.target.value;
+                      onValueChange={(v) => {
                         if (!v) return setEye("");
                         setEye(v as Eye);
                       }}
-                    >
-                      <option value="">Select eye</option>
-                      <option value="LEFT">LEFT</option>
-                      <option value="RIGHT">RIGHT</option>
-                    </select>
+                      options={[
+                        { value: "", label: "Select eye" },
+                        { value: "LEFT", label: "LEFT" },
+                        { value: "RIGHT", label: "RIGHT" },
+                      ]}
+                      placeholder="Select eye"
+                      triggerClassName={selectClass}
+                    />
                   </Field>
                 ) : (
                   <Field id="power-axis" label="Axis (optional)">
-                    <select
+                    <AdminSelect
                       id="power-axis"
-                      className={selectClass}
                       value={axis}
-                      onChange={(e) => setAxis(e.target.value)}
-                    >
-                      <option value="">None</option>
-                      {AXIS_OPTIONS.map((a) => (
-                        <option key={a} value={String(a)}>
-                          {a}
-                        </option>
-                      ))}
-                    </select>
+                      onValueChange={setAxis}
+                      options={[
+                        { value: "", label: "None" },
+                        ...AXIS_OPTIONS.map((a) => ({
+                          value: String(a),
+                          label: String(a),
+                        })),
+                      ]}
+                      placeholder="None"
+                      triggerClassName={selectClass}
+                    />
                   </Field>
                 )}
               </div>
 
               {isProg ? (
                 <Field id="power-axis-prog" label="Axis (optional)">
-                  <select
+                  <AdminSelect
                     id="power-axis-prog"
-                    className={selectClass}
                     value={axis}
-                    onChange={(e) => setAxis(e.target.value)}
-                  >
-                    <option value="">None</option>
-                    {AXIS_OPTIONS.map((a) => (
-                      <option key={a} value={String(a)}>
-                        {a}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setAxis}
+                    options={[
+                      { value: "", label: "None" },
+                      ...AXIS_OPTIONS.map((a) => ({
+                        value: String(a),
+                        label: String(a),
+                      })),
+                    ]}
+                    placeholder="None"
+                    triggerClassName={selectClass}
+                  />
                 </Field>
               ) : null}
             </>

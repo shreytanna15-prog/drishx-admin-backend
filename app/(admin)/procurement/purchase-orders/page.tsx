@@ -8,6 +8,8 @@ import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -82,21 +84,21 @@ export default function PurchaseOrdersListPage() {
               aria-label="Search purchase orders"
             />
           </div>
-          <select
+          <AdminSelect
             value={status}
-            onChange={(e) => {
+            onValueChange={(v) => {
               setLoading(true);
-              setStatus(e.target.value);
+              setStatus(v);
             }}
-            className="h-9 rounded-md border border-(--brand-card-border) bg-(--brand-card) px-3 text-sm text-(--brand-text)"
+            options={PO_STATUSES.map((opt) => ({
+              value: opt.value,
+              label: opt.label,
+            }))}
+            placeholder="All statuses"
+            size="sm"
+            triggerClassName="h-9 w-[12rem] min-w-0"
             aria-label="Filter by status"
-          >
-            {PO_STATUSES.map((opt) => (
-              <option key={opt.value || "all"} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+          />
         </div>
         <Button asChild>
           <Link href="/procurement/purchase-orders/new">
@@ -127,7 +129,7 @@ export default function PurchaseOrdersListPage() {
           </Button>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-(--brand-card-border)">
+        <AdminTable className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -173,7 +175,7 @@ export default function PurchaseOrdersListPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </AdminTable>
       )}
     </AdminPage>
   );

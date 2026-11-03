@@ -7,6 +7,7 @@ import {
   type AuditEventRow,
 } from "@/app/lib/admin-audit";
 import { Badge } from "@/components/ui/badge";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -31,7 +32,8 @@ export function AuditTrailTable({ items, showModule = true }: AuditTrailTablePro
   }
 
   return (
-    <Table>
+    <AdminTable className="overflow-x-auto">
+      <Table>
       <TableHeader>
         <TableRow className="border-(--brand-card-border) hover:bg-transparent">
           <TableHead className="text-(--brand-label)">When</TableHead>
@@ -82,6 +84,7 @@ export function AuditTrailTable({ items, showModule = true }: AuditTrailTablePro
           </TableRow>
         ))}
       </TableBody>
-    </Table>
+      </Table>
+    </AdminTable>
   );
 }

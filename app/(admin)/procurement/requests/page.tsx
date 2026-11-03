@@ -7,6 +7,8 @@ import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -174,20 +176,34 @@ export default function ProcurementRequestsPage() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Select value={source} onChange={changeFilter(setSource)} options={PROCUREMENT_SOURCES} />
-        <Select value={status} onChange={changeFilter(setStatus)} options={PROCUREMENT_STATUSES} />
-        <Select value={priority} onChange={changeFilter(setPriority)} options={PROCUREMENT_PRIORITIES} />
-        <select
+        <AdminSelect
+          value={source}
+          onValueChange={changeFilter(setSource)}
+          options={[...PROCUREMENT_SOURCES]}
+          size="sm"
+          triggerClassName="h-10 w-auto min-w-[10rem]"
+        />
+        <AdminSelect
+          value={status}
+          onValueChange={changeFilter(setStatus)}
+          options={[...PROCUREMENT_STATUSES]}
+          size="sm"
+          triggerClassName="h-10 w-auto min-w-[10rem]"
+        />
+        <AdminSelect
+          value={priority}
+          onValueChange={changeFilter(setPriority)}
+          options={[...PROCUREMENT_PRIORITIES]}
+          size="sm"
+          triggerClassName="h-10 w-auto min-w-[10rem]"
+        />
+        <AdminSelect
           value={lensType}
-          onChange={(e) => changeFilter(setLensType)(e.target.value)}
-          className="h-10 rounded-lg border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
-        >
-          {LENS_TYPE_FILTERS.map((f) => (
-            <option key={f.value || "all"} value={f.value}>
-              {f.label}
-            </option>
-          ))}
-        </select>
+          onValueChange={changeFilter(setLensType)}
+          options={[...LENS_TYPE_FILTERS]}
+          size="sm"
+          triggerClassName="h-10 w-auto min-w-[10rem]"
+        />
         <label className="flex items-center gap-2 text-sm text-(--brand-text-muted)">
           <input
             type="checkbox"
@@ -223,7 +239,7 @@ export default function ProcurementRequestsPage() {
       {loading ? (
         <TableSkeleton compact columns={8} rows={8} />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-(--brand-card-border) bg-(--brand-card) shadow-(--brand-card-shadow)">
+        <AdminTable className="overflow-x-auto">
           <Table className="min-w-[64rem]">
             <TableHeader>
               <TableRow className="border-(--brand-card-border) hover:bg-transparent">
@@ -281,7 +297,7 @@ export default function ProcurementRequestsPage() {
               )}
             </TableBody>
           </Table>
-        </div>
+        </AdminTable>
       )}
     </AdminPage>
   );
@@ -395,30 +411,6 @@ function RequestRow({
         )}
       </TableCell>
     </TableRow>
-  );
-}
-
-function Select({
-  value,
-  onChange,
-  options,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  options: ReadonlyArray<{ value: string; label: string }>;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-10 rounded-lg border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
-    >
-      {options.map((option) => (
-        <option key={option.value || "all"} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
   );
 }
 

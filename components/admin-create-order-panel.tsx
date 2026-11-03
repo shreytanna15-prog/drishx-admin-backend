@@ -34,6 +34,7 @@ import {
 } from "@/components/query-list-states";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import { cn } from "@/lib/utils";
 
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -890,37 +891,43 @@ export function AdminCreateOrderPanel() {
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-sm font-semibold text-(--brand-label)">
                 Lens type
-                <select
-                  className="mt-1 h-11 w-full rounded-xl border border-(--brand-card-border) bg-(--brand-card) px-3"
+                <AdminSelect
+                  className="mt-1"
                   value={rx.lensType}
-                  onChange={(e) =>
+                  onValueChange={(v) =>
                     setRx((p) => ({
                       ...p,
-                      lensType: e.target.value as RxDraft["lensType"],
+                      lensType: v as RxDraft["lensType"],
                     }))
                   }
-                >
-                  <option value="single-vision">Single vision</option>
-                  <option value="kryptok">Kryptok</option>
-                  <option value="progressive">Progressive</option>
-                </select>
+                  options={[
+                    { value: "single-vision", label: "Single vision" },
+                    { value: "kryptok", label: "Kryptok" },
+                    { value: "progressive", label: "Progressive" },
+                  ]}
+                  placeholder="Lens type"
+                  triggerClassName="h-11 rounded-xl min-w-0"
+                />
               </label>
               <label className="text-sm font-semibold text-(--brand-label)">
                 Order for
-                <select
-                  className="mt-1 h-11 w-full rounded-xl border border-(--brand-card-border) bg-(--brand-card) px-3"
+                <AdminSelect
+                  className="mt-1"
                   value={rx.orderFor}
-                  onChange={(e) =>
+                  onValueChange={(v) =>
                     setRx((p) => ({
                       ...p,
-                      orderFor: e.target.value as RxDraft["orderFor"],
+                      orderFor: v as RxDraft["orderFor"],
                     }))
                   }
-                >
-                  <option value="both">Both eyes</option>
-                  <option value="right">Right only</option>
-                  <option value="left">Left only</option>
-                </select>
+                  options={[
+                    { value: "both", label: "Both eyes" },
+                    { value: "right", label: "Right only" },
+                    { value: "left", label: "Left only" },
+                  ]}
+                  placeholder="Order for"
+                  triggerClassName="h-11 rounded-xl min-w-0"
+                />
               </label>
             </div>
             {(rx.orderFor === "both" || rx.orderFor === "right") && (
@@ -1175,19 +1182,20 @@ function DeliverySelect({
   return (
     <label className="block text-sm font-semibold text-(--brand-label)">
       Delivery service (optional)
-      <select
-        className="mt-1 h-11 w-full rounded-xl border border-(--brand-card-border) bg-(--brand-card) px-3"
+      <AdminSelect
+        className="mt-1"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">None selected</option>
-        {services.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.courierCompany} · {s.serviceName}
-            {s.etaText ? ` (${s.etaText})` : ""}
-          </option>
-        ))}
-      </select>
+        onValueChange={onChange}
+        options={[
+          { value: "", label: "None selected" },
+          ...services.map((s) => ({
+            value: s.id,
+            label: `${s.courierCompany} · ${s.serviceName}${s.etaText ? ` (${s.etaText})` : ""}`,
+          })),
+        ]}
+        placeholder="None selected"
+        triggerClassName="h-11 rounded-xl min-w-0"
+      />
     </label>
   );
 }

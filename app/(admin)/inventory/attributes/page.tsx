@@ -8,6 +8,7 @@ import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminTable } from "@/components/admin-table";
 import {
   Table,
   TableBody,
@@ -25,14 +26,18 @@ import {
   type LensAttributeType,
 } from "@/app/lib/admin-lens-catalog";
 import { cn } from "@/lib/utils";
+import { PowerRangeTab } from "./power-range-tab";
 
-const TABS: { id: LensAttributeType; label: string }[] = [
+type TabId = LensAttributeType | "power-range";
+
+const TABS: { id: TabId; label: string }[] = [
   { id: "family", label: "Family" },
   { id: "base", label: "Base" },
   { id: "material", label: "Material" },
   { id: "index", label: "Index" },
   { id: "coating", label: "Coating" },
   { id: "color", label: "Color" },
+  { id: "power-range", label: "Power range" },
 ];
 
 const labelClass =
@@ -56,7 +61,10 @@ type FormState = {
 const EMPTY_FORM: FormState = { code: "", name: "", sortOrder: "0", value: "" };
 
 export default function InventoryAttributesPage() {
-  const [tab, setTab] = useState<LensAttributeType>("family");
+  const [tab, setTab] = useState<TabId>("family");
+  const isPowerRange = tab === "power-range";
+  // Name/code list state + handlers only run for the non-power-range tabs.
+  const attrTab: LensAttributeType = tab === "power-range" ? "family" : tab;
   const [items, setItems] = useState<LensAttribute[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -68,10 +76,14 @@ export default function InventoryAttributesPage() {
   const [formError, setFormError] = useState("");
 
   const load = useCallback(async () => {
+    if (isPowerRange) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const res = await fetchLensAttributes(tab);
+      const res = await fetchLensAttributes(attrTab);
       setItems(res.items);
     } catch (err) {
       setError(errorMessage(err, "Failed to load attributes."));
@@ -79,7 +91,7 @@ export default function InventoryAttributesPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, [attrTab, isPowerRange]);
 
   useEffect(() => {
     void load();
@@ -124,9 +136,9 @@ export default function InventoryAttributesPage() {
         return;
       }
       if (editing) {
-        await updateLensAttributeRequest(tab, editing.id, payload);
+        await updateLensAttributeRequest(attrTab, editing.id, payload);
       } else {
-        await createLensAttributeRequest(tab, payload);
+        await createLensAttributeRequest(attrTab, payload);
       }
       setShowForm(false);
       await load();
@@ -141,7 +153,7 @@ export default function InventoryAttributesPage() {
     setBusyId(row.id);
     setError("");
     try {
-      await updateLensAttributeRequest(tab, row.id, {
+      await updateLensAttributeRequest(attrTab, row.id, {
         isActive: !row.isActive,
       });
       await load();
@@ -157,7 +169,7 @@ export default function InventoryAttributesPage() {
   return (
     <AdminPage
       title="Attributes"
-      subtitle="Master lists for Family, Base, Material, Index, Coating, and Color. Inactive values are hidden from Create product."
+      subtitle="Master lists for Family, Base, Material, Index, Coating, Color, and Power range. Inactive values are hidden from Create product."
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -181,16 +193,25 @@ export default function InventoryAttributesPage() {
               </button>
             ))}
           </div>
-          <Button
-            type="button"
-            onClick={openCreate}
-            className="h-10 rounded-xl bg-(--brand-primary) px-4 font-bold text-black hover:bg-(--brand-primary)/90"
-          >
-            <Plus className="mr-1 size-4" />
-            Add {tabLabel}
-          </Button>
+          {isPowerRange ? null : (
+            <Button
+              type="button"
+              onClick={openCreate}
+              className="h-10 rounded-xl bg-(--brand-primary) px-4 font-bold text-black hover:bg-(--brand-primary)/90"
+            >
+              <Plus className="mr-1 size-4" />
+              Add {tabLabel}
+            </Button>
+          )}
         </div>
 
+        {isPowerRange ? (
+          <PowerRangeTab
+            showForm={showForm}
+            onShowFormChange={setShowForm}
+          />
+        ) : (
+        <>
         {error ? <div className={errorBannerClass}>{error}</div> : null}
 
         <AdminModal
@@ -290,7 +311,7 @@ export default function InventoryAttributesPage() {
             Add one to get started.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-(--brand-card-border)">
+          <AdminTable>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -357,7 +378,9 @@ export default function InventoryAttributesPage() {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </AdminTable>
+        )}
+        </>
         )}
       </div>
     </AdminPage>

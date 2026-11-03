@@ -51,9 +51,7 @@ export default function AuditActivityPage() {
       {loading ? (
         <TableSkeleton compact columns={4} rows={8} />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4">
-          <AuditTrailTable items={items} showModule={false} />
-        </div>
+        <AuditTrailTable items={items} showModule={false} />
       )}
     </AdminPage>
   );

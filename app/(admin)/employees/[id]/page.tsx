@@ -9,6 +9,7 @@ import { DetailSkeleton, ListSkeleton } from "@/components/admin-skeletons";
 import { AssignTaskModal } from "@/components/assign-task-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AdminSelect } from "@/components/admin-select";
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import {
   type AdminEmployee,
@@ -233,18 +234,19 @@ export default function EmployeeDetailPage() {
                   Job role
                 </dt>
                 <dd className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <select
+                  <AdminSelect
                     value={staffRoleId}
-                    onChange={(event) => setStaffRoleId(event.target.value)}
-                    className="h-10 flex-1 rounded-xl border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
-                  >
-                    <option value="">Full operations (default)</option>
-                    {roles.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {role.name}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setStaffRoleId}
+                    options={[
+                      { value: "", label: "Full operations (default)" },
+                      ...roles.map((role) => ({
+                        value: role.id,
+                        label: role.name,
+                      })),
+                    ]}
+                    placeholder="Full operations (default)"
+                    triggerClassName="h-10 flex-1 rounded-xl min-w-0"
+                  />
                   <Button
                     type="button"
                     disabled={roleSaving}
