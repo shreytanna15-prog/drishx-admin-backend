@@ -3,7 +3,7 @@
 **Document type:** Product catalog / SKU master plan  
 **Repos:** Admin panel (primary). Shared backend APIs.  
 **Hierarchy reference:** [CLIENT-HIERARCHY-CONFIRMATION.md](../product-catalog-hierarchy/CLIENT-HIERARCHY-CONFIRMATION.md) (approved)  
-**Status:** Attributes, create product, list/grid, and matrix UI are **implemented** in admin (aligns with this plan).
+**Status:** Oct baseline (Attributes + create + list/grid + matrix) **shipped**. Target updated for **[RC-03](../requested-changes.md#rc-03--product-catalog-optional-material--power-range-as-attribute)** (power range as attribute; Material optional) and **[RC-04](../requested-changes.md#rc-04--product-catalog-parent--variants-new-skuname-builders)** (parent + variants; new SKU/name). More catalog RCs may follow in [`../requested-changes.md`](../requested-changes.md).
 
 ---
 
@@ -11,14 +11,14 @@
 
 Give Admin a clear way to:
 
-1. Maintain **attribute lists** (Family, Base, Material, Index, Coating, Color) — add, rename, active / inactive.  
-2. **Create products** by selecting those attributes plus a **power range** (and a display name).  
-3. Browse products in **list** and **grid** views.  
-4. Open each product and see an **Excel-style power matrix** (SPH × CYL) built from that product’s range, with placeholder values in each cell.
+1. Maintain **attribute lists** (Family, Base, Material, Index, Color, **Power range**; Coating master may remain but is **not** product identity) — add, rename, active / inactive.  
+2. **Create a product parent** once by selecting attributes (Material **optional**), then attach **one or more power-range attributes** as **variants** — without re-picking the same attrs for each range.  
+3. Browse catalog in **flat** (per variant) and **grouped** (by parent / group-by) views, plus grid where useful.  
+4. Open each **variant** and see an **Excel-style power matrix** (SPH × CYL) from that variant’s range.
 
-The **SKU code is generated automatically** from the selected attributes and range (one fixed format). Admin does not invent SKU text by hand.
+**SKU** and **name** are both **auto-built** (Admin does not type them). SKU is a compact machine code; name is human-readable for procurement / stock (no supplier brand fluff).
 
-Existing stock and order systems keep working. This slice builds the **new product master and UI**; live stock editing on the matrix and shop cutover come later.
+Each variant is a fully separate sellable line (own SKU, name, price, matrix; future stock/PO/orders hang on the variant).
 
 ---
 
@@ -26,34 +26,37 @@ Existing stock and order systems keep working. This slice builds the **new produ
 
 ### In scope
 
-- **Attributes** admin page — one place to manage all attribute types (tabs)
-- Separate lists per type (Family, Base, Material, Index, Coating, Color) with add / edit / active switch
-- **Products & catalog** page — list + grid toggle, search / filters, Create product
-- **Create product** form — pick active attributes + define power range + product **name**; **SKU auto-generated**
-- **Product detail** — summary of attributes + range + **matrix view**
-- Matrix: headers from range at **0.25** steps; each cell shows `_ / _ / _` (placeholder for Current / Threshold / Target later)
-- Backend tables and APIs for attributes and products (new schema; legacy lens tables stay)
+- **Attributes** admin — tabs for Family, Base, Material, Index, Color, Power range (+ Coating tab optional / not used on create identity)
+- **Power range** add UX: select-based bounds (−40…+8 step rules), label like `-6.00/+2.00`
+- **Parent + variant** model (one attribute combo → many power ranges)
+- **Create product** — attrs once + **multi-select** power ranges; preview SKUs/names; save parent + N variants
+- **Reuse parent** when attrs already exist → Add power range(s)
+- **Catalog list** — flat + grouped views (server pagination / expand)
+- Auto **SKU** + auto **name** builders (locked formats below)
+- Product / variant detail + matrix (view-only cells `_ / _ / _` this phase)
+- Dev cutover: **delete ~2 test products and recreate** (no migration)
 
 ### Out of scope (this phase)
 
-- Saving stock numbers into every matrix cell / auto-creating thousands of empty stock rows
-- Procurement (PO → receive), reorder rules, power-wise stock beyond display placeholders  
-  *(See [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md).)*
+- Saving stock numbers into every matrix cell / bulk leaf rows  
+  *(See [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md) — attach to **variant**.)*
+- Brand / supplier fancy names (DECENTRX, Night Ryder, 75mm, …)
+- Overlapping-range order allocation (which variant fills a shared power) — later orders/stock RC
 - Customer website / mobile catalog rewrite
-- Removing or replacing `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` tables
-- Hold / Archive shop visibility (can follow once master is stable)
-- Full KT / V2 multi-dimension matrices (ADD / AXIS / EYE) — SV-style SPH×CYL matrix first; other families use the same product form with their range fields, matrix stays SPH×CYL for now
+- Removing legacy `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` tables
+- Full KT / V2 multi-dimension matrices beyond SPH×CYL first
 
 ---
 
 ## 3. How it works today vs after
 
-| Today | After |
+| Today (Oct baseline) | After (RC-03 + RC-04 target) |
 |-------|--------|
-| Attribute names scattered in lens row text / old filter chips | Dedicated **Attributes** page; each type is its own editable list |
-| Products & catalog incomplete / ad-hoc | Full **list + grid**, Create product, product detail |
-| Powers managed mainly as individual lens rows | Product stores **attributes + power range**; matrix **shows** the grid in UI |
-| No clear product SKU for “HC SV + this range” | Each catalog product gets an **auto SKU** from attributes + range, plus a display name |
+| Flat product = attrs + typed range numbers + typed name | Parent = attrs; variants = power-range masters |
+| Re-create whole product for a second range | Same parent → **Add power range** (multi-select on create) |
+| SKU: `FAMILY-BASE-MATERIAL-…` | SKU: `[MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S…-C…` (no coating) |
+| Name typed by Admin | Name **auto**: human words + `-6.00/+2.00` |
+| Coating in SKU path | Coating **not** product identity; **Color** holds Green / Blue / … |
 
 ---
 
@@ -61,29 +64,38 @@ Existing stock and order systems keep working. This slice builds the **new produ
 
 | Concept | Meaning |
 |---------|---------|
-| **Attribute** | A master value such as HC, BRC, UC, 1.56, Green. Managed on the Attributes page. |
-| **Product (catalog SKU)** | One sellable **line**: chosen attributes **plus** one power range (e.g. SPH 0…+10, CYL 0…+4). |
-| **SKU code** | System-built code from those choices (not typed freely by Admin). |
-| **Matrix** | Spreadsheet view for that product: rows = SPH, columns = CYL (0.25 steps inside the range). Cells show `_ / _ / _` for now. |
+| **Attribute** | Master value (HC, 1.56, Green, power range `-6.00/+2.00`, …). |
+| **Power range (attribute)** | Reusable SPH/CYL bounds master. Label e.g. **`-6.00/+2.00`**. |
+| **Product (parent)** | One attribute combination: Material? · Base · Index · Family · Color. Created once. Internal base code only (not shown). |
+| **Variant** | Parent + one power range. **Sellable** catalog SKU: unique auto SKU + auto name + price + matrix. |
+| **SKU code** | Compact machine id on the **variant** (not typed). |
+| **Name** | Human label on the **variant** (not typed; no brand). |
+| **Matrix** | SPH × CYL grid for that variant’s range; cells `_ / _ / _` for now. |
 
 ```
 Attributes (masters)
+  Family · Base · Material? · Index · Color
+  + Power range masters (−6.00/+2.00, −6.00/+4.00, …)
         │
         ▼
 ┌─────────────────────────────────┐
-│  PRODUCT (catalog SKU)          │
-│  Family · Base · Material · …   │
-│  + power RANGE                  │
-│  + name                         │
-│  + SKU (auto from attrs+range)  │
-└────────────────┬────────────────┘
-                 │
-                 ▼
-        Matrix view (UI)
-        SPH × CYL · _ / _ / _
+│  PARENT (LensProduct)           │
+│  Material? · Base · Index ·     │
+│  Family · Color                 │
+│  (internal base code only)      │
+└────────────┬────────────────────┘
+             │ 1 → many
+             ▼
+┌─────────────────────────────────┐
+│  VARIANT (per power range)      │
+│  skuCode  PG-BR-1P56-KT-GREEN-… │
+│  name     PG 1.56 KT BR Green   │
+│           -6.00/+2.00           │
+│  price · active · matrix        │
+└─────────────────────────────────┘
 ```
 
-Two products with the same coatings but different ranges (e.g. −6×2 vs −8×2) are **two catalog products** (different auto SKUs).
+Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and `-6.00/+4.00` → **two** variants, two SKUs, two names, separate stock/price later.
 
 ---
 
@@ -93,29 +105,37 @@ Two products with the same coatings but different ranges (e.g. −6×2 vs −8×
 
 **Path:** `/inventory/attributes` (sidebar: **Attributes**)
 
-One page with **tabs**, one per attribute type:
-
-| Tab | Examples |
-|-----|----------|
-| Family | SV, KT, V2 |
-| Base | HC, BRC, ARC |
-| Material | Plain, UC, Tintable, Poly, PG, PG Poly |
-| Index | 1.49, 1.56, 1.59, 1.61, 1.67, 1.74 |
-| Coating | Green, Blue, Mari-Blue, Violet, … |
-| Color | Tint colours (for tinted / tintable) |
+| Tab | Examples | On create product? |
+|-----|----------|--------------------|
+| Family | SV, KT, V2 | Yes (all families in SKU) |
+| Base | HC, BRC, ARC, BR, … | Yes |
+| Material | Plain, UC, Tintable, Poly, PG, PG Poly | Optional |
+| Index | 1.49, 1.56, 1.61, 1.67, 1.74 | Yes |
+| Color | Green, Blue, Grey, Brown, Violet, … | Yes (identity; not “tint only”) |
+| **Power range** | `-6.00/+2.00`, … | On **variant** (multi) |
+| Coating | (optional master) | **Not** identity / SKU / name |
 
 ### 5.2 What Admin can do on each tab
 
-- **Add** a value (e.g. new material “Tintable”)  
-- **Edit** display name / short code  
-- **Active / inactive** switch — inactive values do **not** appear in Create product dropdowns  
-- Optional sort order so lists stay tidy  
+- **Add** / **Edit** display name / short code  
+- **Active / inactive** — inactive values do not appear in Create dropdowns  
+- Optional sort order  
 
-Coating and Color stay **separate** lists (coat / surface vs tint).
+### 5.2a Power range tab
 
-### 5.3 Cascade (when creating a product)
+- List + add/edit via **selects** (not free number typing), mobile-style options.  
+- Universe **−40 … +8**:
+  | Band | Step |
+  |------|------|
+  | −40 → −16 | **0.5** |
+  | after −16 toward +4 | **0.25** |
+  | after **+4** → +8 | **0.5** |
+- Store SPH min/max + CYL min/max. Label from SPH: **`-6.00/+2.00`**.  
+- Once a range is used by a variant, **do not edit bounds** — create a new range instead.
 
-Choosing **Base** narrows **Material** (e.g. UC / Tintable under HC / BRC). Full parent rules match the approved hierarchy doc.
+### 5.3 Cascade
+
+**Base** may narrow **Material** when Material is used. Material skip is allowed.
 
 ---
 
@@ -127,82 +147,83 @@ Choosing **Base** narrows **Material** (e.g. UC / Tintable under HC / BRC). Full
 
 | Feature | Detail |
 |---------|--------|
-| **List view** | Table: SKU, name, family, base, material, index, coating, color, range summary, status |
-| **Grid view** | Card tiles with the same summary (toggle next to search) |
-| **Search / filters** | By SKU, name, family, base, material, active |
-| **Create product** | Button → Create product form |
+| **Flat view** | One row per **variant** (SKU, name, attrs, range label, status) — server-paginated |
+| **Grouped view** | Parents (or group-by family/base/…); expand loads variants |
+| **Grid** | Optional card tiles (variant summary) |
+| **Search / filters** | Server-side by SKU, name, family, base, material, active |
+| **Create product** | Button → create form |
 
 ### 6.2 Create product
 
 **Path:** `/inventory/products-catalog/new`
 
-Admin fills:
+1. **Family** → **Base** → **Material** (optional) → **Index** → **Color**  
+2. **Power ranges** — multi-select active power-range attributes (≥1)  
+3. Optional default price (copied to new variants as starting price)  
+4. **Preview** each variant’s auto SKU + auto name (read-only)  
+5. **Save** → one parent + N variants  
 
-1. **Name** (display)  
-2. **Family** → **Base** → **Material** (cascade; active values only)  
-3. **Index**, **Coating**, **Color** (aside; Color when tinted / tintable)  
-4. **Power range** — SPH start/end, CYL start/end (optional ADD / AXIS / EYE for KT / V2)  
-5. Optional **default price** for this product/range  
-6. **SKU preview** — shown as the system builds it from the selections above (read-only)  
-7. **Save** → product appears in list / grid  
+If the attribute combo already exists → do not duplicate parent; go to that parent and add the new ranges.
 
 ```
-┌──────────────────────────────────────┐
-│  Create product                      │
-├──────────────────────────────────────┤
-│  Name ________                       │
-│  SKU  [ auto: SV-HC-PLAIN-… ]  (ro)  │
-│  Family [▼]  Base [▼]  Material [▼]  │
-│  Index [▼]   Coating [▼]  Color [▼]  │
-│  SPH from __ to __                   │
-│  CYL from __ to __                   │
-│  [ Cancel ]              [ Save ]    │
-└──────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│  Create product                          │
+├──────────────────────────────────────────┤
+│  Family [▼]  Base [▼]  Material [▼ opt]  │
+│  Index [▼]   Color [▼]                   │
+│  Power ranges [ multi ▼ ]                │
+│    ☑ -6.00/+2.00   ☑ -6.00/+4.00         │
+│  Preview:                                │
+│    PG-BR-1P56-KT-GREEN-SM6TP2-…          │
+│    PG 1.56 KT BR Green -6.00/+2.00       │
+│    …                                     │
+│  [ Cancel ]                    [ Save ]  │
+└──────────────────────────────────────────┘
 ```
 
-### 6.3 How SKU is built (locked)
+### 6.3 SKU format (variant — locked)
 
-One format from attribute **codes** + range bounds (powers encoded for the string; e.g. `1.56` → `1P56`, negative → `M…`):
+Compact codes; omit Material when absent; **all families** (SV, KT, V2, …); **no coating**:
 
-`FAMILY-BASE-MATERIAL[-INDEX][-COATING][-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}[-CROSS]`
-
-Example shape: `SV-HC-PLAIN-1P56-S0T10-C0T4`
-
-Admin never types this string; changing attributes or range changes the SKU. Duplicate same attributes + same range is rejected (same SKU would collide).
-
-### 6.4 Product detail + matrix
-
-**Path:** `/inventory/products-catalog/[id]`
-
-**Header**
-
-- Product name, auto SKU  
-- Attribute chips / summary (Family · Base · Material · Index · Coating · Color)  
-- Range summary (e.g. SPH 0 … +10.00 · CYL 0 … +4.00)
-
-**Matrix (Excel-style)**
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Hard Coat Single Vision +     SKU: SV-HC-PLAIN-…       │
-│  HC · Plain · 1.56 · …                                  │
-├─────────┬──────┬──────┬──────┬──────┬─────              │
-│ SPH\CYL │  0   │+0.25 │+0.50 │+0.75 │ …                 │
-├─────────┼──────┼──────┼──────┼──────┼─────              │
-│  0      │_/_/_ │_/_/_ │_/_/_ │_/_/_ │                   │
-│ +0.25   │_/_/_ │_/_/_ │ …                               │
-│ +0.50   │ …                                             │
-│  …      │                                               │
-└─────────┴───────────────────────────────────────────────┘
-```
+`[MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}`
 
 | Rule | Detail |
 |------|--------|
-| Axes | SPH down the side, CYL across the top (labels `SPH\CYL`) |
-| Steps | **0.25** between range min and max (built in the browser from saved range) |
-| Cell | `_ / _ / _` placeholders (Current / Threshold / Target later) |
-| Behaviour this phase | **View only** — no stock save from the matrix |
-| Scroll | Sticky header row/column so large sheets stay usable |
+| Codes | Uppercase; `.` → `P` (`1.56` → `1P56`); strip non-alphanumeric |
+| Powers | Negatives → `M` (`-6` → `M6`); decimals use `P` |
+| Source | Bounds from selected **power-range attribute** |
+| Uniqueness | Variant `skuCode` unique; reject duplicate parent+range |
+
+Example: `PG-BR-1P56-KT-GREEN-SM6TP2-C0TM2`
+
+Parent may keep an **internal** base code without the power segment (not shown in Admin UI).
+
+### 6.4 Name format (variant — locked)
+
+Fully auto; human-readable; power as **`-6.00/+2.00`**; no brand:
+
+`[Material] [Index] [Family] [Base] [Color] -6.00/+2.00`
+
+Example: `PG 1.56 KT BR Green -6.00/+2.00`  
+
+Omit Material token when Material is absent.
+
+### 6.5 Parent detail + variant matrix
+
+**Parent path:** `/inventory/products-catalog/[id]` (parent id)
+
+- Attribute summary (Material? · Base · Index · Family · Color)  
+- Variants table: range label, SKU, name, price, active  
+- **Add power range(s)**  
+- Lock attribute edit after any variant has stock/orders  
+
+**Variant matrix:** open from a variant row → SPH × CYL from that range; `_ / _ / _` cells; view-only this phase.
+
+| Rule | Detail |
+|------|--------|
+| Axes | SPH side, CYL top |
+| Steps | From saved range (typically 0.25 inside mid band) |
+| Behaviour | View only until stock phase |
 
 ---
 
@@ -210,32 +231,27 @@ Admin never types this string; changing attributes or range changes the SKU. Dup
 
 ```
 ┌─────────────────────────┐
-│  1. Attributes page     │
-│  Add / edit masters     │
-│  Set active             │
+│  1. Attributes          │
+│  Masters + power ranges │
 └───────────┬─────────────┘
             ▼
 ┌─────────────────────────┐
-│  2. Products & catalog  │
-│  List or Grid           │
+│  2. Create product      │
+│  Attrs once             │
+│  Multi-select ranges    │
+│  Preview SKU + name     │
+│  Save → parent + variants│
 └───────────┬─────────────┘
             ▼
 ┌─────────────────────────┐
-│  3. Create product      │
-│  Select attributes      │
-│  Set power range        │
-│  SKU auto-built         │
-│  Save                   │
+│  3. Catalog             │
+│  Flat or Grouped        │
 └───────────┬─────────────┘
             ▼
 ┌─────────────────────────┐
-│  4. Product appears     │
-│  in list / grid         │
-└───────────┬─────────────┘
-            ▼
-┌─────────────────────────┐
-│  5. Open product        │
-│  See matrix (_/_/_)     │
+│  4. Parent detail       │
+│  Add more ranges        │
+│  Open variant matrix    │
 └─────────────────────────┘
 ```
 
@@ -243,15 +259,13 @@ Admin never types this string; changing attributes or range changes the SKU. Dup
 
 ## 8. Names — short and full
 
-Same vocabulary as the hierarchy confirmation:
-
 | Short | Full |
 |-------|------|
 | SV | Single Vision |
 | KT | Kryptok |
 | V2 | Progressive |
 | HC | Hard Coat |
-| BRC | Blue Ray Cut / Blue Cut |
+| BRC / BR | Blue Ray Cut / Blue Cut |
 | ARC | Anti-Reflective Coating |
 | UC | Uncoated |
 | PG | Photochromic |
@@ -261,29 +275,43 @@ Same vocabulary as the hierarchy confirmation:
 
 ## 9. Example
 
-**Create:** Name `Hard Coat Single Vision +`  
-Family SV → Base HC → Material Plain → Index 1.56 → SPH 0…+10 → CYL 0…+4  
+**Parent attrs:** Material PG · Base BR · Index 1.56 · Family KT · Color Green  
 
-**SKU (auto):** e.g. `SV-HC-PLAIN-1P56-S0T10-C0T4`  
+**Ranges selected:** `-6.00/+2.00` and `-6.00/+4.00`
 
-**Result:** Row/card on catalog → open detail → matrix with name/SKU, cells `_ / _ / _` for every 0.25 step in that range.
+| Variant | SKU (shape) | Name |
+|---------|-------------|------|
+| 1 | `PG-BR-1P56-KT-GREEN-SM6TP2-…` | `PG 1.56 KT BR Green -6.00/+2.00` |
+| 2 | `PG-BR-1P56-KT-GREEN-SM6TP4-…` | `PG 1.56 KT BR Green -6.00/+4.00` |
+
+Two separate sellable products; Admin did not re-enter PG/BR/1.56/KT/Green for the second range.
 
 ---
 
 ## 10. Acceptance (client)
 
-- [x] Attributes page: manage Family, Base, Material, Index, Coating, Color (add / edit / active)
-- [x] Inactive attributes do not appear on Create product
-- [x] Create product by selecting attributes + power range; **SKU auto-generated** (unique)
-- [x] Catalog shows **list** and **grid**
-- [x] Each product opens a **matrix** from its range (0.25 steps) with `_ / _ / _` cells
-- [x] Matrix header shows product name, SKU, and attribute summary
-- [x] Legacy stock / orders unchanged by this slice
+### Shipped (Oct baseline)
+
+- [x] Attributes page: Family, Base, Material, Index, Coating, Color (add / edit / active)
+- [x] Inactive attributes hidden on Create
+- [x] Catalog list / grid + matrix `_ / _ / _`
+- [x] Legacy stock / orders unchanged by Oct slice
+
+### Target (RC-03 + RC-04 — not done until implemented)
+
+- [ ] Power range Attributes tab (selects; `-6.00/+2.00` label; −40…+8 steps)
+- [ ] Material optional; coating not product identity
+- [ ] Parent + multi power-range variants; Add range without re-picking attrs
+- [ ] Auto SKU + auto name (locked formats); no typed name
+- [ ] Flat + grouped catalog views (server pagination)
+- [ ] Test products deleted and recreated (no migration)
 
 ---
 
 ## 11. Open points (non-blocking)
 
-1. Whether **brand / line** is a required field on create later.  
-2. KT / V2 multi-axis matrix layout after SPH×CYL matrix (form already allows ADD / AXIS / EYE extras).  
-3. Live stock on matrix cells → inventory / procurement phase ([stock-management-notes.md](../stock-management-notes.md)).
+1. Overlapping power ranges across variants — order/stock allocation later.  
+2. KT / V2 multi-axis matrix after SPH×CYL.  
+3. Live stock on matrix cells → stock-management (on **variant**).  
+4. Whether Brand becomes a real attribute later (ignored for now).  
+5. Further catalog RCs → [`requested-changes.md`](../requested-changes.md).

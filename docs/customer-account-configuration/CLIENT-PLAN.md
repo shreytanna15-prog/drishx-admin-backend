@@ -1,7 +1,8 @@
 # Customer account configuration — Client plan
 
-**Document type:** Customer onbording plan 
-**Repos:** Admin panel, web app, mobile, shared backend
+**Document type:** Customer onboarding plan  
+**Repos:** Admin panel, web app, mobile, shared backend  
+**Follow-ups:** Admin edit / verify / history locked in **[RC-01](../requested-changes.md#rc-01--admin-edit-client-detail-ux-verify-rules-notes-history)** (`requested-changes.md`) — this plan matches that target.
 
 ---
 
@@ -12,15 +13,16 @@ Upgrade how optical-shop customers are identified, approved, commercially config
 1. A customer account can be created in **three ways**: self-signup, **Admin** from admin panel, or **Employee** from their staff login.
 2. **Mobile OTP** is required; after success the mobile is marked **verified**.
 3. **Email is optional**; if provided, run **email OTP** and mark email **verified** (email provider TBD).
-4. **Admin** can list, add, and edit clients (tables + forms + actions + commercial setup).
+4. **Admin** can list, add, and edit clients (full-width detail, prefilled edit form, required update notes, change history + commercial setup).
 5. **Employee** can create a customer (phone + OTP) and place a **live / walk-in order** while Admin finishes commercial setup.
 6. Each client gets a **pricing tier (A–F)** that applies a **% discount** at checkout.
 7. **Credit** is controlled by a **limit** (no credit period in this phase).
 8. **Ledger** and **payments** stay visible and audited.
 9. **Order cancel → refund** has a clear money-back path.
-10. Customers can **fix wrong details after reject** and resubmit; profile edits need **admin re-approval**.
+10. Customers can **fix wrong details after reject** and resubmit; **customer** material profile edits need **admin re-approval**. **Admin** edits stay **Approved**.
 11. Clear account actions: **Blocked**, **Suspended (credit)**, **Closed**.
 12. Admin can **check GST status on demand** (button on client review) — not automatic on every signup.
+13. Address is **verified on Admin approve** at onboarding; later address changes (anyone) make address **unverified** until Admin verifies again. Mobile/email change → re-verify. Verified **GST/PAN** are locked.
 
 This plan is written so UI, data, APIs, and flows are agreed **before** build — to avoid rework.
 
@@ -33,7 +35,9 @@ This plan is written so UI, data, APIs, and flows are agreed **before** build �
 - **Three create paths:** Customer self-signup · Admin panel create · Employee create (staff login)
 - Mobile OTP (**required**) → `mobileVerified`
 - Email OTP (**optional**, when email is entered) → `emailVerified` (email SMS/email provider **not chosen yet**)
-- Admin: Clients list, Add client, Client detail/edit + actions + commercial setup
+- Admin: Clients list, Add client, full-width Client detail, Edit (prefilled form), required Admin update **Notes**, **Change history**, actions + commercial setup
+- Address verified flag: set on onboarding **Approve**; clear when address changes; Admin **Verify address**
+- Mobile/email re-verify after change by anyone; GST/PAN locked once verified
 - Employee: create-customer flow + walk-in **live order** (including customers without GSTIN)
 - Staff-created accounts stay **pending Admin** for commercial configuration
 - Pricing tiers admin page (A–F, editable discount %; **D = base / 0%**)
@@ -42,7 +46,7 @@ This plan is written so UI, data, APIs, and flows are agreed **before** build �
 - Customer ledger (v1: system posts + admin view)
 - Payment history with audit trail
 - Cancelled-order refund flow (record + verify + ledger)
-- Profile edit → pending again; reject → customer can edit and resubmit
+- **Customer** profile edit → pending again; reject → customer can edit and resubmit
 - Account actions: Blocked / Suspended (credit) / Closed
 - Better table UI on admin client list
 - **On-demand GSTIN active check** on Admin client review (button; not in signup/auth flow)
@@ -80,9 +84,11 @@ This plan is written so UI, data, APIs, and flows are agreed **before** build �
 
 | Today | After |
 |-------|--------|
-| Clients list + basic detail + approve/reject/suspend | Proper **table list**, **Add client**, **Edit/detail** with commercial fields and actions |
+| Clients list + basic detail + approve/reject/suspend | Proper **table list**, **Add client**, full-width **detail**, **Edit** (prefilled), required **Notes**, **Change history**, commercial fields and actions |
 | No pricing tier | **Tier A–F** assigned per client |
 | No GST active check | Admin **Verify GST** button on client review (on demand) |
+| No address verified flag | **Address verified** on Approve; any later address change → unverified until Admin verifies |
+| GST/PAN editable after verify | **Locked** once verified (client and Admin) |
 
 ### Money
 
@@ -353,6 +359,18 @@ Works for **pending**, **rejected**, and **approved** (not for **Closed**).
 ```
 
 **Important rule:** When **Admin** edits a client, changes apply **immediately**. That does **not** send the account back to pending.
+
+### 4.5a Admin edits client (RC-01)
+
+| Rule | Detail |
+|------|--------|
+| Detail UX | `/clients/[id]` is a **full-width** admin page (not a skinny one-column card stack) |
+| Edit | Button → same create form **prefilled** → save; account stays **Approved** |
+| Notes | Every Admin update requires a **Notes** reason string |
+| Change history | Button beside Edit → list: datetime, admin, note, human-readable field names changed |
+| Mobile / email | Change by **client or Admin** → that channel **unverified** until OTP / verify again |
+| Address (Option A) | Onboarding **Approve** sets address **verified**. Later address change by anyone → **unverified**; Admin **Verify address** on detail (no OTP). Banner while pending. Account stays Approved |
+| GST / PAN | Once verified, **neither** client nor Admin can change them |
 
 ### 4.6 Pricing tier at checkout
 
@@ -702,8 +720,11 @@ Every one of these creates an audit / activity trail entry:
 - [ ] Customer can be created three ways: **self-signup**, **Admin panel**, **Employee staff login**  
 - [ ] **Mobile OTP** required; success marks mobile **verified**  
 - [ ] **Email optional**; if entered, **email OTP** runs and marks email **verified** (provider TBD)  
-- [ ] Admin can **Add**, **Edit**, and **list** clients in clear table UI  
+- [ ] Admin can **Add**, **Edit** (prefilled), and **list** clients; detail is full-width  
+- [ ] Admin update requires **Notes**; **Change history** shows note, admin, time, field labels  
 - [ ] Admin can Approve / Reject; rejected customer can **edit and resubmit**  
+- [ ] Address verified on Approve; later address change → unverified until Admin verifies  
+- [ ] Mobile/email change → re-verify; verified GST/PAN locked  
 - [ ] Admin can click **Verify GST** on client review (on demand; result stored; not auto on signup)  
 - [ ] Employee can create customer with **phone + OTP**; account goes to Admin for setup  
 - [ ] Employee can place a **walk-in live order** for that customer (GSTIN optional)  

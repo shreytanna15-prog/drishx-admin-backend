@@ -1,19 +1,24 @@
 # Product catalog (SKU master)
 
-Admin **Attributes** + **Product catalog** — define lens products from master attributes, list/grid them, and show a per-product power matrix (UI).
+Admin **Attributes** + **Product catalog** — parent attribute combinations with **power-range variants**, auto SKU + auto name, list/grid and per-variant matrix UI.
 
-**Status (Oct 2026):** Phases A–C implemented in admin (`LensProduct` + attribute masters). See [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) §6.
+**Status (Nov 2026):** Phases A–C shipped (Oct flat `LensProduct` baseline). **Target contract:**
 
-Approved hierarchy (Family → Base → Material + Index / Coating / Color; range on the product): see [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/).
+- **[RC-03](../requested-changes.md#rc-03--product-catalog-optional-material--power-range-as-attribute)** — Material optional; power range as attribute  
+- **[RC-04](../requested-changes.md#rc-04--product-catalog-parent--variants-new-skuname-builders)** — parent + variants; new SKU/name builders; flat + grouped list  
+
+Track further catalog RCs in [`../requested-changes.md`](../requested-changes.md); keep CLIENT-PLAN in sync when locked.
+
+Hierarchy: [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/). Product identity = Material? · Base · Index · Family · Color (+ power range on the **variant**). **Coating is not identity.**
 
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [CLIENT-PLAN.md](./CLIENT-PLAN.md) | Client + product | Screens, flows, what admin does, acceptance |
 | [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | Schema, APIs, UI routes, phases, checklists |
 
-**Related:** tracked as **[RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers)** in [`../remaining-work.md`](../remaining-work.md).  
-**Next (stock + PO):** [`../stock-management/`](../stock-management/) — live matrix, receipts, adjustments, reorder (catalog-centered). Feedback notes: [`../stock-management-notes.md`](../stock-management-notes.md).
+**Related:** [RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers); deltas in [requested-changes.md](../requested-changes.md).  
+**Next (stock + PO):** [`../stock-management/`](../stock-management/) — hang stock/PO on the **variant**.
 
-**SKU rule (locked):** product `skuCode` is **auto-built** from attribute codes + power range — Admin does **not** type a free-text SKU.
+**SKU / name (locked target):** both auto-built on the variant — compact SKU codes; human name with `-6.00/+2.00`. Admin does not type either.
 
-**Out of product-catalog slice:** live stock on matrix cells, procurement PO/receive, shop/mobile checkout rewrite, deleting legacy lens tables — covered under stock-management plans.
+**Out of slice:** live stock cells, PO/receive, shop/mobile rewrite, deleting legacy lens tables.

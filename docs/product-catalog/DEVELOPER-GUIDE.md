@@ -2,19 +2,24 @@
 
 **Companion:** [CLIENT-PLAN.md](./CLIENT-PLAN.md) (product contract — do not contradict without updating both)  
 **Hierarchy:** [ATTRIBUTE-TABLES-AND-HIERARCHY.md](../product-catalog-hierarchy/ATTRIBUTE-TABLES-AND-HIERARCHY.md)  
-**Repos:** `Drishx-admin-and-backend` (admin + API). Shop/mobile cutover is out of this slice.  
-**Status:** Phases **A–C shipped**. Phase D items below are optional follow-ons.
+**Repos:** `drishx-admin-backend` (admin + API). Shop/mobile cutover is out of this slice.  
+**Status:** Phases **A–C shipped** (Oct flat `LensProduct` baseline). **Target deltas (not shipped until implemented):**
+
+- [RC-03](../requested-changes.md#rc-03--product-catalog-optional-material--power-range-as-attribute) — power-range attribute masters; Material optional  
+- [RC-04](../requested-changes.md#rc-04--product-catalog-parent--variants-new-skuname-builders) — parent + `LensProductVariant`; new SKU/name; flat + grouped list  
+
+Update **this guide’s schema / SKU sections when RC-03/04 ship**. Until then §2–§4 describe **current code**. Target contract = CLIENT-PLAN + RC-03/04.
 
 ---
 
 ## 0. How to use this doc
 
-1. Read **CLIENT-PLAN.md** for agreed Admin behaviour.  
-2. Phases **A→C** are implemented; use §1 code map when extending.  
+1. Read **CLIENT-PLAN.md** for agreed Admin behaviour (RC-03/04 target).  
+2. Phases **A→C** are implemented; use §1 code map when extending today’s code.  
 3. **Do not** drop `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` / existing `CatalogProductLine`.  
 4. Follow `drishx-api-auth-audit` for routes/audit; `drishx-client-api` for admin hooks; `drishx-prisma` for schema.  
 5. Matrix cells are **frontend-only** in this slice — no bulk leaf insert, no stock PATCH from the grid.  
-6. **`skuCode` is always built by** `buildLensProductSkuCode` — never accept free-text SKU from Admin on create.
+6. **`skuCode` / `name` are always built by helpers** — never accept free-text SKU or name from Admin on create (target). Today’s code still takes typed `name`; RC-04 removes that.
 
 ---
 
@@ -44,32 +49,53 @@
 
 ---
 
-## 2. Architecture (as built)
+## 2. Architecture
+
+### 2.1 As built (Oct baseline — current code)
 
 ```
-Attribute masters (separate tables, one Attributes admin UI)
+Attribute masters
   LensFamily | LensBase | LensMaterial | LensIndex | LensCoating | LensColor
-  + LensBaseMaterialLink (cascade)
+  + LensBaseMaterialLink
         │
         ▼
-LensProduct (catalog SKU)
-  FKs → attributes
-  + name
-  + skuCode = buildLensProductSkuCode(attrs + range)   ← auto
-  + power range (sphMin/Max, cylMin/Max, rangeType, …)
-  + optional defaultPrice, isActive, KT/V2 extras
+LensProduct (flat catalog SKU)
+  attrs + typed name + inline sph/cyl range
+  + skuCode = buildLensProductSkuCode (old FAMILY-BASE-MATERIAL-… format)
         │
         ▼
-Admin UI
-  List / Grid  →  Detail matrix (SPH×CYL @ 0.25, cells "_ / _ / _")
+Admin UI — List / Grid → Detail matrix
+```
+
+### 2.2 Target (RC-03 + RC-04 — implement next)
+
+```
+Attribute masters
+  + LensPowerRange (sph/cyl bounds, label -6.00/+2.00)
+        │
+        ▼
+LensProduct (parent)
+  material? · base · index · family · color
+  unique on that combo; internal baseCode (not shown in UI)
+  coating NOT identity
+        │ 1 → many
+        ▼
+LensProductVariant
+  powerRangeId
+  skuCode = new builder  [MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S…-C…
+  name    = human builder  [Material] [Index] [Family] [Base] [Color] -6.00/+2.00
+  price, isActive
+  ← stock / PO / orders attach HERE later
+        │
+        ▼
+Admin UI — flat + grouped list; parent detail + add ranges; variant matrix
 ```
 
 **Not in this slice**
 
 ```
 ExactPower / stock leaf rows
-  quantity, threshold, target
-  ← later inventory / procurement (see stock-management-notes.md)
+  ← later inventory / procurement on variant (see stock-management)
 ```
 
 ---
@@ -100,24 +126,40 @@ Fields match CLIENT-PLAN: attribute FKs, range, optional ADD/AXIS/EYE, `defaultP
 
 ---
 
-## 4. Auto SKU (locked)
+## 4. Auto SKU / name
 
-**Source of truth:** `app/lib/catalog/lens-product-sku.ts` → `buildLensProductSkuCode`.
+### 4.1 Current code (Oct)
 
-**Format:**
+**Source:** `app/lib/catalog/lens-product-sku.ts` → `buildLensProductSkuCode`.
 
 ```
 FAMILY-BASE-MATERIAL[-INDEX][-COATING][-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}[-CROSS]
 ```
 
+### 4.2 Target (RC-04 — replace helpers)
+
+**SKU** (`buildLensProductSkuCode` rewrite):
+
+```
+[MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}
+```
+
+**Name** (new `buildLensProductName`):
+
+```
+[Material] [Index] [Family] [Base] [Color] -6.00/+2.00
+```
+
 | Rule | Detail |
 |------|--------|
-| Codes | Uppercase; `.` → `P` (e.g. `1.56` → `1P56`); strip non-alphanumeric |
-| Powers | Negatives → `M` prefix (e.g. `-6` → `M6`); decimals use `P` |
-| Bounds | Min/max normalized before encode |
-| Cross | Append `-CROSS` when `rangeType === CROSS` |
-| Create | Server builds SKU; Admin create body must **not** rely on typed `skuCode` |
-| UI | Preview chip on create form from the same helper |
+| Codes | Uppercase; `.` → `P`; strip non-alphanumeric |
+| Powers in SKU | `M` for negative; `P` for decimal; from power-range attribute bounds |
+| Powers in name | Human label `-6.00/+2.00` (SPH); CYL may appear in list summary |
+| Coating | Not in SKU or name |
+| Material | Optional; omit segment/token when absent |
+| Family | Always include (SV, KT, V2, …) |
+| Create | Server builds both; no typed `skuCode` or `name` |
+| Uniqueness | Parent attrs unique; variant `(productId, powerRangeId)` + unique sku/name |
 
 Example: `SV-HC-PLAIN-1P56-S0T10-C0T4`
 
