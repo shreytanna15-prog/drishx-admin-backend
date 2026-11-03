@@ -21,9 +21,9 @@ There are **no** Agora, Stripe/Razorpay, posts, gifts, or live streaming feature
 ```mermaid
 flowchart TB
     subgraph clients ["Client Apps"]
-        Web["drishx-website<br/>Next.js 16<br/>Customer + Employee portal"]
+        Web["drishx-web-app<br/>Next.js 16<br/>Customer + Employee portal"]
         Mobile["drishx-mobile-app<br/>Expo 54 / React Native<br/>Customer + Staff app"]
-        Admin["drishx-admin-and-backend<br/>Next.js 16 Admin Panel"]
+        Admin["drishx-admin-backend<br/>Next.js 16 Admin Panel"]
     end
 
     subgraph backend ["Single Backend (same deployment)"]
@@ -41,21 +41,21 @@ flowchart TB
 
 | Repo | Role | Has database? |
 |------|------|---------------|
-| **drishx-admin-and-backend** | Backend API + Admin panel | Yes (Prisma + PostgreSQL) |
-| **drishx-website** | Customer web portal + Employee ops portal | No — proxy only |
+| **drishx-admin-backend** | Backend API + Admin panel | Yes (Prisma + PostgreSQL) |
+| **drishx-web-app** | Customer web portal + Employee ops portal | No — proxy only |
 | **drishx-mobile-app** | Customer + Staff mobile app | No — calls backend directly |
 
 **Production URLs (from config):**
 
-- Backend/Admin: `https://drishx-admin-and-backend.vercel.app`
+- Backend/Admin: `https://drishx-admin-backend.vercel.app`
 - Web app: `https://drishx-web-app.vercel.app`
 
 **Local paths:**
 
 | Repo | Path |
 |------|------|
-| Admin + Backend | `drishx-admin-and-backend/` |
-| Web App | `drishx-website/` |
+| Admin + Backend | `drishx-admin-backend/` |
+| Web App | `drishx-web-app/` |
 | Mobile App | `drishx-mobile-app/` |
 
 ---
@@ -92,7 +92,7 @@ enum UserRole {
 
 ---
 
-## Repo 1: `drishx-admin-and-backend` (The Brain)
+## Repo 1: `drishx-admin-backend` (The Brain)
 
 **Stack:** Next.js 16.2, React 19, Prisma 7.8, PostgreSQL (Supabase), JWT auth, Supabase Storage, shadcn/ui, Tailwind v4
 
@@ -112,7 +112,7 @@ enum UserRole {
 
 ---
 
-## Repo 2: `drishx-website` (Customer + Employee Web)
+## Repo 2: `drishx-web-app` (Customer + Employee Web)
 
 **Stack:** Next.js 16.2, React 19, shadcn/ui, Tailwind v4 — **no database, no Prisma**
 
@@ -181,11 +181,11 @@ Payment gateways, loyalty/wallet, attendance, payroll, AI center, discounts, cre
 Two config files contain **obfuscated malicious JavaScript** appended after legitimate config:
 
 1. **`drishx-mobile-app/babel.config.js`** — runs on every Metro/Babel build
-2. **`drishx-website/postcss.config.mjs`** — runs on every Next.js dev/build
+2. **`drishx-web-app/postcss.config.mjs`** — runs on every Next.js dev/build
 
 The malware scans Ethereum blockchain transactions, downloads remote payloads, and `eval`s them. The legitimate config is only the first ~6–11 lines; everything after that should be removed.
 
-**Before running dev or build on either repo**, clean those files and audit git history for when they were introduced. The admin-and-backend repo does not appear to have this issue.
+**Before running dev or build on either repo**, clean those files and audit git history for when they were introduced. The `drishx-admin-backend` repo does not appear to have this issue.
 
 ---
 
@@ -196,8 +196,8 @@ that repo needs. Copy it, fill in real values, and never commit the result.
 
 | Repo | Template | Real file | Notes |
 |---|---|---|---|
-| `drishx-admin-and-backend` | `.env.example` | `.env` | Only repo with secrets. The other two must never hold them. |
-| `drishx-website` | `.env.example` | `.env.local` | Exactly one var: `BACKEND_URL`. No database. |
+| `drishx-admin-backend` | `.env.example` | `.env` | Only repo with secrets. The other two must never hold them. |
+| `drishx-web-app` | `.env.example` | `.env.local` | Exactly one var: `BACKEND_URL`. No database. |
 | `drishx-mobile-app` | `.env.example` | `.env` | Untracked by design. `EXPO_PUBLIC_*` is embedded in the JS bundle in plaintext. |
 
 `DEPLOY_*` variables are unrelated to runtime — they drive the one-shot git push
@@ -241,7 +241,7 @@ holds and cause overselling.
 **Backend (required first):**
 
 ```bash
-cd drishx-admin-and-backend
+cd drishx-admin-backend
 cp .env.example .env    # then fill in DATABASE_URL, JWT_SECRET, SUPABASE_*, CRON_SECRET
 npm install
 npm run db:migrate
@@ -252,7 +252,7 @@ npm run dev       # port 3000
 **Web app:**
 
 ```bash
-cd drishx-website
+cd drishx-web-app
 # .env.local: BACKEND_URL=http://127.0.0.1:3000   (cp .env.example .env.local)
 npm install
 npm run dev -- -p 3001

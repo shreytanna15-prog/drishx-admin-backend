@@ -1,7 +1,7 @@
 # Customer account configuration — Developer guide
 
 **Companion:** [CLIENT-PLAN.md](./CLIENT-PLAN.md) (product contract — do not contradict without updating both)  
-**Repos:** `Drishx-admin-and-backend`, `drishx-website`, `drishx-mobile-app`
+**Repos:** `drishx-admin-backend`, `drishx-web-app`, `drishx-mobile-app`
 
 ---
 
@@ -30,7 +30,7 @@
 | Ledger posts | `app/lib/finance/customer-ledger.ts` |
 | Payments | `app/lib/finance/payments.ts`, `Payment` model |
 | Credit notes (returns) | returns decision + `CreditNote` |
-| Web registration | `drishx-website` `app/signup`, `business-info`, `gst-details`, `registration-addresses`, `pending-approval` |
+| Web registration | `drishx-web-app` `app/signup`, `business-info`, `gst-details`, `registration-addresses`, `pending-approval` |
 | Mobile registration | `drishx-mobile-app` `app/signup.tsx`, `business-info.tsx`, … |
 | Audit | `app/lib/audit/*`, `docs/audit-and-logs-spec.md` |
 

@@ -1,6 +1,6 @@
 ---
 name: drishx-repo
-description: DrishX admin+backend repo map, stack, roles, and non-negotiables. Use when starting work in Drishx-admin-and-backend, choosing where code belongs, or clarifying product scope vs the web/mobile clients.
+description: DrishX admin+backend repo map, stack, roles, and non-negotiables. Use when starting work in drishx-admin-backend, choosing where code belongs, or clarifying product scope vs the web/mobile clients.
 ---
 
 # DrishX Admin + Backend

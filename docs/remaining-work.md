@@ -780,7 +780,7 @@ Add an admin-only **Create order** experience: pick an approved customer ? choos
 
 | Piece | Status |
 |--------|--------|
-| Website employee on-behalf (customer ? catalog / RX / white / color) | **Exists** � `drishx-website` `/employee/orders/on-behalf` |
+| Website employee on-behalf (customer ? catalog / RX / white / color) | **Exists** � `drishx-web-app` `/employee/orders/on-behalf` |
 | APIs accept staff + `userId` (customer) for cart, retail order, RX, color, wholesale | **Exists** � `ADMIN` and `EMPLOYEE` treated as staff |
 | Admin panel create order UI | **Missing** |
 | Admin panel return-on-behalf from order detail | Exists (returns only) |
@@ -894,7 +894,7 @@ Admin ? Orders ? Create order
 | Color on behalf | `app/api/orders/color-lens/route.ts` |
 | Cart / wholesale staff `userId` | `app/api/cart/route.ts`, `app/api/orders/wholesale-checkout/route.ts` |
 | Admin orders UI | `app/(admin)/orders/`, `app/(admin)/orders/[id]/page.tsx` |
-| Website employee on-behalf (reference only) | `drishx-website` `components/employee/employee-order-on-behalf-screen.tsx` |
+| Website employee on-behalf (reference only) | `drishx-web-app` `components/employee/employee-order-on-behalf-screen.tsx` |
 | Order model | `prisma/schema.prisma` ? `Order` |
 | Activity / audit | `OrderActivityLog`, `recordAuditEvent` / `ORDER_CREATED` |
 
@@ -940,8 +940,8 @@ This is the **single API-calling + list performance task**. It has two layers th
 
 | Repo | Transport (keep) |
 |------|------------------|
-| Admin panel (`Drishx-admin-and-backend`) | `adminFetch` / `AdminApiError` ? `app/lib/admin-api.ts` (+ `adminAuthFetch` refresh) |
-| Website (`drishx-website`) | `authFetch` / `authFetchJson` ? `lib/auth-fetch.ts` (BFF `/api/...`) |
+| Admin panel (`drishx-admin-backend`) | `adminFetch` / `AdminApiError` ? `app/lib/admin-api.ts` (+ `adminAuthFetch` refresh) |
+| Website (`drishx-web-app`) | `authFetch` / `authFetchJson` ? `lib/auth-fetch.ts` (BFF `/api/...`) |
 | Mobile (`drishx-mobile-app`) | `apiFetch` ? `lib/api-request.ts` (+ `authFetch`, offline queue, `BACKEND_BASE_URL`) |
 
 **Relation to other RWs:** Independent of RW-08/09/10 product features. New admin screens from those RWs **must** follow this pattern once Phase A lands. Do not block PO/catalog/create-order on finishing every list in Phase C � but **do** block merging new list UIs that still call `adminFetch` / `authFetch` / `apiFetch` from components after Phase A.
@@ -1154,8 +1154,8 @@ For **each** of admin / website / mobile `drishx-client-api`:
 
 | Area | Path |
 |------|------|
-| Admin skill | `Drishx-admin-and-backend/.agents/skills/drishx-client-api/SKILL.md` |
-| Website skill | `drishx-website/.agents/skills/drishx-client-api/SKILL.md` |
+| Admin skill | `drishx-admin-backend/.agents/skills/drishx-client-api/SKILL.md` |
+| Website skill | `drishx-web-app/.agents/skills/drishx-client-api/SKILL.md` |
 | Mobile skill | `drishx-mobile-app/.agents/skills/drishx-client-api/SKILL.md` |
 | Orders list (problem) | `app/api/orders/route.ts` `GET` |
 | Order detail | `app/api/orders/[id]/�` (keep fat) |
@@ -1164,8 +1164,8 @@ For **each** of admin / website / mobile `drishx-client-api`:
 | Invoices list | `app/api/invoices/route.ts` |
 | Good pagination refs | `app/api/lenses/route.ts`, `app/api/admin/catalog/products/route.ts` |
 | Admin transport | `app/lib/admin-api.ts` |
-| Website orders client | `drishx-website/lib/orders-api.ts` ? `fetchOrders` |
-| Website my-orders UI | `drishx-website/components/orders/my-orders-screen.tsx` |
+| Website orders client | `drishx-web-app/lib/orders-api.ts` ? `fetchOrders` |
+| Website my-orders UI | `drishx-web-app/components/orders/my-orders-screen.tsx` |
 | Mobile orders client | `drishx-mobile-app/lib/orders-api.ts` ? `fetchOrders` |
 | Admin orders / dispatch UI | `app/(admin)/orders/`, `app/(admin)/orders/dispatch/page.tsx` |
 
@@ -1436,7 +1436,7 @@ Reject / profile:
 | Profile ? pending | `app/api/users/me/profile/route.ts` |
 | Order eligibility / credit | `app/lib/customer-order-eligibility.ts`, `assertHardCreditAtCheckout` |
 | GST stub | `app/lib/gst/gstin-cloud.ts`, clients verify-gst route |
-| Website signup / login / pending | `drishx-website/app/signup`, `app/login`, pending-approval / company-profile screens |
+| Website signup / login / pending | `drishx-web-app/app/signup`, `app/login`, pending-approval / company-profile screens |
 | Mobile signup / login / profile | `drishx-mobile-app/app/signup.tsx`, `app/login.tsx`, company-profile |
 | Employee on-behalf (no walk-in create yet) | website + mobile `employee-order-on-behalf*` |
 

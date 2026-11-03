@@ -2,7 +2,7 @@
 
 **Document type:** Client meeting change backlog (bugs, UX, behaviour)  
 **Audience:** Developers picking up assigned work  
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-03
 
 ## How to use
 
@@ -10,6 +10,8 @@
 - Default sections: **Type**, **Goal**, **Current state**, **Scope (in)**, **Out of scope**.
 - Discuss → lock behaviour → then write the task here. Add items one by one across any module.
 - End-phase / older backlog stays in [`remaining-work.md`](./remaining-work.md) (`RW-*`). This file is for newer requested changes.
+- **Doc sync:** When an RC is locked, update that module’s **CLIENT-PLAN** (and README) so the living contract matches. Update **DEVELOPER-GUIDE** when the RC ships. Do not leave plan docs describing the old behaviour.
+- **Product catalog:** more RCs are expected after RC-03 — keep catalog CLIENT-PLAN as the target contract and append further `RC-*` here as they are locked.
 
 ---
 
@@ -20,6 +22,7 @@
 | RC-01 | Admin edit client + detail UX + verify rules + change history | backend (admin panel); APIs as needed |
 | RC-02 | Unwire / remove photo prescription orders from RX | backend, website, mobile, admin panel |
 | RC-03 | Product catalog: optional material + power range as attribute | backend (admin panel); APIs as needed |
+| RC-04 | Product catalog: parent + variants, new SKU/name builders | backend (admin panel); APIs as needed |
 
 ---
 
@@ -103,6 +106,7 @@ Admin can fix customer entity data when the shop will not update their own profi
 - [ ] Mobile/email change by anyone → unverified until OTP/verify again
 - [ ] Address verified on Admin approve at onboarding; any later address change → unverified until Admin verifies
 - [ ] Verified GST/PAN cannot be edited by client or Admin
+- [ ] `customer-account-configuration` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC
 
 ### Suggested first PR
 
@@ -239,6 +243,7 @@ Change — product catalog / attributes (critical)
 - [ ] Same other attrs + different power range ⇒ different product / different interim SKU  
 - [ ] Power-range APIs work like other attribute masters (active-only in create dropdowns)  
 - [ ] Docs/task note followed: delete ~2 test products and recreate; no migration path required
+- [ ] `product-catalog` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC
 
 ### Suggested first PR
 
@@ -246,5 +251,115 @@ Power-range option helper + attribute API/schema + Attributes tab UI. Then wire 
 
 ### Follow-up (not this RC)
 
-SKU string formatting / display redesign — track as a later `RC-*` when ready.
+- SKU/name redesign + parent/variant architecture → **[RC-04](#rc-04--product-catalog-parent--variants-new-skuname-builders)**
+- Further product-catalog meeting changes — add as new `RC-*` and sync CLIENT-PLAN when locked
+
+---
+
+## RC-04 — Product catalog: parent + variants, new SKU/name builders
+
+### Type
+
+Change — product catalog architecture (critical)
+
+### Goal
+
+1. Split catalog into a **parent** (attribute combination, created once) and **variants** (one per power-range attribute). Admin does not re-select the same attributes just to add another range.  
+2. Replace typed product **name** and the old SKU format with **auto builders**: compact SKU codes + human-readable names (supplier-style, no brand).  
+3. Each variant is a fully separate sellable product (own SKU, name, price, stock, matrix).
+
+### Current state
+
+- Flat `LensProduct`: attributes + inline range + typed `name` + SKU from `buildLensProductSkuCode` (`FAMILY-BASE-MATERIAL-…`).  
+- RC-03 target still describes one product row per range (select one power range).  
+- Admin pain: same attribute combo + second range means re-picking every attribute.  
+- Only ~2 test products; no stock/PO/order FKs to `LensProduct` yet.
+
+### Locked behaviour
+
+#### A. Parent + variant
+
+| Layer | Holds | Role |
+|-------|--------|------|
+| **LensProduct (parent)** | Material? · Base · Index · Family · Color | Attribute combination only. Internal base code (not shown in UI). No stock / no sellable SKU. |
+| **LensProductVariant** | Parent + **power-range attribute** | Sellable unit: unique `skuCode`, auto `name`, price, `isActive`, matrix, future stock/PO/orders |
+
+- Parent uniqueness: `(materialId?, baseId, indexId, familyId, colorId)` — **coating is not part of identity**.  
+- Variant uniqueness: `(productId, powerRangeId)` and unique `skuCode` / `name`.  
+- **Coating** may remain as an Attributes master tab for later use, but is **not** on create-product identity, SKU, or name. **Green / Blue / …** live under **Color**.
+
+#### B. SKU (variant — machine code)
+
+Order (omit Material when absent; all families including SV):
+
+`[MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}`
+
+- Compact codes (`.` → `P`, negatives → `M`, e.g. `PG-BR-1P56-KT-GREEN-SM6TP2-C0TM2`).  
+- **No coating** in SKU.  
+- Power bounds from the selected power-range attribute.  
+- Parent may store an **internal** base code without the power segment (not shown to Admin).
+
+#### C. Name (variant — human)
+
+Fully auto (Admin does **not** type name). Spaces + display labels + power as **`-6.00/+2.00`**:
+
+`[Material] [Index] [Family] [Base] [Color] -6.00/+2.00`
+
+Example: `PG 1.56 KT BR Green -6.00/+2.00`  
+
+Ignore supplier brand / fancy names (DECENTRX, Night Ryder, 75mm, etc.).
+
+#### D. Create / edit UX
+
+1. Pick attributes once (Material optional; Family, Base, Index, Color as required by form rules).  
+2. **Multi-select** one or more active power-range attributes.  
+3. Preview every variant SKU + name before save → one parent + N variants.  
+4. If that attribute combo already exists → open existing parent and offer **Add power range(s)** (do not invent a duplicate parent).  
+5. Parent detail: table of variants + **Add power range**; each variant opens its matrix.  
+6. After any variant has stock/orders: lock parent attribute edits. Lock power-range master bounds once used by a variant (create a new range instead of editing). Removing a range → deactivate variant (do not hard-delete if history exists).
+
+#### E. Catalog list views
+
+- Toggle **flat** (one row per variant) vs **grouped** (parents with expand → variants; group-by family / base / …).  
+- Server-paginated for both; expand loads variants on demand. Search/filters server-side (`Paginated` / `drishx-client-api`).
+
+#### F. Cutover
+
+No migration. Delete ~2 test products; recreate under parent + variants.
+
+### Scope (in)
+
+- Schema: parent `LensProduct` (attrs only) + `LensProductVariant` (range FK, sku, name, price, …)  
+- New `buildLensProductSkuCode` + `buildLensProductName` helpers  
+- Create: multi-range; detail: add ranges; list: flat + grouped  
+- Coating out of product identity / SKU / name  
+- Doc sync + delete/recreate test data note  
+
+### Out of scope
+
+- Brand attribute / supplier alias exact-match  
+- Overlapping-range order allocation (which variant fills −4.25 when two ranges overlap) — later orders/stock RC  
+- Live stock cells, PO wiring (stock-management plans still apply to **variant** id)  
+- Customer/mobile catalog rewrite  
+
+### Acceptance
+
+- [ ] Parent = attributes once; multiple power ranges = multiple variants without re-picking attrs  
+- [ ] Variant SKU matches locked format (no coating; all families; encoded power)  
+- [ ] Variant name fully auto with `-6.00/+2.00`; no typed name on create  
+- [ ] Same parent + two ranges ⇒ two unique SKUs/names; each own price/matrix path  
+- [ ] Existing parent reuse when attrs match; Add power range works  
+- [ ] Catalog flat + grouped views (server pagination / expand)  
+- [ ] Coating not required for product identity  
+- [ ] Test products deleted/recreated; no migration  
+- [ ] `product-catalog` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC  
+
+### Suggested first PR
+
+Schema parent/variant + SKU/name builders + APIs. Then create (multi-range) + parent detail add-range. Then list flat/grouped. Delete/recreate test products.
+
+### Related
+
+- Depends on / ships with **[RC-03](#rc-03--product-catalog-optional-material--power-range-as-attribute)** power-range attribute masters  
+- Living contract: [`product-catalog/CLIENT-PLAN.md`](./product-catalog/CLIENT-PLAN.md)
 

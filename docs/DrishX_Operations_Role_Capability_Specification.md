@@ -20,9 +20,9 @@ This document is a single, authoritative description of what the DrishX platform
 
 | Repo | Local path | Technology | What it is |
 | --- | --- | --- | --- |
-| **Admin + Backend** | `D:\internship\Drishx-admin-and-backend` | Next.js App Router, Prisma, PostgreSQL | The **single source of truth**. Hosts the entire REST API (`app/api/**/route.ts`) *and* the Admin web panel in one deployment. |
-| **Web App** | `D:\internship\drishx-web-app` | Next.js 16 App Router | Customer portal + Employee operations portal. Holds **no database**; proxies every call to the backend. |
-| **Mobile App** | `D:\internship\DrishX-App\DrishX-mobile-app` | Expo / React Native, expo-router | Customer app + Staff app in one binary, switched by role. Calls the backend **directly**. |
+| **Admin + Backend** | `C:\app-project\drishx\drishx-admin-backend` | Next.js App Router, Prisma, PostgreSQL | The **single source of truth**. Hosts the entire REST API (`app/api/**/route.ts`) *and* the Admin web panel in one deployment. |
+| **Web App** | `C:\app-project\drishx\drishx-web-app` | Next.js 16 App Router | Customer portal + Employee operations portal. Holds **no database**; proxies every call to the backend. |
+| **Mobile App** | `C:\app-project\drishx\drishx-mobile-app` | Expo / React Native, expo-router | Customer app + Staff app in one binary, switched by role. Calls the backend **directly**. |
 
 ### 1.3 Important correction to earlier assumptions
 
@@ -71,7 +71,7 @@ flowchart TD
     EMPLOYEE -->|"fulfils orders placed by"| CUSTOMER
 
     subgraph surfaces ["Where each role works"]
-        AdminPanel["Admin Panel<br/>Drishx-admin-and-backend<br/>AdminShell requires role ADMIN"]
+        AdminPanel["Admin Panel<br/>drishx-admin-backend<br/>AdminShell requires role ADMIN"]
         StaffWeb["Staff Web<br/>drishx-web-app /employee/*<br/>EmployeeDashboardShell"]
         StaffMobile["Staff Mobile<br/>Orders + Procurement tabs"]
         CustWeb["Customer Web<br/>drishx-web-app (customer)<br/>DashboardShell"]
@@ -322,7 +322,7 @@ Legend — **Yes** = allowed unconditionally for that role; **No** = blocked by 
 
 Status legend — **Working**: complete UI wired to a live endpoint. **Partial**: functional but with a missing surface, a hard-coded data source, or a missing guard. **Stubbed**: label or placeholder page with no implementation.
 
-### 6.1 `Drishx-admin-and-backend` — API + Admin Panel
+### 6.1 `drishx-admin-backend` — API + Admin Panel
 
 Roughly 64 route files exporting ~95 handlers, plus 21 admin pages. Admin pages are **not** in a `(admin)` route group; they sit directly under `app/` and are wrapped in `AdminShell`.
 
@@ -425,7 +425,7 @@ Roughly 64 route files exporting ~95 handlers, plus 21 admin pages. Admin pages 
 | Backend proxy (cart, cart/bulk) | `app/api/cart/route.ts`, `app/api/cart/bulk/route.ts` | — | Working |
 | Unused placeholder components | `components/dashboard/coming-soon.tsx`, `components/employee/employee-coming-soon.tsx` | — | **Stubbed — mounted by no page** |
 
-### 6.3 `DrishX-mobile-app` — Customer + Staff mobile
+### 6.3 `drishx-mobile-app` — Customer + Staff mobile
 
 56 routes under `app/`. One tab navigator; tab visibility switched by `isStaffRole(role)`. Calls the backend **directly**, not through the web app.
 
@@ -1235,7 +1235,7 @@ flowchart TB
         WebStore["localStorage<br/>drishx_token, drishx_user"]
     end
 
-    subgraph backend ["Drishx-admin-and-backend - Next.js + Prisma"]
+    subgraph backend ["drishx-admin-backend - Next.js + Prisma"]
         AdminUI["Admin panel pages<br/>AdminShell requires ADMIN<br/>localStorage drishx_admin_token"]
         API["REST API<br/>app/api/**/route.ts<br/>~64 routes, ~95 handlers"]
         Guards["Per-route JWT checks<br/>app/lib/auth.ts signToken / verifyToken<br/>app/lib/session-auth.ts getSession<br/>no middleware.ts"]
@@ -1274,7 +1274,7 @@ flowchart TB
 
 | Aspect | Detail |
 | --- | --- |
-| **Web → backend** | Server-side proxy. `lib/backend-url.ts` reads `BACKEND_URL` (default `http://127.0.0.1:3000`); current `.env.local` points at `https://drishx-admin-and-backend.vercel.app`. The catch-all handler rewrites `/api/{path}` to `{BACKEND_URL}/api/{path}`, forwards `Authorization` and `Content-Type`, uses `cache: "no-store"`, and returns `502` if the backend is unreachable. |
+| **Web → backend** | Server-side proxy. `lib/backend-url.ts` reads `BACKEND_URL` (default `http://127.0.0.1:3000`); current `.env.local` points at `https://drishx-admin-backend.vercel.app`. The catch-all handler rewrites `/api/{path}` to `{BACKEND_URL}/api/{path}`, forwards `Authorization` and `Content-Type`, uses `cache: "no-store"`, and returns `502` if the backend is unreachable. |
 | **Mobile → backend** | Direct. `lib/api-config.ts` validates `EXPO_PUBLIC_BACKEND_BASE_URL` at startup. No proxy hop. |
 | **Shared auth** | One JWT format everywhere: `{ userId, role }`, HS256 via `jsonwebtoken`, `expiresIn: "7d"`, secret `process.env.JWT_SECRET` with the fallback literal `"please_change_this_secret"`. A token minted by any client works against any surface. |
 | **Token storage differs per client** | Web: `localStorage` (`drishx_token`, `drishx_user`). Admin panel: `localStorage` (`drishx_admin_token`, `drishx_admin_user`) — a **separate key namespace** on the same origin family. Mobile: `AsyncStorage` under `@drishx/auth-session` — **not** `expo-secure-store`. |
@@ -1427,29 +1427,29 @@ Everything else in this section is structural — stub pages, hrefless labels, u
 
 | Concern | File |
 | --- | --- |
-| Prisma schema (28 models, 24 enums) | `Drishx-admin-and-backend/prisma/schema.prisma` |
-| JWT sign / verify, password hashing | `Drishx-admin-and-backend/app/lib/auth.ts` |
-| Bearer token extraction | `Drishx-admin-and-backend/app/lib/session-auth.ts` |
-| Canonical order status transitions | `Drishx-admin-and-backend/app/lib/order-status-transitions.ts` |
-| Order status enforcement, force-cancel, invoice flip | `Drishx-admin-and-backend/app/api/orders/[id]/route.ts` |
-| Shared order placement | `Drishx-admin-and-backend/app/lib/place-order.ts` |
-| Reservation and physical stock movement | `Drishx-admin-and-backend/app/lib/order-inventory.ts`, `app/lib/cart-reservations.ts` |
-| Least-load employee assignment | `Drishx-admin-and-backend/app/lib/assign-order-to-employee.ts` |
-| Alternate-power state machine | `Drishx-admin-and-backend/app/lib/alternate-power-workflow.ts` |
-| Return decision (credit / replacement / reject) | `Drishx-admin-and-backend/app/api/returns/[id]/decision/route.ts` |
-| Admin panel role gate | `Drishx-admin-and-backend/components/admin-shell.tsx` |
-| Admin sidebar, including stubs | `Drishx-admin-and-backend/components/admin-sidebar.tsx` |
+| Prisma schema (28 models, 24 enums) | `drishx-admin-backend/prisma/schema.prisma` |
+| JWT sign / verify, password hashing | `drishx-admin-backend/app/lib/auth.ts` |
+| Bearer token extraction | `drishx-admin-backend/app/lib/session-auth.ts` |
+| Canonical order status transitions | `drishx-admin-backend/app/lib/order-status-transitions.ts` |
+| Order status enforcement, force-cancel, invoice flip | `drishx-admin-backend/app/api/orders/[id]/route.ts` |
+| Shared order placement | `drishx-admin-backend/app/lib/place-order.ts` |
+| Reservation and physical stock movement | `drishx-admin-backend/app/lib/order-inventory.ts`, `app/lib/cart-reservations.ts` |
+| Least-load employee assignment | `drishx-admin-backend/app/lib/assign-order-to-employee.ts` |
+| Alternate-power state machine | `drishx-admin-backend/app/lib/alternate-power-workflow.ts` |
+| Return decision (credit / replacement / reject) | `drishx-admin-backend/app/api/returns/[id]/decision/route.ts` |
+| Admin panel role gate | `drishx-admin-backend/components/admin-shell.tsx` |
+| Admin sidebar, including stubs | `drishx-admin-backend/components/admin-sidebar.tsx` |
 | Web backend proxy | `drishx-web-app/app/api/[...path]/route.ts` |
 | Web backend URL resolution | `drishx-web-app/lib/backend-url.ts` |
 | Web customer guard | `drishx-web-app/components/dashboard/dashboard-shell.tsx` |
 | Web staff guard | `drishx-web-app/components/employee/employee-dashboard-shell.tsx` |
 | Web order-kind classification | `drishx-web-app/lib/order-list-display.ts` |
 | Web wholesale matrix builder | `drishx-web-app/components/wholesale/wholesale-order-screen.tsx` |
-| Mobile backend base URL | `DrishX-mobile-app/lib/api-config.ts` |
-| Mobile auth, token storage, `isStaffRole` | `DrishX-mobile-app/lib/auth.tsx` |
-| Mobile onboarding routing | `DrishX-mobile-app/lib/auth-api.ts` |
-| Mobile tab guard and role-based tabs | `DrishX-mobile-app/app/(tabs)/_layout.tsx` |
-| Mobile duplicate transition map | `DrishX-mobile-app/lib/order-tracking.ts` |
-| Mobile status sheet (all-statuses bug) | `DrishX-mobile-app/components/employee-order-range-sheet.tsx` |
-| Mobile wholesale matrix builder | `DrishX-mobile-app/app/wholesale/product-order.tsx` |
-| Mobile offline queue | `DrishX-mobile-app/lib/offline-queue.ts`, `lib/api-request.ts` |
+| Mobile backend base URL | `drishx-mobile-app/lib/api-config.ts` |
+| Mobile auth, token storage, `isStaffRole` | `drishx-mobile-app/lib/auth.tsx` |
+| Mobile onboarding routing | `drishx-mobile-app/lib/auth-api.ts` |
+| Mobile tab guard and role-based tabs | `drishx-mobile-app/app/(tabs)/_layout.tsx` |
+| Mobile duplicate transition map | `drishx-mobile-app/lib/order-tracking.ts` |
+| Mobile status sheet (all-statuses bug) | `drishx-mobile-app/components/employee-order-range-sheet.tsx` |
+| Mobile wholesale matrix builder | `drishx-mobile-app/app/wholesale/product-order.tsx` |
+| Mobile offline queue | `drishx-mobile-app/lib/offline-queue.ts`, `lib/api-request.ts` |

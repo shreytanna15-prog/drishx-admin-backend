@@ -3,7 +3,7 @@
 **Document type:** Data-grounded catalog inventory (Supabase Postgres)  
 **Generated from audit:** 22 August 2026  
 **Source script:** `scripts/audit-lens-catalog.mjs` → `scripts/catalog-audit-output/` (gitignored)  
-**Re-run:** `npm run audit:catalog` from `Drishx-admin-and-backend`
+**Re-run:** `npm run audit:catalog` from `drishx-admin-backend`
 
 For universal power rules, see [`lens-logic-handover.md`](./lens-logic-handover.md). For how to add new rows, see [`how-to-add-lens-data.md`](./how-to-add-lens-data.md).
 
@@ -295,7 +295,7 @@ If `sphStartRange` / `cylStartRange` are wrong, the shop shows **wrong pickable 
 ## 15. Re-running the audit
 
 ```bash
-cd Drishx-admin-and-backend
+cd drishx-admin-backend
 npm run audit:catalog
 ```
 

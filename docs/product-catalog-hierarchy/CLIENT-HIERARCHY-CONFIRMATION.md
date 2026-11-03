@@ -2,6 +2,8 @@
 
 How products will be organised in DrishX — plain language, no technical detail.
 
+**Update (RC-03 + RC-04):** **Material is optional**. **Power range** is an Attributes master. Product = **parent** (Material? · Base · Index · Family · Color) with **many variants** (one per power range). **Coating is not product identity** — Green/Blue/… are **Color**. Auto SKU + auto name on each variant. Living detail: [`../product-catalog/CLIENT-PLAN.md`](../product-catalog/CLIENT-PLAN.md) and [`../requested-changes.md`](../requested-changes.md).
+
 ---
 
 ## Simple idea
@@ -17,12 +19,13 @@ Lenses work the same way:
 
 | Part | What it includes | How it works |
 |------|------------------|--------------|
-| **Core hierarchy** | Family → Base → Material | Choosing one filters the next dropdown |
-| **Aside fields** | Index, Coating, Color | Separate lists on the form |
-| **After the product** | Power range → each power | Stock is power by power; SV, KT, and V2 each have their own power rules |
+| **Core hierarchy** | Family → Base → Material (optional) | Choosing one filters the next dropdown when Material is used |
+| **Aside fields** | Index, Color, **Power range** (Coating not identity) | Separate lists / Attributes tabs |
+| **After the parent** | Each selected power range → a **variant** → matrix powers | Stock is per variant; SV, KT, and V2 each have their own power rules |
 
-One product line = family + base + material + index + coating + color (when used).  
-Different powers under that line = separate stock items (every **0.25** step where that applies).
+One **parent** = family + base + material (if any) + index + color.  
+One **variant** = that parent + one power-range attribute (own SKU, name, price, stock later).  
+Admin picks the parent attrs once and can attach many ranges.
 
 ---
 

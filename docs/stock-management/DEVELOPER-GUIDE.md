@@ -5,7 +5,7 @@
 **Notes:** [../stock-management-notes.md](../stock-management-notes.md)  
 **Legacy tracker:** [../remaining-work.md](../remaining-work.md) → RW-08 (keep **rules**; replace **identity** with `LensProduct` + power leaf)
 
-**Repos:** `Drishx-admin-and-backend`  
+**Repos:** `drishx-admin-backend`  
 **Data note:** Development phase — no production stock to preserve. Prefer clean identity under catalog; dual-write to legacy lens rows only if shop/orders still require `lensType`+`lensId` until cutover.
 
 ---

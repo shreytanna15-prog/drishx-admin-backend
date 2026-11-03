@@ -1,4 +1,4 @@
-# Project agent skills (Drishx-admin-and-backend)
+# Project agent skills (drishx-admin-backend)
 
 Skills live in **`.agents/skills/`** as markdown (`SKILL.md` + optional references).
 
