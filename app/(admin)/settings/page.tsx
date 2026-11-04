@@ -6,22 +6,15 @@ import { DetailSkeleton } from "@/components/admin-skeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminSelect } from "@/components/admin-select";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-
-type AlternatePowerSettings = {
-  maxSphDelta: number;
-  maxCylDelta: number;
-  maxSuggestions: number;
-  preferWarehouse: boolean;
-  hardMaxDistanceScore: number;
-};
-
-type DispatchCutoffSettings = {
-  enabled: boolean;
-  time: string;
-  timezone: string;
-  skipWeekends: boolean;
-};
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  getAlternatePowerSettings,
+  getDispatchCutoffSettings,
+  updateAlternatePowerSettings,
+  updateDispatchCutoffSettings,
+  type AlternatePowerSettings,
+  type DispatchCutoffSettings,
+} from "@/app/lib/admin-settings";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AlternatePowerSettings | null>(null);
@@ -37,15 +30,8 @@ export default function SettingsPage() {
       setLoading(true);
       setError("");
       try {
-        const data = await adminFetch<{ settings: AlternatePowerSettings }>(
-          "/api/settings/alternate-power"
-        );
-        if (!cancelled) {
-          setSettings({
-            ...data.settings,
-            hardMaxDistanceScore: data.settings.hardMaxDistanceScore ?? 4,
-          });
-        }
+        const data = await getAlternatePowerSettings();
+        if (!cancelled) setSettings(data);
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -68,10 +54,8 @@ export default function SettingsPage() {
     let cancelled = false;
     async function loadCutoff() {
       try {
-        const data = await adminFetch<{ settings: DispatchCutoffSettings }>(
-          "/api/settings/dispatch-cutoff"
-        );
-        if (!cancelled) setDispatchCutoff(data.settings);
+        const data = await getDispatchCutoffSettings();
+        if (!cancelled) setDispatchCutoff(data);
       } catch {
         setDispatchCutoff(null);
       }
@@ -88,14 +72,8 @@ export default function SettingsPage() {
     setError("");
     setMessage("");
     try {
-      const data = await adminFetch<{ settings: AlternatePowerSettings }>(
-        "/api/settings/alternate-power",
-        {
-          method: "PUT",
-          body: JSON.stringify(settings),
-        }
-      );
-      setSettings(data.settings);
+      const data = await updateAlternatePowerSettings(settings);
+      setSettings(data);
       setMessage("Alternate power settings saved.");
     } catch (err) {
       setError(
@@ -112,14 +90,8 @@ export default function SettingsPage() {
     setError("");
     setMessage("");
     try {
-      const data = await adminFetch<{ settings: DispatchCutoffSettings }>(
-        "/api/settings/dispatch-cutoff",
-        {
-          method: "PUT",
-          body: JSON.stringify(dispatchCutoff),
-        }
-      );
-      setDispatchCutoff(data.settings);
+      const data = await updateDispatchCutoffSettings(dispatchCutoff);
+      setDispatchCutoff(data);
       setMessage("Dispatch cutoff settings saved.");
     } catch (err) {
       setError(

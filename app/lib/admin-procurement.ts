@@ -1,6 +1,7 @@
 /** Client-side types + fetch helpers for stock-wise procurement. */
 
 import { ProcurementRequestStatus } from "@prisma/client";
+import { adminFetch } from "@/app/lib/admin-api";
 
 export type LensPowerInfo = {
   sph: number | null;
@@ -234,4 +235,25 @@ export function sourceLabel(source: string): string {
     default:
       return source;
   }
+}
+
+export async function listProcurementRequests(
+  params: URLSearchParams,
+  init?: RequestInit
+): Promise<ProcurementRequestsResponse> {
+  return adminFetch<ProcurementRequestsResponse>(
+    `/api/procurement/requests?${params.toString()}`,
+    init
+  );
+}
+
+export async function procurementRequestAction(
+  requestId: string,
+  action: "approve" | "cancel",
+  body?: Record<string, unknown>
+): Promise<void> {
+  await adminFetch(`/api/procurement/requests/${requestId}/${action}`, {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+  });
 }

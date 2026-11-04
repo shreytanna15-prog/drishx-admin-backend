@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Loader2 } from "lucide-react";
-import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { listAdminEmployees, patchEmployeeStaffRole } from "@/app/lib/admin-employees";
+import {
+  deleteStaffRole,
+  getStaffRole,
+  updateStaffRole,
+  type StaffRoleDetail,
+} from "@/app/lib/admin-staff-roles";
 import { STAFF_PERMISSION_GROUPS } from "@/app/lib/staff-permissions";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
@@ -20,17 +27,6 @@ type Member = {
   isActive: boolean;
 };
 
-type RoleDetail = {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  isSystem: boolean;
-  permissions: string[];
-  memberCount?: number;
-  members: Member[];
-};
-
 type EmployeeOption = {
   id: string;
   name: string | null;
@@ -43,7 +39,7 @@ export default function StaffRoleDetailPage() {
   const router = useRouter();
   const id = params?.id;
 
-  const [role, setRole] = useState<RoleDetail | null>(null);
+  const [role, setRole] = useState<StaffRoleDetail | null>(null);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -59,16 +55,22 @@ export default function StaffRoleDetailPage() {
     setLoading(true);
     setError("");
     try {
-      const [roleData, empData] = await Promise.all([
-        adminFetch<{ role: RoleDetail }>(`/api/admin/staff-roles/${id}`),
-        adminFetch<{ employees: EmployeeOption[] }>("/api/users/employees"),
+      const [next, empList] = await Promise.all([
+        getStaffRole(id),
+        listAdminEmployees(),
       ]);
-      const next = roleData.role;
       setRole(next);
       setName(next.name);
       setDescription(next.description ?? "");
       setPermissions(next.permissions);
-      setEmployees(Array.isArray(empData.employees) ? empData.employees : []);
+      setEmployees(
+        empList.map((e) => ({
+          id: e.id,
+          name: e.name,
+          email: e.email,
+          staffRole: e.staffRole ? { id: e.staffRole.id } : null,
+        }))
+      );
     } catch (err) {
       setError(
         err instanceof AdminApiError ? err.message : "Failed to load role."
@@ -104,13 +106,10 @@ export default function StaffRoleDetailPage() {
     setError("");
     setMessage("");
     try {
-      await adminFetch(`/api/admin/staff-roles/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || null,
-          permissions,
-        }),
+      await updateStaffRole(id, {
+        name: name.trim(),
+        description: description.trim() || null,
+        permissions,
       });
       setMessage("Role saved.");
       await load();
@@ -127,7 +126,7 @@ export default function StaffRoleDetailPage() {
     setSaving(true);
     setError("");
     try {
-      await adminFetch(`/api/admin/staff-roles/${id}`, { method: "DELETE" });
+      await deleteStaffRole(id);
       router.replace("/employees/roles");
     } catch (err) {
       setError(
@@ -143,10 +142,7 @@ export default function StaffRoleDetailPage() {
     setError("");
     setMessage("");
     try {
-      await adminFetch(`/api/users/employees/${assignId}/staff-role`, {
-        method: "PATCH",
-        body: JSON.stringify({ staffRoleId: id }),
-      });
+      await patchEmployeeStaffRole(assignId, id);
       setAssignId("");
       setMessage("Employee assigned.");
       await load();
@@ -163,10 +159,7 @@ export default function StaffRoleDetailPage() {
     setSaving(true);
     setError("");
     try {
-      await adminFetch(`/api/users/employees/${employeeId}/staff-role`, {
-        method: "PATCH",
-        body: JSON.stringify({ staffRoleId: null }),
-      });
+      await patchEmployeeStaffRole(employeeId, null);
       setMessage("Employee unassigned (defaults to Full operations).");
       await load();
     } catch (err) {

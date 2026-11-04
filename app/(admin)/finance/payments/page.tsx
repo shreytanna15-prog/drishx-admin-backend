@@ -3,22 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  confirmFinancePaymentClaim,
+  listPendingFinancePaymentClaims,
+  rejectFinancePaymentClaim,
+  type FinancePaymentClaim,
+} from "@/app/lib/admin-finance-payments";
 import { Button } from "@/components/ui/button";
 
-type Claim = {
-  id: string;
-  amount: number | string;
-  mode: string;
-  reference: string | null;
-  status: string;
-  createdAt: string;
-  customer: { name: string | null; email: string; businessName: string | null };
-  items: Array<{ invoice: { invoiceNumber: string } }>;
-};
-
 export default function PaymentsClaimsPage() {
-  const [claims, setClaims] = useState<Claim[]>([]);
+  const [claims, setClaims] = useState<FinancePaymentClaim[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
@@ -26,15 +21,7 @@ export default function PaymentsClaimsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminFetch<{ items?: Claim[] } | Claim[]>(
-        "/api/finance/payments?kind=claims&status=PENDING&page=1&limit=100"
-      );
-      const items = Array.isArray(data)
-        ? data
-        : Array.isArray(data.items)
-          ? data.items
-          : [];
-      setClaims(items);
+      setClaims(await listPendingFinancePaymentClaims());
       setError("");
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Failed to load.");
@@ -50,10 +37,7 @@ export default function PaymentsClaimsPage() {
   async function confirm(id: string) {
     setBusyId(id);
     try {
-      await adminFetch("/api/finance/payments", {
-        method: "POST",
-        body: JSON.stringify({ action: "confirm-claim", claimId: id }),
-      });
+      await confirmFinancePaymentClaim(id);
       await load();
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Confirm failed.");
@@ -65,14 +49,7 @@ export default function PaymentsClaimsPage() {
   async function reject(id: string) {
     setBusyId(id);
     try {
-      await adminFetch("/api/finance/payments", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "reject-claim",
-          claimId: id,
-          reason: "Rejected by admin",
-        }),
-      });
+      await rejectFinancePaymentClaim(id, "Rejected by admin");
       await load();
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Reject failed.");

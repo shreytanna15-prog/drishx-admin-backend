@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { recordFinancePayment } from "@/app/lib/admin-finance-payments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   formatInvoiceMoney,
+  getAdminInvoice,
   openAdminInvoiceTaxPdf,
 } from "@/app/lib/admin-invoices";
 
@@ -59,7 +61,7 @@ export default function InvoiceDetailPage() {
   const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
-    void adminFetch<InvoiceDetail>(`/api/invoices/${id}`)
+    void getAdminInvoice<InvoiceDetail>(id)
       .then((d) => {
         setInvoice(d);
         setPayAmount(String(Number(d.amountOutstanding) || ""));
@@ -74,17 +76,14 @@ export default function InvoiceDetailPage() {
     if (!invoice) return;
     setBusy(true);
     try {
-      await adminFetch("/api/finance/payments", {
-        method: "POST",
-        body: JSON.stringify({
-          customerId: invoice.userId,
-          amount: Number(payAmount),
-          mode: "UPI",
-          reference: payRef,
-          allocations: [{ invoiceId: invoice.id, amount: Number(payAmount) }],
-        }),
+      await recordFinancePayment({
+        customerId: invoice.userId,
+        amount: Number(payAmount),
+        mode: "UPI",
+        reference: payRef,
+        allocations: [{ invoiceId: invoice.id, amount: Number(payAmount) }],
       });
-      const refreshed = await adminFetch<InvoiceDetail>(`/api/invoices/${id}`);
+      const refreshed = await getAdminInvoice<InvoiceDetail>(id);
       setInvoice(refreshed);
       setPayAmount(String(Number(refreshed.amountOutstanding) || ""));
     } catch (err) {

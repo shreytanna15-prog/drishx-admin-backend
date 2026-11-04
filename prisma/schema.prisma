@@ -73,6 +73,7 @@ model User {
   businessAddress            String?
   state                      String?
   pincode                    String?
+  /// Customers: unique when set (partial DB index `User_customer_mobileNumber_key`). Staff may be null.
   mobileNumber               String?
   /// Set only after successful mobile OTP (2factor / OTP_DEV_MODE).
   mobileVerifiedAt           DateTime?

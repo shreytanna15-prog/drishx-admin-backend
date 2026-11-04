@@ -7,11 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminSelect } from "@/components/admin-select";
 import { AdminCreateReturnPanel } from "@/components/admin-create-return-panel";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { listDeliveryServices } from "@/app/lib/admin-delivery";
 import { invalidateListCache } from "@/app/lib/admin-cache";
+import { listAdminEmployees } from "@/app/lib/admin-employees";
 import {
   type AdminOrder,
   buildAdminStatusSelectOptions,
+  deleteAdminOrder,
+  dispatchAdminOrderToCourier,
+  patchAdminOrder,
+  putAdminOrder,
+  warehouseReleaseAdminOrder,
   formatDate,
   formatMoney,
   formatStatus,
@@ -147,20 +154,25 @@ export function AdminOrderControlPanel({
     let cancelled = false;
     async function loadEmployees() {
       try {
-        const data = await adminFetch<{ employees: AdminEmployee[] }>(
-          "/api/users/employees"
-        );
-        if (!cancelled) setEmployees(Array.isArray(data.employees) ? data.employees : []);
+        const data = await listAdminEmployees();
+        if (!cancelled) setEmployees(data);
       } catch {
         if (!cancelled) setEmployees([]);
       }
     }
     async function loadDeliveryServices() {
       try {
-        const data = await adminFetch<
-          Array<{ id: string; serviceName: string; customerRate: number; etaText?: string | null }>
-        >("/api/delivery-services?all=1");
-        if (!cancelled) setDeliveryServices(Array.isArray(data) ? data : []);
+        const data = await listDeliveryServices({ all: true });
+        if (!cancelled) {
+          setDeliveryServices(
+            data.map((s) => ({
+              id: s.id,
+              serviceName: s.serviceName,
+              customerRate: s.customerRate,
+              etaText: s.etaText,
+            }))
+          );
+        }
       } catch {
         if (!cancelled) setDeliveryServices([]);
       }
@@ -177,10 +189,7 @@ export function AdminOrderControlPanel({
     setError("");
     setMessage("");
     try {
-      const updated = await adminFetch<AdminOrder>(`/api/orders/${order.id}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      });
+      const updated = await putAdminOrder(order.id, body);
       invalidateListCache("orders");
       onUpdated(updated);
       setMessage("Order updated.");
@@ -231,10 +240,7 @@ export function AdminOrderControlPanel({
     setError("");
     setMessage("");
     try {
-      const res = await adminFetch<{ order: AdminOrder; message?: string }>(
-        `/api/orders/${order.id}/warehouse-release`,
-        { method: "POST", body: "{}" }
-      );
+      const res = await warehouseReleaseAdminOrder(order.id);
       invalidateListCache("orders");
       onUpdated(res.order);
       setMessage(
@@ -286,15 +292,9 @@ export function AdminOrderControlPanel({
     setError("");
     setMessage("");
     try {
-      const res = await adminFetch<{
-        order: AdminOrder;
-        duplicateWarning?: string | null;
-      }>(`/api/orders/${order.id}/dispatch`, {
-        method: "POST",
-        body: JSON.stringify({
-          courierName: name,
-          trackingNumber: tracking,
-        }),
+      const res = await dispatchAdminOrderToCourier(order.id, {
+        courierName: name,
+        trackingNumber: tracking,
       });
       invalidateListCache("orders");
       onUpdated(res.order);
@@ -327,10 +327,7 @@ export function AdminOrderControlPanel({
     try {
       let current: AdminOrder = order;
       if (current.status !== "PICKING" && current.status !== "PACKED") {
-        current = await adminFetch<AdminOrder>(`/api/orders/${order.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ status: "PICKING" }),
-        });
+        current = await putAdminOrder(order.id, { status: "PICKING" });
         onUpdated(current);
       }
       const body: Record<string, unknown> = {
@@ -339,10 +336,7 @@ export function AdminOrderControlPanel({
         actualWeight: w,
       };
       if (current.delivery && weightReason.trim()) body.weightReason = weightReason.trim();
-      const updated = await adminFetch<AdminOrder>(`/api/orders/${order.id}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      });
+      const updated = await putAdminOrder(order.id, body);
       invalidateListCache("orders");
       onUpdated(updated);
       setMessage("Order packed with delivery charge.");
@@ -392,10 +386,7 @@ export function AdminOrderControlPanel({
         body.axis = editAxis === "" ? null : Number(editAxis);
         body.add = editAdd === "" ? null : Number(editAdd);
       }
-      const updated = await adminFetch<AdminOrder>(`/api/orders/${order.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      });
+      const updated = await patchAdminOrder(order.id, body);
       invalidateListCache("orders");
       onUpdated(updated);
       setMessage("Order details saved.");
@@ -417,7 +408,7 @@ export function AdminOrderControlPanel({
     setBusy("delete");
     setError("");
     try {
-      await adminFetch(`/api/orders/${order.id}`, { method: "DELETE" });
+      await deleteAdminOrder(order.id);
       invalidateListCache("orders");
       router.push("/orders");
     } catch (err) {

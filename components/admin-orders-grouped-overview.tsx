@@ -13,7 +13,7 @@ import {
   ListSkeleton,
   PaginatedListStatusBanner,
 } from "@/components/admin-skeletons";
-import { adminFetch } from "@/app/lib/admin-api";
+import { listAdminEmployees } from "@/app/lib/admin-employees";
 import {
   resolvePaginatedListUi,
   usePaginatedListState,
@@ -144,11 +144,9 @@ export function AdminOrdersGroupedOverview() {
     let cancelled = false;
     async function loadEmployees() {
       try {
-        const empData = await adminFetch<{ employees: AdminEmployee[] }>(
-          "/api/users/employees"
-        );
+        const employees = await listAdminEmployees();
         if (!cancelled) {
-          setEmployees(Array.isArray(empData.employees) ? empData.employees : []);
+          setEmployees(employees);
         }
       } catch {
         if (!cancelled) setEmployees([]);

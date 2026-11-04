@@ -172,13 +172,13 @@ describe("classifyOrdersListScope", () => {
       expected: "rx_lab",
     },
     {
-      name: "warehouse hold → rx_lab",
+      name: "warehouse hold without RX notes → catalog (RC-02)",
       order: {
         warehouseHold: true,
         notes: null,
         orderImageUrl: null,
       },
-      expected: "rx_lab",
+      expected: "catalog",
     },
     {
       name: "legacy photo (image, null notes, no hold) → catalog (RC-02)",
@@ -190,11 +190,20 @@ describe("classifyOrdersListScope", () => {
       expected: "catalog",
     },
     {
-      name: "legacy photo still on warehouse hold → rx_lab",
+      name: "legacy photo still on warehouse hold → catalog (RC-02)",
       order: {
         warehouseHold: true,
         notes: null,
         orderImageUrl: "https://cdn.example/rx.jpg",
+      },
+      expected: "catalog",
+    },
+    {
+      name: "RX on warehouse hold → rx_lab",
+      order: {
+        warehouseHold: true,
+        notes: `${RX_ORDER_NOTES_MARKER} OD/OS`,
+        orderImageUrl: null,
       },
       expected: "rx_lab",
     },
@@ -220,51 +229,32 @@ describe("catalogWhere NULL-safety", () => {
     );
     const where = catalogWhere();
     assert.equal("NOT" in where && where.NOT != null, false);
-    assert.ok(where.AND && Array.isArray(where.AND));
   });
 
-  it("keeps warehouseHold false and null-safe notes / image arms", () => {
+  it("excludes RX notes with null-safe notes arms (held non-RX stays catalog)", () => {
     const where = catalogWhere();
-    const parts = where.AND as PrismaTypes.OrderWhereInput[];
+    assert.ok(where.OR && Array.isArray(where.OR));
     assert.ok(
-      parts.some(
-        (p) =>
-          p &&
-          typeof p === "object" &&
-          "warehouseHold" in p &&
-          p.warehouseHold === false
-      )
-    );
-    const notesSafe = parts.filter(
-      (p) => p && typeof p === "object" && "OR" in p && Array.isArray(p.OR)
-    );
-    assert.ok(
-      notesSafe.some((p) =>
-        (p.OR as PrismaTypes.OrderWhereInput[]).some(
-          (arm) =>
-            arm &&
-            typeof arm === "object" &&
-            "notes" in arm &&
-            arm.notes === null
-        )
+      where.OR.some(
+        (arm) =>
+          arm &&
+          typeof arm === "object" &&
+          "notes" in arm &&
+          arm.notes === null
       ),
       "catalogWhere must allow notes: null"
     );
+    assert.equal("warehouseHold" in where, false);
   });
 });
 
-describe("rxLabWhere is RX / hold only (RC-02)", () => {
-  it("has no orderImageUrl (photo) arm", () => {
+describe("rxLabWhere is RX notes only (RC-02)", () => {
+  it("has no orderImageUrl or bare warehouseHold arm", () => {
     const where = rxLabWhere();
-    assert.ok(where.OR && Array.isArray(where.OR));
-    assert.equal(where.OR.length, 2);
-    assert.equal(JSON.stringify(where).includes("orderImageUrl"), false);
-    assert.deepEqual(where.OR[0], { warehouseHold: true });
-    assert.ok(
-      where.OR.some(
-        (arm) => arm && typeof arm === "object" && "notes" in arm
-      )
-    );
+    const json = JSON.stringify(where);
+    assert.equal(json.includes("orderImageUrl"), false);
+    assert.equal(json.includes("warehouseHold"), false);
+    assert.ok(where.notes && typeof where.notes === "object");
   });
 });
 
@@ -279,7 +269,7 @@ describe("buildOrdersListWhere — catalog / RETAIL scopes", () => {
     });
     const json = JSON.stringify(where);
     assert.match(json, /"notes":null/);
-    assert.equal(json.includes('"warehouseHold":false'), true);
+    assert.equal(json.includes(RX_ORDER_NOTES_MARKER), true);
   });
 
   it("scope=catalog + q=238170 still ANDs null-safe catalog (ORD238170 path)", () => {

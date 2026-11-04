@@ -1,4 +1,5 @@
 import type { OrderStatus } from "@prisma/client";
+import { adminFetch } from "@/app/lib/admin-api";
 
 export const DASHBOARD_TIMEZONE = "Asia/Kolkata";
 export const LOW_STOCK_MAX = 5;
@@ -212,5 +213,13 @@ export function customerLabel(user: {
     user.name?.trim() ||
     user.email?.trim() ||
     "Unknown customer"
+  );
+}
+
+export async function fetchAdminDashboard(
+  range: DashboardRange
+): Promise<AdminDashboardPayload> {
+  return adminFetch<AdminDashboardPayload>(
+    `/api/admin/dashboard?range=${range}`
   );
 }

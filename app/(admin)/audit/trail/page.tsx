@@ -7,13 +7,12 @@ import { TableSkeleton } from "@/components/admin-skeletons";
 import { AuditTrailTable } from "@/components/audit/audit-trail-table";
 import { AdminApiError } from "@/app/lib/admin-api";
 import {
-  auditExportUrl,
+  downloadAuditExport,
   fetchAuditEvents,
   type AuditEventRow,
 } from "@/app/lib/admin-audit";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
 
 export default function AuditTrailPage() {
   const [items, setItems] = useState<AuditEventRow[]>([]);
@@ -51,15 +50,12 @@ export default function AuditTrailPage() {
   }, [load]);
 
   function handleExport() {
-    const url = auditExportUrl({
+    void downloadAuditExport({
       module: module || undefined,
       action: action || undefined,
       q: query || undefined,
-    });
-    void adminAuthFetch(url, { method: "GET" })
-      .then(async (res) => {
-        if (!res.ok) throw new Error("Export failed");
-        const blob = await res.blob();
+    })
+      .then((blob) => {
         const objectUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = objectUrl;

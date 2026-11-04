@@ -22,52 +22,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  getAttendanceCalendar,
+  getAttendanceDayDetail,
+  getAttendanceToday,
+  markAttendanceManual,
+  refreshAttendanceTodayToken,
+  type AttendanceCalendarDay,
+  type AttendanceCalendarPayload,
+  type AttendanceRecordRow,
+  type AttendanceTodayPayload,
+  type AttendanceEmployeeBrief,
+} from "@/app/lib/admin-attendance";
 import { cn } from "@/lib/utils";
-
-type EmployeeBrief = {
-  id: string;
-  name: string | null;
-  email: string;
-  role: string;
-  isActive: boolean;
-};
-
-type AttendanceRecordRow = {
-  id: string;
-  employeeId: string;
-  employee: EmployeeBrief;
-  status: string;
-  method: "QR_SCAN" | "BY_ADMIN";
-  markedAt: string;
-  markedBy: { id: string; name: string | null; email: string } | null;
-};
-
-type TodayPayload = {
-  date: string;
-  token: string;
-  qrPayload: string;
-  tokenExpiresAt: string;
-  tokenTtlSeconds: number;
-  timezone: string;
-  records: AttendanceRecordRow[];
-  absentEmployees: EmployeeBrief[];
-};
-
-type CalendarDay = {
-  date: string;
-  presentCount: number;
-  absentCount: number;
-  employeeIds: string[];
-};
-
-type CalendarPayload = {
-  year: number;
-  month: number;
-  timezone: string;
-  employees: EmployeeBrief[];
-  days: CalendarDay[];
-};
 
 type Tab = "today" | "calendar";
 
@@ -105,7 +73,7 @@ function secondsUntil(iso: string) {
 
 export default function AttendancePage() {
   const [tab, setTab] = useState<Tab>("today");
-  const [today, setToday] = useState<TodayPayload | null>(null);
+  const [today, setToday] = useState<AttendanceTodayPayload | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -118,20 +86,20 @@ export default function AttendancePage() {
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth() + 1);
   const [calEmployeeId, setCalEmployeeId] = useState("");
-  const [calendar, setCalendar] = useState<CalendarPayload | null>(null);
+  const [calendar, setCalendar] = useState<AttendanceCalendarPayload | null>(null);
   const [calLoading, setCalLoading] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayDetail, setDayDetail] = useState<{
     date: string;
     present: AttendanceRecordRow[];
-    absent: EmployeeBrief[];
+    absent: AttendanceEmployeeBrief[];
   } | null>(null);
 
   const loadToday = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     setError("");
     try {
-      const data = await adminFetch<TodayPayload>("/api/attendance/today");
+      const data = await getAttendanceToday();
       setToday(data);
       setCountdown(secondsUntil(data.tokenExpiresAt));
       if (
@@ -153,14 +121,11 @@ export default function AttendancePage() {
     setCalLoading(true);
     setError("");
     try {
-      const qs = new URLSearchParams({
-        year: String(calYear),
-        month: String(calMonth),
+      const data = await getAttendanceCalendar({
+        year: calYear,
+        month: calMonth,
+        employeeId: calEmployeeId || undefined,
       });
-      if (calEmployeeId) qs.set("employeeId", calEmployeeId);
-      const data = await adminFetch<CalendarPayload>(
-        `/api/attendance/calendar?${qs.toString()}`
-      );
       setCalendar(data);
     } catch (err) {
       setError(
@@ -223,9 +188,7 @@ export default function AttendancePage() {
     setMessage("");
     setError("");
     try {
-      const data = await adminFetch<TodayPayload>("/api/attendance/today/refresh", {
-        method: "POST",
-      });
+      const data = await refreshAttendanceTodayToken();
       setToday(data);
       setCountdown(secondsUntil(data.tokenExpiresAt));
       setMessage("QR code refreshed.");
@@ -244,16 +207,10 @@ export default function AttendancePage() {
     setMessage("");
     setError("");
     try {
-      const res = await adminFetch<{ alreadyPresent: boolean; message: string }>(
-        "/api/attendance/manual",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            employeeId: manualEmployeeId,
-            date: today?.date,
-          }),
-        }
-      );
+      const res = await markAttendanceManual({
+        employeeId: manualEmployeeId,
+        date: today?.date,
+      });
       setMessage(res.message);
       await loadToday({ silent: true });
     } catch (err) {
@@ -300,11 +257,7 @@ export default function AttendancePage() {
     setSelectedDay(dateKey);
     setDayDetail(null);
     try {
-      const data = await adminFetch<{
-        date: string;
-        present: AttendanceRecordRow[];
-        absent: EmployeeBrief[];
-      }>(`/api/attendance/day?date=${encodeURIComponent(dateKey)}`);
+      const data = await getAttendanceDayDetail(dateKey);
       setDayDetail(data);
     } catch (err) {
       setError(
@@ -325,7 +278,7 @@ export default function AttendancePage() {
   const calendarGrid = useMemo(() => {
     if (!calendar) return [];
     const firstWeekday = new Date(Date.UTC(calYear, calMonth - 1, 1)).getUTCDay();
-    const cells: Array<CalendarDay | null> = [];
+    const cells: Array<AttendanceCalendarDay | null> = [];
     for (let i = 0; i < firstWeekday; i++) cells.push(null);
     for (const day of calendar.days) cells.push(day);
     return cells;

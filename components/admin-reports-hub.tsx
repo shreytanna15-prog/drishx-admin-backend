@@ -27,8 +27,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  exportAdminReport,
+  fetchReportsCatalog,
+  runAdminReport,
+} from "@/app/lib/admin-reports";
 import { getFinancialYear } from "@/app/lib/finance/financial-year";
 import {
   DEAD_POWERS_LOOKBACK_DAYS,
@@ -562,7 +566,7 @@ export function AdminReportsHub() {
       setCatalogLoading(true);
       setCatalogError("");
       try {
-        const data = await adminFetch<CatalogResponse>("/api/reports");
+        const data = await fetchReportsCatalog();
         if (!cancelled) setCatalog(data);
       } catch (err) {
         if (!cancelled) {
@@ -644,9 +648,7 @@ export function AdminReportsHub() {
     setExportError("");
     setResult(null);
     try {
-      const data = await adminFetch<ReportSuccessResponse>(
-        `/api/reports?${params.toString()}`
-      );
+      const data = await runAdminReport(params.toString());
       setResult(data);
     } catch (err) {
       setRunError(
@@ -668,24 +670,11 @@ export function AdminReportsHub() {
       setExportLoading(format);
       setExportError("");
       try {
-        const res = await adminAuthFetch(`/api/reports?${params.toString()}`, {
-          method: "GET",
-        });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as {
-            error?: string;
-          };
-          throw new Error(
-            typeof data.error === "string"
-              ? data.error
-              : "Export failed. Please try again."
-          );
-        }
-        const blob = await res.blob();
-        const disposition = res.headers.get("Content-Disposition") || "";
-        const match = /filename="([^"]+)"/i.exec(disposition);
+        const { blob, filename: suggested } = await exportAdminReport(
+          params.toString()
+        );
         const filename =
-          match?.[1] ??
+          suggested ??
           `drishx-${selected.key}-${new Date().toISOString().slice(0, 10)}.${format}`;
         const objectUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");

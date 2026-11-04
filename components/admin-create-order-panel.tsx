@@ -10,7 +10,13 @@ import {
   Loader2,
   Search,
 } from "lucide-react";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { listActiveDeliveryServiceOptions } from "@/app/lib/admin-delivery";
+import {
+  createAdminCatalogOrder,
+  createAdminRxOrder,
+  searchAdminCatalogLenses,
+} from "@/app/lib/admin-orders";
 import {
   createWalkInCustomer,
   sendWalkInMobileOtp,
@@ -293,12 +299,9 @@ export function AdminCreateOrderPanel() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await adminFetch<
-          DeliveryServiceOption[] | { services?: DeliveryServiceOption[] }
-        >("/api/delivery-services");
+        const list = await listActiveDeliveryServiceOptions();
         if (cancelled) return;
-        const list = Array.isArray(data) ? data : (data.services ?? []);
-        setDeliveryServices(list.filter((s) => s.isActive !== false));
+        setDeliveryServices(list);
       } catch {
         /* delivery optional at create for some flows */
       }
@@ -324,18 +327,14 @@ export function AdminCreateOrderPanel() {
         void (async () => {
           setLensLoading(true);
           try {
-            const params = new URLSearchParams({
+            const hits = await searchAdminCatalogLenses({
               type: lensTypeFilter,
               search: q,
-              page: "1",
-              limit: "20",
+              page: 1,
+              limit: 20,
             });
-            const data = await adminFetch<{
-              items?: CatalogLensHit[];
-              lenses?: CatalogLensHit[];
-            }>(`/api/lenses?${params}`);
             if (cancelled) return;
-            setLensHits(data.items ?? data.lenses ?? []);
+            setLensHits(hits as CatalogLensHit[]);
           } catch {
             if (!cancelled) setLensHits([]);
           } finally {
@@ -414,14 +413,7 @@ export function AdminCreateOrderPanel() {
           add: catalog.lens.add,
           eye: catalog.lens.eye,
         };
-        const res = await adminFetch<{ order: { id: string } }>(
-          "/api/orders",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }
-        );
+        const res = await createAdminCatalogOrder(body);
         router.push(`/orders/${res.order.id}`);
         return;
       }
@@ -444,26 +436,19 @@ export function AdminCreateOrderPanel() {
             add: rx.left.add.trim() ? Number(rx.left.add) : null,
           };
         }
-        const res = await adminFetch<{ order: { id: string } }>(
-          "/api/orders/rx",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              userId: selectedCustomer.id,
-              lensType: rx.lensType,
-              orderFor: rx.orderFor,
-              quantity: rx.quantity,
-              feature: rx.feature,
-              lensIndex: rx.lensIndex,
-              coating: rx.coating,
-              productName: rx.productName.trim() || undefined,
-              remarks: rx.remarks.trim() || undefined,
-              deliveryServiceId: rx.deliveryServiceId || undefined,
-              prescription,
-            }),
-          }
-        );
+        const res = await createAdminRxOrder({
+          userId: selectedCustomer.id,
+          lensType: rx.lensType,
+          orderFor: rx.orderFor,
+          quantity: rx.quantity,
+          feature: rx.feature,
+          lensIndex: rx.lensIndex,
+          coating: rx.coating,
+          productName: rx.productName.trim() || undefined,
+          remarks: rx.remarks.trim() || undefined,
+          deliveryServiceId: rx.deliveryServiceId || undefined,
+          prescription,
+        });
         router.push(`/orders/${res.order.id}`);
         return;
       }

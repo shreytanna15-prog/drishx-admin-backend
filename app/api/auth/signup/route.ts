@@ -4,7 +4,23 @@ import { hashPassword } from "../../../lib/auth";
 import { toSafeUser } from "../../../lib/user-public";
 import { optionalTrim } from "../../../lib/customer-registration";
 
+/**
+ * RW-12: Legacy email+password Path A is retired.
+ * Customers sign up via mobile OTP (`/api/auth/otp/...`). Opt-in with
+ * ALLOW_LEGACY_PASSWORD_SIGNUP=1 only for emergency dual-login.
+ */
 export async function POST(req: NextRequest) {
+  if (process.env.ALLOW_LEGACY_PASSWORD_SIGNUP !== "1") {
+    return NextResponse.json(
+      {
+        error:
+          "Password signup is retired. Please register with mobile OTP instead.",
+        code: "PASSWORD_SIGNUP_RETIRED",
+      },
+      { status: 410 }
+    );
+  }
+
   const body = await req.json();
   const email = String(body.email ?? "").trim().toLowerCase();
   const password = String(body.password ?? "").trim();

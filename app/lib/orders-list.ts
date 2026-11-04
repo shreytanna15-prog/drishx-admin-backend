@@ -172,37 +172,28 @@ export type OrdersListScopeFields = {
 /**
  * Pure classification matching list scopes (catalog vs rx_lab).
  * Color-lens jobs with a reference image stay catalog (marker in notes).
+ * RC-02: only `[RX Order]` notes → rx_lab (warehouseHold alone is not enough —
+ * legacy held photo rows must not appear on Rx Lab).
  */
 export function classifyOrdersListScope(
   order: OrdersListScopeFields
 ): "catalog" | "rx_lab" {
-  if (order.warehouseHold) return "rx_lab";
   if (order.notes?.includes(RX_ORDER_NOTES_MARKER)) return "rx_lab";
-  // RC-02: photo prescription (image without RX notes) is no longer rx_lab.
   return "catalog";
 }
 
-/** Prescription lab: RX form orders or still on warehouse hold (RC-02: no photo). */
+/** Prescription lab: RX form orders only (RC-02 — no photo / hold-only). */
 export function rxLabWhere(): Prisma.OrderWhereInput {
-  return {
-    OR: [
-      { warehouseHold: true },
-      { notes: { contains: RX_ORDER_NOTES_MARKER } },
-    ],
-  };
+  return { notes: { contains: RX_ORDER_NOTES_MARKER } };
 }
 
 /**
  * Catalog / color / wholesale — excludes prescription lab jobs.
  * Positive NULL-safe predicates (never `NOT(rxLabWhere())`).
+ * Held non-RX (legacy photo) stays catalog so it is not orphaned off Rx Lab.
  */
 export function catalogWhere(): Prisma.OrderWhereInput {
-  return {
-    AND: [
-      { warehouseHold: false },
-      notesDoesNotContainMarker(RX_ORDER_NOTES_MARKER),
-    ],
-  };
+  return notesDoesNotContainMarker(RX_ORDER_NOTES_MARKER);
 }
 
 function orderKindWhere(orderKind: string): Prisma.OrderWhereInput | null {

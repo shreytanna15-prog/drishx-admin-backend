@@ -101,18 +101,20 @@ Admin can fix customer entity data when the shop will not update their own profi
 
 ### Acceptance
 
-- [ ] Client detail is a proper full-page layout (usable width, less wasted side space)
-- [ ] Edit client opens prefilled form; save persists; account stays Approved
-- [ ] Admin cannot save an update without Notes
-- [ ] Change history lists note, datetime, admin, human field names
-- [ ] Mobile/email change by anyone → unverified until OTP/verify again
-- [ ] Address verified on Admin approve at onboarding; any later address change → unverified until Admin verifies
-- [ ] Verified GST/PAN cannot be edited by client or Admin
-- [ ] `customer-account-configuration` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC
+- [x] Client detail is a proper full-page layout (usable width, less wasted side space)
+- [x] Edit client opens prefilled form; save persists; account stays Approved
+- [x] Admin cannot save an update without Notes
+- [x] Change history lists note, datetime, admin, human field names
+- [x] Mobile/email change by anyone → unverified until OTP/verify again
+- [x] Address verified on Admin approve at onboarding; any later address change → unverified until Admin verifies
+- [x] Verified GST/PAN cannot be edited by client or Admin
+- [x] `customer-account-configuration` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC
 
 ### Suggested first PR
 
 Detail layout + Edit prefilled form + required notes + stay Approved. Then verify flags (mobile/email/address) + GST/PAN lock. Then change-history button + list.
+
+**Shipped** — Admin Clients edit / verify / history (RC-01).
 
 ---
 
@@ -167,6 +169,8 @@ RX form orders stay as today. Photo prescription orders (`POST /api/orders/photo
 ### Suggested first PR
 
 Backend hold/list/API retire done. Remaining client UI/create cleanup → **RC-05**.
+
+**Shipped** — Photo prescription retired from RX (`POST /api/orders/photo` → 410; `rxLabWhere` / classify = RX notes only; legacy image rows stay catalog with neutral “Image attached” UX).
 
 ---
 
@@ -239,18 +243,20 @@ Change — product catalog / attributes (critical)
 
 ### Acceptance
 
-- [ ] Product can be saved **without** Material  
-- [ ] Attributes has a **Power range** tab with list + add/edit via selects (−40…+8 step rules)  
-- [ ] Range label reads like `-6.00/+2.00` (SPH); CYL bounds stored and visible  
-- [ ] Create product picks an existing power range (no typed SPH/CYL range numbers)  
-- [ ] Same other attrs + different power range ⇒ different product / different interim SKU  
-- [ ] Power-range APIs work like other attribute masters (active-only in create dropdowns)  
-- [ ] Docs/task note followed: delete ~2 test products and recreate; no migration path required
-- [ ] `product-catalog` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC
+- [x] Product can be saved **without** Material  
+- [x] Attributes has a **Power range** tab with list + add/edit via selects (−40…+8 step rules)  
+- [x] Range label reads like `-6.00/+2.00` (SPH); CYL bounds stored and visible  
+- [x] Create product picks an existing power range (no typed SPH/CYL range numbers)  
+- [x] Same other attrs + different power range ⇒ different product / different interim SKU  
+- [x] Power-range APIs work like other attribute masters (active-only in create dropdowns)  
+- [x] Docs/task note followed: delete ~2 test products and recreate; no migration path required
+- [x] `product-catalog` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship) matches this RC
 
 ### Suggested first PR
 
 Power-range option helper + attribute API/schema + Attributes tab UI. Then wire create product to select a range + make Material optional. Then interim SKU from selected bounds; delete/recreate test products locally.
+
+**Shipped** (with RC-04 parent+variants) — optional material + power-range masters.
 
 ### Follow-up (not this RC)
 

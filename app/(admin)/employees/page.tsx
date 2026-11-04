@@ -10,11 +10,12 @@ import { ListSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
 import { readListCache, writeListCache } from "@/app/lib/admin-cache";
 import {
   type AdminEmployee,
   employeeDisplayName,
+  listAdminEmployees,
   matchesEmployeeSearch,
 } from "@/app/lib/admin-employees";
 import { useProgressiveList } from "@/hooks/use-progressive-list";
@@ -60,10 +61,7 @@ export default function EmployeesPage() {
     }
     setError("");
     try {
-      const data = await adminFetch<{ employees: AdminEmployee[] }>(
-        "/api/users/employees"
-      );
-      const list = Array.isArray(data.employees) ? data.employees : [];
+      const list = await listAdminEmployees();
       writeListCache("employees", list);
       setEmployees(list);
     } catch (err) {

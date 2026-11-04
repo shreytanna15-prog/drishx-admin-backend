@@ -3,11 +3,15 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
 import { invalidateListCache } from "@/app/lib/admin-cache";
 import type {
   AdminOrder,
   AdminPowerVersion,
+} from "@/app/lib/admin-orders";
+import {
+  getAdminOrder,
+  markAdminOrderProcurementNotAvailable,
 } from "@/app/lib/admin-orders";
 
 function formatPower(sph: number | null | undefined, cyl: number | null | undefined) {
@@ -38,7 +42,7 @@ export function AdminAlternatePowerPanel({ order, onUpdated }: Props) {
   }
 
   async function refreshOrder() {
-    const updated = await adminFetch<AdminOrder>(`/api/orders/${order.id}`);
+    const updated = await getAdminOrder(order.id);
     onUpdated(updated);
   }
 
@@ -56,12 +60,9 @@ export function AdminAlternatePowerPanel({ order, onUpdated }: Props) {
               },
             ]
           : [];
-      await adminFetch(`/api/orders/${order.id}/procurement/not-available`, {
-        method: "POST",
-        body: JSON.stringify({
-          notes: "Marked not available from supplier",
-          supplierOptions,
-        }),
+      await markAdminOrderProcurementNotAvailable(order.id, {
+        notes: "Marked not available from supplier",
+        supplierOptions,
       });
       invalidateListCache("orders");
       await refreshOrder();

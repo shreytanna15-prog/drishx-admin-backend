@@ -114,3 +114,49 @@ export async function listLoyaltyCustomers(
   );
   return normalizeLoyaltyCustomersResponse(data);
 }
+
+export type LoyaltyWalletSummary = {
+  availablePoints: number;
+  pendingPoints: number;
+  expiringSoon: number;
+  totalEarned: number;
+  totalRedeemed: number;
+  rupeeValue?: number;
+};
+
+export type LoyaltyLedgerRow = {
+  id: string;
+  type: string;
+  points: number;
+  status: string;
+  reason: string | null;
+  createdAt: string;
+};
+
+export async function getLoyaltyWallet(
+  customerId: string
+): Promise<LoyaltyWalletSummary> {
+  return adminFetch<LoyaltyWalletSummary>(
+    `/api/loyalty/wallet?customerId=${encodeURIComponent(customerId)}`
+  );
+}
+
+export async function getLoyaltyTransactions(
+  customerId: string
+): Promise<LoyaltyLedgerRow[]> {
+  const data = await adminFetch<{ transactions: LoyaltyLedgerRow[] }>(
+    `/api/loyalty/transactions?customerId=${encodeURIComponent(customerId)}`
+  );
+  return data.transactions ?? [];
+}
+
+export async function adjustLoyaltyPoints(input: {
+  customerId: string;
+  points: number;
+  reason: string;
+}): Promise<void> {
+  await adminFetch("/api/loyalty/adjust", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}

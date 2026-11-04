@@ -2,9 +2,10 @@
 
 import { useState, type FormEvent } from "react";
 import { Loader2, Plus } from "lucide-react";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
 import {
   type AdminTask,
+  createAdminTask,
   toDatetimeLocalValue,
 } from "@/app/lib/admin-tasks";
 import { AdminModal } from "@/components/admin-modal";
@@ -76,14 +77,11 @@ export function AssignTaskModal({
 
     setSubmitting(true);
     try {
-      const task = await adminFetch<AdminTask>("/api/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          assignedToId: employeeId,
-          title: trimmedTitle,
-          details: details.trim() || null,
-          dueDate: parsedDue.toISOString(),
-        }),
+      const task = await createAdminTask({
+        assignedToId: employeeId,
+        title: trimmedTitle,
+        details: details.trim() || null,
+        dueDate: parsedDue.toISOString(),
       });
       onCreated(task);
       handleOpenChange(false);

@@ -15,7 +15,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TableSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  dispatchOrder,
+  getDispatchStats,
+  listPendingDispatches,
+  overrideDispatchCutoff,
+  type DispatchStats,
+} from "@/app/lib/admin-dispatch";
 import {
   type AdminOrder,
   formatDate,
@@ -28,23 +35,6 @@ import {
 import { cn } from "@/lib/utils";
 
 type PendingOrder = AdminOrder;
-
-type DispatchStats = {
-  days: number;
-  stats: Array<{
-    courierCompany: string;
-    orders: number;
-    totalCustomerCharge: number;
-    totalInternalCost: number;
-    margin: number;
-  }>;
-  totals: {
-    orders: number;
-    totalCustomerCharge: number;
-    totalInternalCost: number;
-    margin: number;
-  };
-};
 
 const inputClass =
   "h-10 w-full rounded-lg border border-(--brand-card-border) bg-transparent px-3 text-sm text-(--brand-text) placeholder:text-(--brand-placeholder)";
@@ -91,10 +81,7 @@ export default function DispatchPage() {
   // ── Data loaders (no sync setState — safe to call from effects) ──────
   const loadPending = useCallback(async () => {
     try {
-      const data = await adminFetch<{ orders: PendingOrder[] }>(
-        "/api/dispatch/pending"
-      );
-      setPending(Array.isArray(data.orders) ? data.orders : []);
+      setPending(await listPendingDispatches());
       setError("");
     } catch (err) {
       setError(
@@ -109,10 +96,7 @@ export default function DispatchPage() {
 
   const loadStats = useCallback(async () => {
     try {
-      const data = await adminFetch<DispatchStats>(
-        "/api/dispatch/stats?days=30"
-      );
-      setStats(data);
+      setStats(await getDispatchStats(30));
     } catch {
       setStats(null);
     }
@@ -167,10 +151,7 @@ export default function DispatchPage() {
     setBusyId(order.id);
     setError("");
     try {
-      await adminFetch(`/api/orders/${order.id}/dispatch`, {
-        method: "POST",
-        body: JSON.stringify({ courierName, trackingNumber }),
-      });
+      await dispatchOrder(order.id, { courierName, trackingNumber });
       await refreshAll();
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Dispatch failed.");
@@ -190,10 +171,7 @@ export default function DispatchPage() {
     setOverrideBusyId(order.id);
     setError("");
     try {
-      await adminFetch(`/api/orders/${order.id}/dispatch-override`, {
-        method: "POST",
-        body: JSON.stringify({ reason: reason.trim() }),
-      });
+      await overrideDispatchCutoff(order.id, reason.trim());
       await refreshAll();
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Could not move the order forward.");

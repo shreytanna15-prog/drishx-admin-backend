@@ -18,9 +18,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
 import {
   type AdminOrder,
+  getAdminOrder,
   formatCatalogSummary,
   formatDate,
   formatLensType,
@@ -95,7 +96,7 @@ function OrderDetailPageContent() {
       setLoading(true);
       setError("");
       try {
-        const data = await adminFetch<AdminOrder>(`/api/orders/${id}`);
+        const data = await getAdminOrder(id);
         if (!cancelled) setOrder(data ?? null);
       } catch (err) {
         if (!cancelled) {

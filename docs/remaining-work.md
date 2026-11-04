@@ -32,7 +32,9 @@
 
 ---
 
-## RW-01 � Auth session drops mid-use (Unauthorized)
+## RW-01 — Auth session drops mid-use (Unauthorized)
+
+**Status (2026-11-04):** Mostly shipped — refresh-on-401 + single-flight + non-refreshable account codes + **transient refresh backoff retry** (admin/web/mobile). Residual: prove long-idle parallel calls in staging.
 
 ### Type
 
@@ -153,37 +155,40 @@ Signup creates the customer immediately with `approvalStatus: PENDING_REVIEW`, `
 
 ### Type
 
-Change � order visibility / roles (RX + photo prescription orders)
+Change — order visibility / roles (RX prescription hold)
 
 ### Goal
 
-Custom prescription jobs (**RX form orders** and **photo prescription orders**) must stay **admin-only** until the physical warehouse step: admin reviews, can **assign**, and **manually marks** the order available / at warehouse. Only then should warehouse employees see them on staff RX/photo queues. Today both flows auto-assign and notify staff immediately, so employees can see them too early. Same hold/release rules apply to RX (`[RX Order]` / `POST /api/orders/rx`) and photo orders (`POST /api/orders/photo` / `orderImageUrl`). Wire through **roles/permissions** as well.
+**RX form orders** must stay **admin-only** until the physical warehouse step: admin reviews, can **assign**, and **manually marks** the order available / at warehouse. Only then should warehouse employees see them on staff RX queues.
 
-### Current state
+**Update (RC-02):** Photo prescription create is **retired** (`POST /api/orders/photo` → 410). Hold/release/list/notify apply to **RX only** (`[RX Order]` notes). Do not treat legacy `orderImageUrl` rows as RX-lab siblings.
 
-RX is detected via `notes` containing `[RX Order]`; photo via image + not RX/Color. Create paths set `PENDING`, auto-`resolveOrderAssigneeId`, and notify staff. Admin has `/orders/rx-lab`; employees with `orders.rx` see assigned RX on web/mobile. There is no admin-hold / �at warehouse� / release flag � assignment happens at create for both RX and photo.
+### Current state (post RC-02)
+
+RX: `notes` containing `[RX Order]`; create uses warehouse hold → assign → release. Admin `/orders/rx-lab` is RX-only. Photo create unwired; legacy image rows stay on catalog lists with neutral “Image attached” UX.
 
 ### Scope (in)
 
-- On create (RX + photo): do **not** put on employee warehouse queues yet (no premature assign/notify, or equivalent hold)
+- On create (RX): do **not** put on employee warehouse queues yet (no premature assign/notify, or equivalent hold)
 - Admin panel always sees these orders; admin can **assign** and **manually mark available / at warehouse**
 - After mark (+ assign as designed): employees with the right permission see them on staff queues (web + mobile)
 - Enforce in **API** and UI; extend staff permissions/roles as needed (view vs work after release)
-- Same rules for RX form orders and photo prescription orders
 
 ### Out of scope
 
-- Redesigning the customer RX form or photo-upload UX (beyond visibility/lifecycle)
+- Photo prescription product (retired — see **RC-02**)
 - Catalog / wholesale / color order queues
-- Full RX pricing/lab workflow redesign beyond hold ? mark warehouse ? assign ? staff see
+- Full RX pricing/lab workflow redesign beyond hold → mark warehouse → assign → staff see
 
 ---
 
-## RW-06 � Reports module (client report catalog, phased)
+## RW-06 — Reports module (client report catalog, phased)
+
+**Status (2026-11-04):** Hub + catalog shipped. **Profit & Margin** intentionally deferred (`deferred-reports.ts` — needs historical COGS).
 
 ### Type
 
-New feature � Admin **Reports hub** (financial, inventory, power, order, sales)
+New feature — Admin **Reports hub** (financial, inventory, power, order, sales)
 
 ### Goal
 
@@ -243,7 +248,7 @@ Deliver the client�s full report list as a structured **Reports** area in the 
 | Pending Orders Report | Status filter (clarify which statuses count as �pending�) |
 | Completed Orders Report | `COMPLETED` |
 | Cancelled Orders Report | `CANCELLED` |
-| RX Orders Report | `notes` contains `[RX Order]` (and decide photo orders: `orderImageUrl` / not Color) |
+| RX Orders Report | `notes` contains `[RX Order]` only (RC-02: photo create retired; do not mix `orderImageUrl`) |
 | Ready Stock Orders Report | **Needs client definition** (non-RX catalog? dispatch-ready? fully reserved?) |
 
 #### Sales Reports
@@ -330,7 +335,7 @@ Ship P1 even if open questions for P4 are unanswered.
 5. **Stock valuation** � `costPrice`, `price`, or weighted average?
 6. **Stock aging** � age from last receipt only; what if no movement history?
 7. **Ready stock orders** � definition?
-8. **RX report** � include photo prescription orders?
+8. **RX report** — RX notes only (RC-02: no photo)
 9. **Export** � CSV only, or Excel too, for v1?
 
 ### Acceptance (module-level)
@@ -923,11 +928,13 @@ Schema (`orderSource`, `placedByUserId`) + set on admin retail create + `/orders
 
 ---
 
-## RW-11 � Client API calling pattern + list/table performance
+## RW-11 — Client API calling pattern + list/table performance
+
+**Status (2026-11-04):** **Complete for acceptance.** Phase 0–C foundation + hot lists shipped across admin/web/mobile. Admin UI no longer calls `adminFetch` / `adminAuthFetch` from pages/components (all via `app/lib/admin-*.ts`). Opportunistic leftover hooks on non-hot web/mobile screens can continue as touched.
 
 ### Type
 
-Cross-cutting change � **all three frontends** + shared backend list APIs (admin panel, website, mobile)
+Cross-cutting change — **all three frontends** + shared backend list APIs (admin panel, website, mobile)
 
 ### Audience note (for humans + AI)
 
@@ -1179,14 +1186,14 @@ For **each** of admin / website / mobile `drishx-client-api`:
 
 ### Acceptance
 
-- [ ] Phase 0: all three `drishx-client-api` skills include list/pagination + list-vs-detail rules; AGENTS still reference the skill
-- [ ] Phase A: `useApiQuery` / `useApiMutation` (+ registry/types) exist in all three repos; one gold screen each uses them
-- [ ] Phase B: `GET /api/orders` is paginated summary; no per-row signed image on list; detail still complete
-- [ ] Phase B: admin + website + mobile order list UIs use pagination + hooks; primary filters are server-side
-- [ ] Phase C: customers / returns / invoices lists paginated (or explicitly bounded with UI honesty) + hooked admin UI
-- [ ] No new list screen merged that calls transport directly from a component
-- [ ] 401s still not user-toasted; non-401 errors surface via hook `error` / `onError` (mobile: `appAlert` when appropriate)
-- [ ] Measurable win: smaller `/api/orders` list payload and faster first paint on order tables/lists vs pre-RW baseline (note in PR)
+- [x] Phase 0: all three `drishx-client-api` skills include list/pagination + list-vs-detail rules; AGENTS still reference the skill
+- [x] Phase A: `useApiQuery` / `useApiMutation` (+ registry/types) exist in all three repos; one gold screen each uses them
+- [x] Phase B: `GET /api/orders` is paginated summary; no per-row signed image on list; detail still complete
+- [x] Phase B: admin + website + mobile order list UIs use pagination + hooks; primary filters are server-side
+- [x] Phase C: customers / returns / invoices lists paginated (or explicitly bounded with UI honesty) + hooked admin UI
+- [x] No new list screen merged that calls transport directly from a component
+- [x] 401s still not user-toasted; non-401 errors surface via hook `error` / `onError` (mobile: `appAlert` when appropriate)
+- [x] Measurable win: smaller `/api/orders` list payload and faster first paint on order tables/lists vs pre-RW baseline (note in PR)
 
 ### Suggested first PR
 
@@ -1197,11 +1204,13 @@ For **each** of admin / website / mobile `drishx-client-api`:
 
 ---
 
-## RW-12 � Customer account configuration: OTP clients + reject/resubmit + Path C (web / mobile)
+## RW-12 — Customer account configuration: OTP clients + reject/resubmit + Path C (web / mobile)
+
+**Status (2026-11-04):** Path A OTP + login + reject/resubmit + Path C walk-in shipped on web/mobile. Password signup API gated **410** (`ALLOW_LEGACY_PASSWORD_SIGNUP=1` escape). Customer `mobileNumber` unique partial index applied. Live 2factor/email/GSTIN credentials still pending (DEV OTP OK).
 
 ### Type
 
-Change / completion � **customer identity & account flows** across website + mobile (backend/admin mostly done; wire clients + finish gaps)
+Change / completion — **customer identity & account flows** across website + mobile (backend/admin mostly done; wire clients + finish gaps)
 
 ### Audience note (for humans + AI)
 

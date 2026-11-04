@@ -1,3 +1,5 @@
+import { adminFetch } from "@/app/lib/admin-api";
+
 export type AdminTaskStatus = "PENDING" | "COMPLETED";
 
 export type AdminTaskPerson = {
@@ -68,4 +70,28 @@ export function taskStatusBadgeClass(status: string) {
 export function toDatetimeLocalValue(date = new Date()) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export async function listAdminTasks(employeeId?: string): Promise<AdminTask[]> {
+  const qs = employeeId
+    ? `?employeeId=${encodeURIComponent(employeeId)}`
+    : "";
+  const data = await adminFetch<AdminTask[]>(`/api/tasks${qs}`);
+  return Array.isArray(data) ? data : [];
+}
+
+export type CreateAdminTaskPayload = {
+  assignedToId: string;
+  title: string;
+  details: string | null;
+  dueDate: string;
+};
+
+export async function createAdminTask(
+  payload: CreateAdminTaskPayload
+): Promise<AdminTask> {
+  return adminFetch<AdminTask>("/api/tasks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
 import {
   formatPowerValue,
   LENS_TYPE_LABELS,
@@ -27,6 +27,8 @@ import {
   PROCUREMENT_STATUSES,
   sourceLabel,
   STATUS_BADGE_CLASS,
+  listProcurementRequests,
+  procurementRequestAction,
   type ProcurementRequestRow,
   type ProcurementRequestsResponse,
 } from "@/app/lib/admin-procurement";
@@ -72,10 +74,9 @@ export default function ProcurementRequestsPage() {
       if (openOnly) params.set("openOnly", "true");
       params.set("limit", "300");
 
-      const res = await adminFetch<ProcurementRequestsResponse>(
-        `/api/procurement/requests?${params.toString()}`,
-        { signal: controller.signal }
-      );
+      const res = await listProcurementRequests(params, {
+        signal: controller.signal,
+      });
       if (!shouldCommitListResult(seq, loadSeqRef.current)) return;
       setData(res);
     } catch (err) {
@@ -132,12 +133,11 @@ export default function ProcurementRequestsPage() {
     setError("");
     setNotice("");
     try {
-      await adminFetch(`/api/procurement/requests/${row.id}/${action}`, {
-        method: "POST",
-        body: JSON.stringify(
-          action === "cancel" ? { reason: "Cancelled from admin console" } : {}
-        ),
-      });
+      await procurementRequestAction(
+        row.id,
+        action,
+        action === "cancel" ? { reason: "Cancelled from admin console" } : undefined
+      );
       setNotice(
         action === "approve"
           ? `${row.publicId} approved. It is now ready to purchase.`
