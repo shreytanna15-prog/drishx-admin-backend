@@ -2,7 +2,7 @@
 
 **Document type:** Client meeting change backlog (bugs, UX, behaviour)  
 **Audience:** Developers picking up assigned work  
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-04
 
 ## How to use
 
@@ -23,6 +23,7 @@
 | RC-02 | Unwire / remove photo prescription orders from RX | backend, website, mobile, admin panel |
 | RC-03 | Product catalog: optional material + power range as attribute | backend (admin panel); APIs as needed |
 | RC-04 | Product catalog: parent + variants, new SKU/name builders | backend (admin panel); APIs as needed |
+| RC-05 | Finish photo unwire (clients) + null-material parent uniqueness | backend, website, mobile |
 
 ---
 
@@ -155,15 +156,16 @@ RX form orders stay as today. Photo prescription orders (`POST /api/orders/photo
 
 ### Acceptance
 
+- [x] Backend: `POST /api/orders/photo` retired (410); RX hold/list no longer treat photo as sibling
 - [ ] No combined “RX and Photo” (or equivalent) labels in admin / staff UI
 - [ ] Staff and admin RX surfaces show **RX only**
-- [ ] Photo create / API / hold coupling removed or clearly retired (no live photo→RX pipeline)
+- [ ] Mobile/web: no live photo create path (see **[RC-05](#rc-05--finish-photo-unwire-clients--null-material-parent-uniqueness)**)
 - [ ] Classification helpers no longer treat photo as an RX-hold sibling for queues
 - [ ] RX flow still works: hold → assign → release → staff see assigned RX
 
 ### Suggested first PR
 
-Strip combined UI copy + RX-queue photo inclusion. Then unwire `isPhotoPrescriptionOrder` from hold/list/notify. Then retire photo create (API + mobile entry) and clean reports/filters that mixed photo into RX.
+Backend hold/list/API retire done. Remaining client UI/create cleanup → **RC-05**.
 
 ---
 
@@ -360,4 +362,77 @@ Schema parent/variant + SKU/name builders + APIs. Then create (multi-range) + pa
 
 - Depends on / ships with **[RC-03](#rc-03--product-catalog-optional-material--power-range-as-attribute)** power-range attribute masters  
 - Living contract: [`product-catalog/CLIENT-PLAN.md`](./product-catalog/CLIENT-PLAN.md)
+
+---
+
+## RC-05 — Finish photo unwire (clients) + null-material parent uniqueness
+
+### Type
+
+Change / cleanup — photo clients leftover + catalog uniqueness edge case
+
+### Goal
+
+1. Finish **RC-02** on website and mobile: no broken create calls, no photo-order product UI.  
+2. Harden catalog parent uniqueness when **Material is absent** (treat as none; never show a “None” token; omit from SKU/name).
+
+### Current state
+
+- Backend photo create is **410 Gone**; RX hold/list updated.  
+- **Mobile** shop still calls `POST /api/orders/photo` (`lib/photo-orders-api.ts` / shop tab) → broken UX.  
+- Web/mobile still **display/classify** photo orders and related copy.  
+- Parent unique index includes nullable `materialId`; Postgres treats each `NULL` as distinct, so duplicate “no material” parents can slip past the DB unique constraint (app `findParentByAttrs` helps but is not enough alone).
+
+### Locked behaviour / sub-tasks
+
+1. **Mobile shop must not call the broken API**  
+   Remove or gate photo upload / `uploadPhotoOrder` so nothing hits `POST /api/orders/photo`.
+
+2. **Remove photo-order UI**  
+   Drop create entry points and “RX and Photo” / photo-prescription product surfaces on mobile (and web where copy still implies a live photo path).  
+   Legacy rows may stay readable if needed; **no new photo orders**. RX-only queues/labels.
+
+3. **Flat + grouped-by-parent is enough**  
+   No extra group-by (family/base/…) required — already shipped in RC-04.
+
+4. **Name using attribute codes is acceptable**  
+   No follow-up to expand codes into long display names for Material/Family/Base/Index.
+
+5. **Null material = none (identity only)**  
+   - Absent material means no material — do **not** require an explicit “None” label in UI.  
+   - Omit from SKU and name (already).  
+   - Enforce **one parent** per `(family, base, index, color)` when material is null (business + DB-safe uniqueness). Create/reuse must not create a second parent for the same combo without material.
+
+### Scope (in)
+
+- Mobile: remove/gate photo create + shop entry  
+- Web (+ admin labels if any remain): strip photo create/copy from RX surfaces  
+- Catalog: fix null-material parent uniqueness (service + migration/index as needed)  
+- Tests covering “no material” duplicate parent rejection / reuse  
+
+### Out of scope
+
+- New photo-order product  
+- Extra catalog group-by axes  
+- Renaming SKU/name tokens to long marketing names  
+- Live stock matrix  
+
+### Acceptance
+
+- [ ] Mobile shop never calls `/api/orders/photo`  
+- [ ] No photo-order create UI; RX surfaces are RX-only (no “RX and Photo” product framing)  
+- [ ] Legacy photo rows (if any) do not block RX; no new photo creates possible  
+- [ ] Two creates with same attrs and **no** material reuse one parent (or hard-reject duplicate), never two parents  
+- [ ] SKU/name still omit material when absent; no “None” token required in UI  
+- [ ] CLIENT-PLAN uniqueness note matches  
+
+### Suggested first PR
+
+Mobile + web photo create/UI removal. Then null-material uniqueness (DB + `findParentByAttrs` / create path) + tests.
+
+### Related
+
+- Completes leftover from **[RC-02](#rc-02--unwire--remove-photo-prescription-orders-from-rx)**  
+- Catalog rule extends **[RC-03](#rc-03--product-catalog-optional-material--power-range-as-attribute)** / **[RC-04](#rc-04--product-catalog-parent--variants-new-skuname-builders)**  
+- [`product-catalog/CLIENT-PLAN.md`](./product-catalog/CLIENT-PLAN.md)
 

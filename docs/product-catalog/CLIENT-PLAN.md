@@ -3,7 +3,7 @@
 **Document type:** Product catalog / SKU master plan  
 **Repos:** Admin panel (primary). Shared backend APIs.  
 **Hierarchy reference:** [CLIENT-HIERARCHY-CONFIRMATION.md](../product-catalog-hierarchy/CLIENT-HIERARCHY-CONFIRMATION.md) (approved)  
-**Status:** Oct baseline **shipped**. **[RC-03](../requested-changes.md#rc-03--product-catalog-optional-material--power-range-as-attribute)** + **[RC-04](../requested-changes.md#rc-04--product-catalog-parent--variants-new-skuname-builders)** **shipped** (power-range masters; Material optional; parent + variants; auto SKU/name; flat + expandable grouped list). More catalog RCs may follow in [`../requested-changes.md`](../requested-changes.md).
+**Status:** Oct baseline **shipped**. **[RC-03](../requested-changes.md#rc-03--product-catalog-optional-material--power-range-as-attribute)** + **[RC-04](../requested-changes.md#rc-04--product-catalog-parent--variants-new-skuname-builders)** **shipped** (power-range masters; Material optional; parent + variants; auto SKU/name; flat + expandable grouped list). Follow-up: **[RC-05](../requested-changes.md#rc-05--finish-photo-unwire-clients--null-material-parent-uniqueness)** (photo client cleanup + null-material parent uniqueness). More catalog RCs may follow in [`../requested-changes.md`](../requested-changes.md).
 
 ---
 
@@ -193,6 +193,7 @@ Compact codes; omit Material when absent; **all families** (SV, KT, V2, …); **
 | Powers | Negatives → `M` (`-6` → `M6`); decimals use `P` |
 | Source | Bounds from selected **power-range attribute** |
 | Uniqueness | Variant `skuCode` unique; reject duplicate parent+range |
+| Parent uniqueness | `(family, base, index, color, material?)` — **absent material = none** (omit from SKU/name; no “None” label required). Same combo without material must be **one** parent (fix Postgres `NULL` unique quirk — see **[RC-05](../requested-changes.md#rc-05--finish-photo-unwire-clients--null-material-parent-uniqueness)**). |
 
 Example: `PG-BR-1P56-KT-GREEN-SM6TP2-C0TM2`
 
