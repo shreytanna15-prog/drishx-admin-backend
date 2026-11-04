@@ -24,6 +24,7 @@
 | RC-03 | Product catalog: optional material + power range as attribute | backend (admin panel); APIs as needed |
 | RC-04 | Product catalog: parent + variants, new SKU/name builders | backend (admin panel); APIs as needed |
 | RC-05 | Finish photo unwire (clients) + null-material parent uniqueness | backend, website, mobile |
+| RC-06 | Walk-in: skip OTP when staff-created+verified; history; staff-only | backend, website, mobile |
 
 ---
 
@@ -435,4 +436,112 @@ Mobile + web photo create/UI removal. Then null-material uniqueness (DB + `findP
 - Completes leftover from **[RC-02](#rc-02--unwire--remove-photo-prescription-orders-from-rx)**  
 - Catalog rule extends **[RC-03](#rc-03--product-catalog-optional-material--power-range-as-attribute)** / **[RC-04](#rc-04--product-catalog-parent--variants-new-skuname-builders)**  
 - [`product-catalog/CLIENT-PLAN.md`](./product-catalog/CLIENT-PLAN.md)
+
+---
+
+## RC-06 — Walk-in: skip OTP (staff-created + verified), history, staff-only
+
+### Type
+
+Change — Path C Employee/Admin walk-in (counter)
+
+### Goal
+
+1. **Skip OTP** when the typed mobile already belongs to a **staff-created** customer whose mobile is **verified** — go straight into on-behalf order (catalog / order flow).  
+2. Add a **walk-in history** list of staff-created customers so staff can re-select a prior counter customer without retyping mobile / redoing OTP.  
+3. Walk-in is **staff-created only**. Self-signup (Path A, `createdByStaffId = null`) must **never** enter or complete via the walk-in create/history path. Remove any code that currently allows that.
+
+### Current state
+
+- Path C UI (web + mobile): enter mobile → always send/verify `WALK_IN` OTP → `POST /api/users/customers/walk-in` (requires `challengeId`) → select customer → on-behalf order.  
+- On-behalf gate already allows: **Approved+active**, OR **PENDING_REVIEW + `createdByStaffId` set** (`assessStaffOnBehalfOrderEligibility`).  
+- Admin Path B create also sets `createdByStaffId` (same staff-created family as walk-in).  
+- **Leak today:** `POST /api/auth/otp/mobile/verify` with `purpose=WALK_IN` returns `user` for **any** CUSTOMER on that mobile (including Path A self-signup). Web/mobile walk-in panels call `onCreated(res.user)` when `res.user?.id` is set — so a self-signup shop can be pulled into the walk-in/on-behalf selection path after OTP. That must stop.  
+- No walk-in “history” UI; no lookup that skips OTP for already-verified staff-created mobiles.  
+- Create still always requires a fresh WALK_IN OTP claim (`assertWalkInMobileVerified`).
+
+### Definitions
+
+| Term | Meaning |
+|------|---------|
+| **Staff-created** | `User.role = CUSTOMER` and `createdByStaffId != null` (Path B Admin create **or** Path C walk-in create) |
+| **Self-signup / Path A** | Customer with `createdByStaffId = null` — **out of walk-in** |
+| **Mobile verified** | `mobileVerifiedAt` set (channel verified) |
+| **Walk-in history** | List of staff-created customers for the walk-in / counter UI (pending + verified / approved as product allows) |
+
+### Locked behaviour
+
+#### A. Who walk-in is for
+
+- Only **Employee or Admin** (existing staff session). Customers never use walk-in.  
+- Walk-in create + history + skip-OTP apply **only** to **staff-created** customers.  
+- **No** special UX for “verified Path A mobile typed into walk-in.” If that mobile is Path A: **reject for walk-in** with a clear message (e.g. use Order on behalf picker / that account already exists via self-signup). Do **not** invent an intermediate “select them anyway from walk-in” flow.
+
+#### B. Skip OTP
+
+When staff enters a mobile on the walk-in screen:
+
+1. **Lookup** (staff-auth API): find CUSTOMER by mobile.  
+2. If **no** customer → keep today’s create path: send OTP → verify → create walk-in (`createdByStaffId` = staff) → continue to order.  
+3. If customer exists and **`createdByStaffId` is null** (Path A) → **do not** send walk-in OTP as a way to “claim” them; **do not** select them into walk-in; show clear error / redirect guidance.  
+4. If customer is **staff-created** and **mobile verified** → **skip OTP**; select that customer and continue to on-behalf order (same as after successful create today).  
+5. If customer is **staff-created** and **mobile not verified** → require OTP (verify marks `mobileVerifiedAt`), then continue (do not create a duplicate). Prefer selecting the existing row over 409 create.
+
+#### C. Walk-in history
+
+- Show a list (or searchable recent list) of **staff-created** customers (`createdByStaffId != null`).  
+- Include pending and verified/approved staff-created rows that are still usable for counter order (respect CLOSED/BLOCKED; align with orderable rules).  
+- **Pick from history:**  
+  - **Verified mobile (or otherwise order-ready staff-created)** → go to catalog / on-behalf order.  
+  - **Pending staff-created** → stay on walk-in / create-adjacent UX as today, then place on-behalf (existing pending exception).  
+- History must **not** list Path A self-signup customers.
+
+#### D. Remove non–staff-created from walk-in code paths
+
+Audit and fix so walk-in cannot adopt Path A users:
+
+| Area | Required behaviour |
+|------|--------------------|
+| `POST …/otp/mobile/verify` (`WALK_IN`) | Must **not** return a selectable `user` for Path A (`createdByStaffId` null). Prefer `user: null` + explicit error/code, or return user only when staff-created. |
+| Web/mobile walk-in panels | Never call `onCreated` / select customer from verify/create unless staff-created. |
+| `POST /api/users/customers/walk-in` | Keep create for new mobiles only; on 409 existing: if Path A → error without selecting; if staff-created → clients may select only when rules in B allow. |
+| New lookup / history APIs | Filter `createdByStaffId: { not: null }` (or equivalent). |
+| Docs / CLIENT-PLAN | Path C steps describe skip-OTP + history; state Path A is excluded from walk-in. |
+
+Do **not** weaken the separate **Order on behalf** picker for approved customers (including Path A approved shops) — that remains the path for existing self-signup shops. This RC only hardens **walk-in**.
+
+### Scope (in)
+
+- Backend: mobile lookup for walk-in (staff-created + verification status); WALK_IN verify response hardened; walk-in create/409 handling clarified; history list endpoint or reuse filtered customers list  
+- Web + mobile: walk-in panel UX — skip OTP when allowed; history list + pick; block Path A from walk-in selection  
+- Tests for: skip OTP staff-created+verified; Path A rejected from walk-in; history excludes Path A; pending staff-created still orderable  
+- Sync `customer-account-configuration` CLIENT-PLAN (+ DEVELOPER-GUIDE on ship)
+
+### Out of scope
+
+- Changing Path A self-signup  
+- Changing Admin Path B create form (except that those customers appear in walk-in history as staff-created)  
+- Merging Path A into staff-created / changing `createdByStaffId` after the fact  
+- Redesigning full on-behalf catalog flows  
+- RC-01 Admin edit/verify (already locked separately)
+
+### Acceptance
+
+- [ ] Staff-created + mobile verified → walk-in skips OTP and continues to on-behalf order  
+- [ ] New mobile → OTP → create with `createdByStaffId` → order (unchanged happy path)  
+- [ ] Path A mobile typed into walk-in → cannot be selected / created via walk-in; clear error  
+- [ ] WALK_IN OTP verify no longer hands Path A users into walk-in `onCreated`  
+- [ ] Walk-in history lists only staff-created customers; pick works for pending and verified per locked rules  
+- [ ] Pending staff-created on-behalf still works; CLOSED/BLOCKED excluded  
+- [ ] `customer-account` CLIENT-PLAN Path C matches this RC
+
+### Suggested first PR
+
+Backend lookup + harden WALK_IN verify / walk-in create responses + tests. Then web walk-in panel (skip OTP + history). Then mobile parity. Doc sync.
+
+### Related
+
+- Builds on Path C in [`customer-account-configuration/CLIENT-PLAN.md`](./customer-account-configuration/CLIENT-PLAN.md)  
+- On-behalf gate: `app/lib/customer-order-eligibility.ts`  
+- Surfaces: web `EmployeeWalkInCreatePanel` / mobile `employee-walk-in-create-panel`; `POST /api/users/customers/walk-in`
 

@@ -2,7 +2,7 @@
 
 **Document type:** Customer onboarding plan  
 **Repos:** Admin panel, web app, mobile, shared backend  
-**Follow-ups:** Admin edit / verify / history locked in **[RC-01](../requested-changes.md#rc-01--admin-edit-client-detail-ux-verify-rules-notes-history)** (`requested-changes.md`) — this plan matches that target.
+**Follow-ups:** Admin edit / verify / history locked in **[RC-01](../requested-changes.md#rc-01--admin-edit-client-detail-ux-verify-rules-notes-history)**. Walk-in skip-OTP + history + staff-only locked in **[RC-06](../requested-changes.md#rc-06--walk-in-skip-otp-staff-created--verified-history-staff-only)** (`requested-changes.md`) — this plan matches those targets.
 
 ---
 
@@ -14,7 +14,7 @@ Upgrade how optical-shop customers are identified, approved, commercially config
 2. **Mobile OTP** is required; after success the mobile is marked **verified**.
 3. **Email is optional**; if provided, run **email OTP** and mark email **verified** (email provider TBD).
 4. **Admin** can list, add, and edit clients (full-width detail, prefilled edit form, required update notes, change history + commercial setup).
-5. **Employee** can create a customer (phone + OTP) and place a **live / walk-in order** while Admin finishes commercial setup.
+5. **Employee** can create / re-select **staff-created** walk-in customers (OTP only when needed; history + skip OTP when already verified) and place a **live / walk-in order** while Admin finishes commercial setup.
 6. Each client gets a **pricing tier (A–F)** that applies a **% discount** at checkout.
 7. **Credit** is controlled by a **limit** (no credit period in this phase).
 8. **Ledger** and **payments** stay visible and audited.
@@ -492,9 +492,19 @@ Works for **pending**, **rejected**, and **approved** (not for **Closed**).
 |------|--------|
 | **Where** | Staff web / mobile (near existing **Order on behalf**) — **not** the Admin panel |
 | **Navigate** | Employee orders → Create customer / Walk-in |
-| **Purpose** | Start account with phone + OTP, then place live order |
+| **Purpose** | Counter create / re-select **staff-created** customers, then place live on-behalf order |
+| **Who** | Employee or Admin only. **Staff-created only** (`createdByStaffId` set — Path B or C). Self-signup (Path A) is **never** selected or created via walk-in |
 
-**Steps:** Enter mobile → OTP verify (→ mobile verified) → optional email + email OTP → account created (pending Admin) → optional minimal name/shop → **Place order** (on behalf). GSTIN not required for the walk-in purchase.
+**Steps (target — [RC-06](../requested-changes.md#rc-06--walk-in-skip-otp-staff-created--verified-history-staff-only)):**
+
+1. **History:** list prior staff-created customers; pick → if mobile verified / order-ready → on-behalf catalog; if pending staff-created → continue walk-in then on-behalf (existing pending exception).  
+2. **New / typed mobile:**  
+   - No customer → send OTP → verify → create walk-in (`createdByStaffId`) → place order.  
+   - Staff-created + mobile verified → **skip OTP** → place order.  
+   - Staff-created + mobile not verified → OTP then continue (no duplicate create).  
+   - Path A (`createdByStaffId` null) → reject for walk-in (use normal Order on behalf for approved shops).  
+
+GSTIN not required for the walk-in purchase. Optional name/shop on create as today.
 
 ### 5.4 Pricing tiers (new page)
 
@@ -515,11 +525,11 @@ Changing a tier’s % affects **all customers on that tier** at next checkout (d
 | Surface | Change |
 |---------|--------|
 | Signup (web + mobile) | Start with **mobile** → OTP → optional email (+ optional email OTP) → business/GST/addresses |
-| Employee create customer | Phone + OTP → pending account; then on-behalf **live order**; customer can later finish registration |
+| Employee create / walk-in | Staff-created only; history + skip OTP when verified; else phone + OTP → pending; then on-behalf **live order** (RC-06) |
 | Pending / rejected screens | Show status + reject reason; **Edit profile & resubmit** always available when pending or rejected |
 | Profile / My Business | Editable in pending, rejected, approved, etc. (not when **Closed**) |
 | Checkout (self-serve) | Show tier discount line if % &gt; 0; block if over credit limit or **Blocked**; self-serve still needs **Approved** |
-| Walk-in order (staff) | Allowed for employee-created pending customer (exception for counter sales) |
+| Walk-in order (staff) | Allowed for staff-created pending customer; Path A self-signup not via walk-in (RC-06) |
 | Order detail | If cancelled and refund due / paid — show refund status |
 
 ---
@@ -707,7 +717,7 @@ Every one of these creates an audit / activity trail entry:
 |-------|----------|
 | **A** | OTP auth (mobile + optional email); identity rules |
 | **B** | Admin clients list / add / detail edit + approval + account actions + **Verify GST** button |
-| **C** | Employee walk-in create (phone + OTP) + live on-behalf order while pending Admin setup |
+| **C** | Employee walk-in: staff-created only; history + skip OTP when verified; create via OTP when new; live on-behalf while pending (RC-06) |
 | **D** | Pricing tiers page + assign on client + checkout discount + credit limit block |
 | **E** | Profile edit → pending / reject → resubmit loop |
 | **F** | Cancel → refund payout UI + ledger + audit |
@@ -726,7 +736,7 @@ Every one of these creates an audit / activity trail entry:
 - [ ] Address verified on Approve; later address change → unverified until Admin verifies  
 - [ ] Mobile/email change → re-verify; verified GST/PAN locked  
 - [ ] Admin can click **Verify GST** on client review (on demand; result stored; not auto on signup)  
-- [ ] Employee can create customer with **phone + OTP**; account goes to Admin for setup  
+- [ ] Employee walk-in: staff-created only; skip OTP when verified; history pick; new mobile uses phone + OTP; account goes to Admin for setup (RC-06)  
 - [ ] Employee can place a **walk-in live order** for that customer (GSTIN optional)  
 - [ ] After OTP, customer can log in and complete registration form  
 - [ ] Customer profile edit returns account to **pending**; **self-serve cannot order** until approved again  
