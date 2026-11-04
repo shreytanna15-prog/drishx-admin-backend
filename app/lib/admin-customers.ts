@@ -1,4 +1,4 @@
-import { adminFetch } from "@/app/lib/admin-api";
+import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
 import type { Paginated } from "@/app/lib/types/api-client";
 
 export type AdminCustomer = {
@@ -515,14 +515,48 @@ export type CreateWalkInCustomerPayload = {
   email?: string;
 };
 
+export type WalkInLookupKind = "none" | "path_a" | "staff_created";
+
+export type WalkInLookupResult = {
+  kind: WalkInLookupKind;
+  mobileNumber: string;
+  customer: AdminCustomer | null;
+  skipOtp: boolean;
+  orderable: boolean;
+  message: string | null;
+};
+
+export async function lookupWalkInMobile(
+  mobile: string
+): Promise<WalkInLookupResult> {
+  const qs = new URLSearchParams({ mobile: mobile.trim() });
+  return adminFetch<WalkInLookupResult>(
+    `/api/users/customers/walk-in/lookup?${qs.toString()}`
+  );
+}
+
 export async function createWalkInCustomer(
   payload: CreateWalkInCustomerPayload
 ): Promise<AdminCustomer> {
-  const data = await adminFetch<{ customer: AdminCustomer }>(
-    "/api/users/customers/walk-in",
-    { method: "POST", body: JSON.stringify(payload) }
-  );
-  return data.customer;
+  try {
+    const data = await adminFetch<{ customer: AdminCustomer }>(
+      "/api/users/customers/walk-in",
+      { method: "POST", body: JSON.stringify(payload) }
+    );
+    return data.customer;
+  } catch (err) {
+    if (
+      err instanceof AdminApiError &&
+      err.status === 409 &&
+      err.code === "WALK_IN_EXISTS" &&
+      err.details.customer &&
+      typeof err.details.customer === "object" &&
+      "id" in (err.details.customer as object)
+    ) {
+      return err.details.customer as AdminCustomer;
+    }
+    throw err;
+  }
 }
 
 export async function sendWalkInMobileOtp(mobileNumber: string): Promise<{
@@ -545,6 +579,9 @@ export async function verifyWalkInMobileOtp(input: {
   challengeId: string;
   mobileNumber: string;
   user: AdminCustomer | null;
+  walkInKind?: WalkInLookupKind;
+  code?: string;
+  message?: string | null;
 }> {
   return adminFetch("/api/auth/otp/mobile/verify", {
     method: "POST",
@@ -554,6 +591,20 @@ export async function verifyWalkInMobileOtp(input: {
       purpose: "WALK_IN",
       sessionId: input.sessionId ?? undefined,
     }),
+  });
+}
+
+/** Staff-created walk-in history (Path B/C only). */
+export async function fetchWalkInHistory(params?: {
+  page?: number;
+  limit?: number;
+  q?: string;
+}) {
+  return listAdminCustomers({
+    status: "staff-created",
+    page: params?.page ?? 1,
+    limit: params?.limit ?? 20,
+    q: params?.q,
   });
 }
 

@@ -2,51 +2,52 @@
 
 **Document type:** End-phase backlog (bugs, changes, new modules)  
 **Audience:** Developers picking up assigned work  
-**Last updated:** 2026-10-26
+**Last updated:** 2026-11-04 (doc sync: most RWs shipped; residuals noted below)
 
 ## How to use
 
-- Each item has a stable ID (`RW-01`, `RW-02`, �).
+- Each item has a stable ID (`RW-01`, `RW-02`, …).
 - Default sections: **Type**, **Goal**, **Current state**, **Scope (in)**, **Out of scope**.
 - Larger items (e.g. RW-06, RW-08, RW-09, RW-11, RW-12) add extra sections: catalog, architecture, phases, data sources, open questions, PDF UI references.
 - Cross-repo work is listed under **Repos** in the index.
+- **Residuals (not feature work):** (1) RW-01 optional staging soak when a long-lived staging env is available; (2) RW-06 Profit & Margin stays deferred until invoice-line COGS exists; (3) RW-12 Phase E live 2factor/email/GSTIN credentials when the client delivers keys.
 
 ---
 
 ## Index
 
-| ID | Task | Repos |
-|----|------|-------|
-| RW-01 | Auth session drops mid-use � Unauthorized / forced re-login | backend, website, mobile, admin panel |
-| RW-02 | Admin grouped orders overview (card UI) | backend (admin panel) |
-| RW-03 | Returns: show fuller order details (list + detail) | backend (admin panel) |
-| RW-04 | Customer status: abandoned signups + admin status changes | backend (admin panel; loyalty filters) |
-| RW-05 | RX + photo order visibility (admin hold ? warehouse) | backend, website, mobile, admin panel |
-| RW-06 | Reports module (client report catalog, phased) | backend (admin panel) |
-| RW-07 | Client registration form � most fields optional | backend, website, mobile |
-| RW-08 | Procurement: Purchase Order ? receive ? close (power-wise) | backend (admin panel) |
-| RW-09 | Products & catalog: admin product master + ranges ? powers | backend (admin panel) |
-| RW-10 | Admin panel: create order on behalf of customer | backend (admin panel) |
-| RW-11 | Client API calling pattern + list/table performance | backend, website, mobile, admin panel |
-| RW-12 | Customer account config � OTP clients, reject/resubmit, Path C (web + mobile) | backend, website, mobile, admin panel |
+| ID | Task | Status | Repos |
+|----|------|--------|-------|
+| RW-01 | Auth session drops mid-use — Unauthorized / forced re-login | Shipped (ops soak optional) | backend, website, mobile, admin panel |
+| RW-02 | Admin grouped orders overview (card UI) | Shipped | backend (admin panel) |
+| RW-03 | Returns: show fuller order details (list + detail) | Shipped | backend (admin panel) |
+| RW-04 | Customer status: abandoned signups + admin status changes | Shipped | backend (admin panel; loyalty filters) |
+| RW-05 | RX + photo order visibility (admin hold → warehouse) | Shipped (photo retired RC-02) | backend, website, mobile, admin panel |
+| RW-06 | Reports module (client report catalog, phased) | Shipped; Profit & Margin deferred | backend (admin panel) |
+| RW-07 | Client registration form — most fields optional | Shipped | backend, website, mobile |
+| RW-08 | Procurement: Purchase Order → receive → close (power-wise) | Shipped | backend (admin panel) |
+| RW-09 | Products & catalog: admin product master + ranges → powers | Shipped (RC-03/04/05 parent+variants) | backend (admin panel) |
+| RW-10 | Admin panel: create order on behalf of customer | Shipped | backend (admin panel) |
+| RW-11 | Client API calling pattern + list/table performance | Shipped | backend, website, mobile, admin panel |
+| RW-12 | Customer account config — OTP clients, reject/resubmit, Path C | Shipped (DEV OTP); Phase E credentials later | backend, website, mobile, admin panel |
 
 ---
 
 ## RW-01 — Auth session drops mid-use (Unauthorized)
 
-**Status (2026-11-04):** Mostly shipped — refresh-on-401 + single-flight + non-refreshable account codes + **transient refresh backoff retry** (admin/web/mobile). Residual: prove long-idle parallel calls in staging.
+**Status (2026-11-04):** **Shipped for acceptance.** Refresh-on-401 + single-flight `refreshPromise` + non-refreshable account codes + transient refresh backoff (admin `admin-auth-fetch`, web/mobile `auth-fetch`). Backend rotation race policy covered by `auth-refresh-race.test.ts`. Soak script: `scripts/e2e-rw01-refresh-soak.mjs` (local + deployed Vercel `drishx-admin-backend.vercel.app` — PASS).
 
 ### Type
 
-Bug � session / refresh reliability (all clients)
+Bug — session / refresh reliability (all clients)
 
 ### Goal
 
-Users stay signed in for the life of a valid refresh session. Across **admin panel**, **web app**, and **mobile**, people currently hit **Unauthorized** mid-work and must refresh or log in again. Expired access tokens should refresh silently; force re-login only when the refresh session is truly invalid.
+Users stay signed in for the life of a valid refresh session. Across **admin panel**, **web app**, and **mobile**, expired access tokens should refresh silently; force re-login only when the refresh session is truly invalid.
 
 ### Current state
 
-Access JWT is **15 minutes**; refresh is **30 days** (cookie on web/admin, secure store + body on mobile). Website/admin/mobile already have auth-fetch wrappers with refresh-on-401, but clients still see Unauthorized mid-session � likely incomplete use of those wrappers, proxy/cookie gaps, or races. Fix spans backend refresh behavior plus all three frontends.
+Access JWT is **15 minutes**; refresh is **30 days** (cookie on web/admin, secure store + body on mobile). Auth-fetch wrappers on all three clients share one in-flight refresh, skip silent refresh for account/permission `401` codes, and retry once after transient refresh failures before surfacing auth failure.
 
 ### Scope (in)
 
@@ -58,16 +59,27 @@ Access JWT is **15 minutes**; refresh is **30 days** (cookie on web/admin, secur
 ### Out of scope
 
 - New auth providers or role-model changes
-- �Fix� by only lengthening access-token TTL without making refresh reliable
+- “Fix” by only lengthening access-token TTL without making refresh reliable
 - Permission / inactive / pending-account errors (those should still surface, not silent-refresh)
+
+### Acceptance
+
+- [x] Silent refresh + retry on expired access with valid refresh (admin / web / mobile)
+- [x] Single-flight refresh under parallel 401s (shared `refreshPromise`)
+- [x] Non-refreshable account/permission codes do not trigger silent refresh
+- [x] Transient refresh failure: one short backoff + second attempt before logout
+- [x] **Local soak:** parallel authenticated calls after access JWT near-expiry / refresh path exercises single-flight (dev)
+- [x] **Deployed soak:** same script against `https://drishx-admin-backend.vercel.app` (login + 12 parallel authed calls + parallel refresh) — PASS 2026-11-04
 
 ---
 
-## RW-02 � Admin grouped orders overview (card UI)
+## RW-02 — Admin grouped orders overview (card UI)
+
+**Status (2026-11-04):** **Shipped for acceptance.** `/orders/overview` + `AdminOrdersGroupedOverview` (group by date / customer).
 
 ### Type
 
-New feature � admin order overview page
+New feature — admin order overview page
 
 ### Goal
 
@@ -93,11 +105,13 @@ Order Management has flat table pages (`/orders`, Rx, Dispatch, Procurement). Ea
 
 ---
 
-## RW-03 � Returns: show fuller order details (list + detail)
+## RW-03 — Returns: show fuller order details (list + detail)
+
+**Status (2026-11-04):** **Shipped for acceptance.** Returns list/detail show order catalog summary, status, amounts, and customer business context.
 
 ### Type
 
-Change / UX � admin Returns & Replacements
+Change / UX — admin Returns & Replacements
 
 ### Goal
 
@@ -122,11 +136,13 @@ On admin **returns list** and **return detail**, the linked order(s) currently s
 
 ---
 
-## RW-04 � Customer status: abandoned signups + admin status changes
+## RW-04 — Customer status: abandoned signups + admin status changes
+
+**Status (2026-11-04):** **Shipped for acceptance.** Clients tabs include incomplete; pending bucket + `setCustomerApprovalAction` (approve/reject/reopen/etc.).
 
 ### Type
 
-Bug / change � admin Clients & customer approval lifecycle
+Bug / change — admin Clients & customer approval lifecycle
 
 ### Goal
 
@@ -151,7 +167,9 @@ Signup creates the customer immediately with `approvalStatus: PENDING_REVIEW`, `
 
 ---
 
-## RW-05 � RX + photo order visibility (admin hold ? warehouse)
+## RW-05 — RX + photo order visibility (admin hold → warehouse)
+
+**Status (2026-11-04):** **Shipped for acceptance.** RX admin hold → assign → release; photo create retired (RC-02/RC-05). See `prescription-order-hold.ts`.
 
 ### Type
 
@@ -184,7 +202,7 @@ RX: `notes` containing `[RX Order]`; create uses warehouse hold → assign → r
 
 ## RW-06 — Reports module (client report catalog, phased)
 
-**Status (2026-11-04):** Hub + catalog shipped. **Profit & Margin** intentionally deferred (`deferred-reports.ts` — needs historical COGS).
+**Status (2026-11-04):** **Shipped for acceptance (P1–P4).** Reports hub + `app/lib/reports` registry/`runReport` cover the client catalog. **Decision: keep Profit & Margin deferred** (`deferred-reports.ts` + `profit-cogs.ts`) until invoice-line historical COGS is persisted — do **not** invent margin from catalog `costPrice` or same-period purchases.
 
 ### Type
 
@@ -192,17 +210,15 @@ New feature — Admin **Reports hub** (financial, inventory, power, order, sales
 
 ### Goal
 
-Deliver the client�s full report list as a structured **Reports** area in the admin panel (not 30 one-off pages). Reuse existing finance/inventory/order data; add shared query layer + consistent UI (filters, tables, later export). Build in **phases** so P1 can ship without waiting on SKU redesign or perfect stock-history.
+Deliver the client's full report list as a structured **Reports** area in the admin panel (not 30 one-off pages). Reuse existing finance/inventory/order data; add shared query layer + consistent UI (filters, tables, later export). Build in **phases** so P1 can ship without waiting on SKU redesign or perfect stock-history.
 
 ### Current state
 
-- **Exists today:** Admin **Finance ? GST & Reports** (`/finance/reports`) with API `GET /api/finance/reports`:
-  - `gst-summary` � output / input / net GST by financial year
-  - `hsn` � HSN-wise sales
-  - `power-wise` � power-wise **sales** (invoice lines), not warehouse stock analytics
-- **Related UIs (not formal �reports�):** receivables + aging (`/finance/receivables`, `/api/finance/receivables`), payments/claims, invoices, purchases/payables, order lists by status, lens `quantity` + reserved/available helpers in `app/lib/order-inventory.ts`, reorder `minStock` on `ReorderRule`, stock movements / intake for some history.
-- **Missing:** Reports hub navigation, most named reports below, shared report framework, CSV/Excel export, power fast/slow/dead rules, stock aging/valuation as report products.
-- Older ops-spec text that said �Reports stubbed� is **out of date** for GST/HSN/power-wise sales.
+- **Reports hub:** admin Reports UI + `GET /api/reports` via `app/lib/reports` (registry, `runReport`, export helpers).
+- **Runnable keys (phase ≤ 4):** `gst-summary`, `sales-summary`, `purchase-summary`, `outstanding-customers`, `payment-collection`, order lists (`pending` / `completed` / `cancelled` / `rx` / `ready-stock`), daily/monthly/quarterly/yearly sales, stock reports (current / reserved / available / product-wise / power-wise / OOS / low / valuation), power movement (`fast` / `slow` / `dead` / `unsold`), `stock-aging`.
+- **Deferred (blocked, not fake):** `profit-margin` only — see `app/lib/reports/deferred-reports.ts` and `profit-cogs.ts`.
+- **Legacy:** Finance GST/HSN/power-wise sales pages may still exist; hub is the structured reports product.
+- P4 thresholds (fast/slow/dead windows, valuation basis, aging honesty) are documented on report definitions — not silent invented numbers.
 
 ### Client report catalog (required set)
 
@@ -212,7 +228,7 @@ Deliver the client�s full report list as a structured **Reports** area in the 
 |--------|------------------------|
 | Sales Summary | Aggregate sales (prefer invoice lines / paid or issued invoices � confirm status filter) |
 | Purchase Summary | Aggregate purchases (`PurchaseBill` and related) |
-| Profit & Margin Report | Needs client formula (sales - COGS - ?expenses) |
+| Profit & Margin Report | **Deferred** — needs historical invoice-line COGS (`profit-cogs.ts`); do not invent margin |
 | Outstanding Customers Report | Largely wrap receivables / unpaid invoices + aging |
 | Payment Collection Report | Payments + confirmed payment claims in period |
 | GST Summary Report | **Already implemented** � move/link into Reports hub |
@@ -340,35 +356,37 @@ Ship P1 even if open questions for P4 are unanswered.
 
 ### Acceptance (module-level)
 
-- [ ] Admin can open a Reports hub and run P1 reports with correct filters
-- [ ] GST Summary remains available and matches current finance report numbers
-- [ ] Inventory reserved/available reports match order-inventory semantics
-- [ ] Unknown report keys fail cleanly; unauthorized roles blocked
-- [ ] P2�P4 either shipped or explicitly blocked on documented open questions (no silent fake thresholds)
+- [x] Admin can open a Reports hub and run P1 reports with correct filters
+- [x] GST Summary remains available and matches current finance report numbers
+- [x] Inventory reserved/available reports match order-inventory semantics
+- [x] Unknown report keys fail cleanly; unauthorized roles blocked
+- [x] P2–P4 shipped where runnable; **Profit & Margin** explicitly deferred on historical COGS (`deferred-reports.ts` / `profit-cogs.ts`) — no silent fake thresholds
 
 ### Suggested first PR
 
-Reports hub + registry + migrate GST + 2�3 P1 reports (e.g. outstanding customers, pending orders, daily sales) to prove the pattern; then fill the catalog phase by phase.
+Done — hub + registry + phased catalog. Follow-up only when invoice-line historical COGS lands for Profit & Margin.
 
 ---
 
-## RW-07 � Client registration form: most fields optional
+## RW-07 — Client registration form: most fields optional
+
+**Status (2026-11-04):** **Shipped for acceptance.** Signup requires name + email + mobile (+ password/OTP path); business/GST/addresses optional on API (`signup` / `gst`) and client wizards. Aligns with RW-04 incomplete vs pending-ready.
 
 ### Type
 
-Change � customer signup / onboarding (web + mobile + API)
+Change — customer signup / onboarding (web + mobile + API)
 
 ### Depends on
 
-**Start only after RW-04 is finished.** RW-04 owns incomplete/abandoned Clients visibility and admin status changes. This task must not redesign that flow � it relies on it (sparse signups land in incomplete; GST-complete stay in pending-ready).
+**Depends on RW-04 (shipped).** RW-04 owns incomplete/abandoned Clients visibility and admin status changes.
 
 ### Goal
 
-Relax customer registration so **only name, email, and contact (mobile)** are required at minimum (password remains required for auth). Shop/business, GST, billing, and shipping fields become optional. Users who skip or leave blanks still exist as customers and are managed through the **RW-04** incomplete / status paths � do not invent a parallel approval model.
+Relax customer registration so **only name, email, and contact (mobile)** are required at minimum (password remains required for auth). Shop/business, GST, billing, and shipping fields become optional. Users who skip or leave blanks still exist as customers and are managed through the **RW-04** incomplete / status paths — do not invent a parallel approval model.
 
 ### Current state
 
-DB `User` columns for business/GST/addresses are already mostly nullable. Signup API still requires **business name** in addition to name/email/mobile/password. Web and mobile wizards (`business-info` ? `gst-details` ? `registration-addresses`) mark almost every field required. `POST /api/auth/gst` rejects unless the full business + GST + billing + shipping set is present. Frontend-only loosening is not enough � sparse submit gets **400** from the API today.
+**Done.** Sparse signup is accepted; optional GST/address payload writes nulls when blank. Incomplete signups surface under RW-04 incomplete.
 
 ### Scope (in)
 
@@ -387,11 +405,13 @@ DB `User` columns for business/GST/addresses are already mostly nullable. Signup
 
 ---
 
-## RW-08 � Procurement: Purchase Order ? receive ? close (power-wise)
+## RW-08 — Procurement: Purchase Order → receive → close (power-wise)
+
+**Status (2026-11-04):** **Shipped for acceptance (Phases A–C).** Residual polish only (live supplier email send / claim modules if requested).
 
 ### Type
 
-New module / change � admin procurement (Purchase Order lifecycle on top of existing reorder)
+New module / change — admin procurement (Purchase Order lifecycle on top of existing reorder)
 
 ### Audience note (for humans + AI)
 
@@ -403,17 +423,21 @@ This is the **single procurement PO task**. Implement against **this document + 
 
 Deliver the full admin **Purchase Order** path the client described: power-wise threshold/target ? manual **Run reorder** (keep) ? generate **PO** (draft ? review ? approve/open ? sent) ? **Receive goods** (supplier bill + power-wise Excel) ? validate ? reconcile (power-wise + range-wise) ? resolve exceptions ? **Confirm Receipt** (only then stock updates) ? close outstanding with reasons ? PO closed. While a PO is open for a given power, **never** create another PO for that same power. Reorder may raise that power again **only after** the PO is closed.
 
-### Current state (what already exists � reuse)
+### Current state (shipped)
 
-| Exists today | Where | Keep? |
-|--------------|--------|--------|
-| Power-wise reorder rules (`minStock` / `targetStock` per lens row) | `ReorderRule`, `/inventory/power-wise-stock` | **Yes** � extend UI toward matrix |
-| Manual run reorder (creates demand, not money) | `POST /api/inventory/reorder-check`, Run button | **Yes � do not remove / do not auto-PO at EOD** |
-| Demand rows | `ProcurementRequest` + `/procurement/requests` approve/cancel | **Yes** � feed �Add from Reorder Queue� into PO |
-| Available / reserved / incoming math | `app/lib/procurement-requests.ts`, `procurement-rules.ts` | **Yes** � change `incoming` to count **open PO** qty (not only open requests) once POs exist |
-| Thin suppliers + finance purchase bills | `Supplier`, `PurchaseBill`, `/finance/purchases` | Reuse/enrich; client said current purchases page feels incomplete |
+**Status (2026-11-04):** **Shipped for acceptance (Phases A–C).** Schema, APIs, admin UI, receive/confirm, and stock matrix are in-repo. Unit coverage: `purchase-order-*.test.ts`, `stock-matrix.test.ts`.
 
-**Missing today:** `PurchaseOrder` entity, create/review/approve/sent UI, receive wizard, bill+Excel validation, reconciliations, Confirm Receipt stock post, close-outstanding reasons, open-PO duplicate guard.
+| Piece | Where |
+|-------|--------|
+| Models | `PurchaseOrder`, `PurchaseOrderLine`, `OpenPurchaseOrderPower`, allocations, goods receipts (Prisma) |
+| APIs | `app/api/procurement/purchase-orders/**`, `app/api/procurement/receipts/**` |
+| Domain | `app/lib/purchase-orders.ts`, receive/math/excel/wizard/allocations, `goods-receipts.ts` |
+| Admin UI | `/procurement/purchase-orders` (list / new / detail / receive) |
+| Matrix | `/inventory/stock-matrix` + `/inventory/power-wise-stock` (Current / Threshold / Target; current read-only) |
+| Reorder + incoming | Manual Run reorder kept; `incoming` includes open PO outstanding; open-power lock blocks duplicate PO |
+
+Legacy reorder requests + suppliers/bills remain. No new SKU master.
+
 
 ### Hard rules (do / do not)
 
@@ -550,44 +574,47 @@ Use the client procurement PDF images as layout/intent references. Finder phrase
 
 | Area | Path |
 |------|------|
+| PO domain + HTTP | `app/lib/purchase-orders.ts`, `app/lib/purchase-order-http.ts`, `app/lib/admin-purchase-orders.ts` |
+| Receive / confirm | `app/lib/goods-receipts.ts`, `app/api/procurement/receipts/[id]/confirm/route.ts` |
 | Run reorder | `app/api/inventory/reorder-check/route.ts`, cron `app/api/cron/stock-reorder/route.ts` |
 | Request create / incoming / approve | `app/lib/procurement-requests.ts`, `app/lib/procurement-rules.ts` |
-| Admin power-wise UI | `app/(admin)/inventory/power-wise-stock/page.tsx` |
+| Admin PO + matrix UI | `app/(admin)/procurement/purchase-orders/**`, `app/(admin)/inventory/stock-matrix/page.tsx` |
 | Requests UI | `app/(admin)/procurement/requests/page.tsx` |
-| Order shortage procurement | `app/(admin)/orders/procurement/page.tsx` |
 | Suppliers / bills today | `Supplier`, `PurchaseBill`, `app/(admin)/finance/purchases/page.tsx` |
-| Stock increment patterns | `app/lib/stock-intake.ts` (reuse patterns; post only on Confirm Receipt) |
+| Stock increment patterns | `app/lib/stock-intake.ts` (post only on Confirm Receipt) |
 
-### Open questions (do not block Phase A)
+### Open questions (mostly settled)
 
-1. Final **receive Excel** column template from client (required before Phase B parse is finished).
-2. Exact Prisma status enum names / whether `SENT` is separate from `OPEN`.
-3. Whether **Send via Email** must be live in v1 or stub.
-4. Whether **Create Supplier Claim / Request Replacement** need full modules or UI stubs in B.
-5. QC step before stock available � default for this RW: **stock available on Confirm Receipt**.
+1. Receive Excel template — implemented parser + downloadable template (`purchase-order-excel` / import).
+2. Status enum — `SENT` is distinct from approved/open (covered in tests).
+3. **Send via Email** — mailto stub OK for v1; live SMTP optional follow-up.
+4. Supplier Claim / Request Replacement — UI stubs acceptable; full modules out of v1 unless client asks.
+5. QC before stock — default remains **stock available on Confirm Receipt**.
 
 ### Acceptance
 
-- [ ] Run reorder still manual; still creates/updates demand without auto-PO
-- [ ] Admin can create draft PO from reorder queue, review, approve ? open/sent
-- [ ] Open PO qty for a power blocks a second PO for that power
-- [ ] Receive: bill + Excel ? validate ? reconcile ? Confirm Receipt posts stock once
-- [ ] Partial short: Keep Open vs Close Outstanding with reason; closed PO allows reorder again
-- [ ] Range-wise bill vs Excel mismatch can be reviewed/resolved
-- [ ] Matrix (Phase C) shows Current/Threshold/Target with below-threshold highlight; current not editable
-- [ ] No dependency on a new SKU master table
+- [x] Run reorder still manual; still creates/updates demand without auto-PO
+- [x] Admin can create draft PO from reorder queue, review, approve → open/sent
+- [x] Open PO qty for a power blocks a second PO for that power
+- [x] Receive: bill + Excel → validate → reconcile → Confirm Receipt posts stock once
+- [x] Partial short: Keep Open vs Close Outstanding with reason; closed PO allows reorder again
+- [x] Range-wise bill vs Excel mismatch can be reviewed/resolved
+- [x] Matrix (Phase C) shows Current/Threshold/Target with below-threshold highlight; current not editable
+- [x] No dependency on a new SKU master table
 
 ### Suggested first PR
 
-Phase A only: `PurchaseOrder` schema + create/review/approve UI + reorder `incoming` from open PO lines + �Add from Reorder Queue�. Then Phase B receive/confirm/close. Phase C matrix + supplier profile.
+Done — Phases A–C shipped. Follow-ups only for live supplier email send or claim/replacement modules if the client requires them beyond stubs.
 
 ---
 
-## RW-09 � Products & catalog: admin product master + ranges ? powers
+## RW-09 — Products & catalog: admin product master + ranges → powers
+
+**Status (2026-11-04):** **Shipped for acceptance** via product-catalog work + **RC-03/RC-04/RC-05** (optional material, power-range attribute, parent + variants, null-material uniqueness). `/inventory/products-catalog` is a real module (list/create/detail/variants). Leaf stock remains `lensType`+`lensId`.
 
 ### Type
 
-New module / change � admin **Products & catalog** (product master, ranges, power generation, archive/hold)
+New module / change — admin **Products & catalog** (product master, ranges, power generation, archive/hold)
 
 ### Audience note (for humans + AI)
 
@@ -750,26 +777,28 @@ Products & catalog (admin)
 
 ### Acceptance
 
-- [ ] `/inventory/products-catalog` is a real module (not Coming soon)
-- [ ] Admin can create SV product + range and get full power matrix rows in DB
-- [ ] Overlapping range on same product is rejected with a clear suggested correction
-- [ ] Kryptok and Progressive create paths support their extra power attributes
-- [ ] Hold/Archive hides product from customer catalog/wholesale (and admin active lists)
-- [ ] Existing orders/carts still resolve `lensId`; no orphaning rewrite
-- [ ] Filters/search make large catalogs navigable
-- [ ] No dependency on completing RW-08; SKU leaves remain `lensType`+`lensId`
+- [x] `/inventory/products-catalog` is a real module (not Coming soon)
+- [x] Admin can create product + power range variant(s); matrix leaves remain on lens tables
+- [x] Duplicate parent+range / uniqueness rules enforced (incl. null-material parent reuse — RC-05)
+- [x] SV / Kryptok / Progressive families supported via catalog attribute + parent model
+- [x] Hold/Archive / `isActive` hides inactive products from active admin/shop paths as implemented
+- [x] Existing orders/carts still resolve `lensId`; no orphaning rewrite
+- [x] Filters/search make large catalogs navigable
+- [x] No dependency on completing RW-08; SKU leaves remain `lensType`+`lensId`
 
 ### Suggested first PR
 
-Phase A: real Products & catalog list + SV product create + one range generate (bulk insert) + basic product detail. Then Phase B overlap + KT/PROG. Then Phase C hold/archive + shop query filters.
+_(Shipped — historical note only.)_ Phase A–C + RC-03/04/05 covered the catalog cutover.
 
 ---
 
-## RW-10 � Admin panel: create order on behalf of customer
+## RW-10 — Admin panel: create order on behalf of customer
+
+**Status (2026-11-04):** **Shipped for acceptance.** `/orders/new` + `AdminCreateOrderPanel` (catalog + RX); attribution via `orderSource` / `placedByUserId`. Walk-in Path C aligned with RC-06.
 
 ### Type
 
-New feature � admin Order Management (dedicated create-order flow + attribution)
+New feature — admin Order Management (dedicated create-order flow + attribution)
 
 ### Audience note (for humans + AI)
 
@@ -913,18 +942,18 @@ Admin ? Orders ? Create order
 
 ### Acceptance
 
-- [ ] Admin can open a dedicated Create order flow in the admin panel
-- [ ] Catalog order for an approved customer succeeds; `userId` is the customer
-- [ ] `orderSource = ADMIN_PANEL` and `placedByUserId` set to the admin
-- [ ] List + detail show �Placed by admin � {name}� (or equivalent)
-- [ ] Stock/cutoff/delivery behave like normal checkout
-- [ ] Website employee on-behalf still works
-- [ ] RX creatable from admin (Phase B) with same attribution
-- [ ] No reliance on stuffing attribution only into `notes`
+- [x] Admin can open a dedicated Create order flow in the admin panel
+- [x] Catalog order for an approved customer succeeds; `userId` is the customer
+- [x] `orderSource = ADMIN_PANEL` and `placedByUserId` set to the admin
+- [x] List + detail show “Placed by admin — {name}” (or equivalent)
+- [x] Stock/cutoff/delivery behave like normal checkout
+- [x] Website employee on-behalf still works
+- [x] RX creatable from admin (Phase B) with same attribution
+- [x] No reliance on stuffing attribution only into `notes`
 
 ### Suggested first PR
 
-Schema (`orderSource`, `placedByUserId`) + set on admin retail create + `/orders/new` customer + catalog place + list/detail badge. Then RX. Then color/wholesale if needed.
+_(Shipped — historical note only.)_
 
 ---
 
@@ -1131,13 +1160,13 @@ Detail APIs             ? GET /:id ? full include (unchanged richness)
 
 For **each** of admin / website / mobile `drishx-client-api`:
 
-- [ ] Transport section still accurate
-- [ ] Query + mutation gold examples still accurate
-- [ ] **List & pagination** section added (`Paginated`, params, deps, no client-only primary filter)
-- [ ] **List vs detail** section added
-- [ ] Migration / hot-path rules mention orders (+ Phase C entities)
-- [ ] Error/loading contract unchanged (401 silent; non-401 via `error` / `onError`)
-- [ ] `AGENTS.md` still points at skill
+- [x] Transport section still accurate
+- [x] Query + mutation gold examples still accurate
+- [x] **List & pagination** section added (`Paginated`, params, deps, no client-only primary filter)
+- [x] **List vs detail** section added
+- [x] Migration / hot-path rules mention orders (+ Phase C entities)
+- [x] Error/loading contract unchanged (401 silent; non-401 via `error` / `onError`)
+- [x] `AGENTS.md` still points at skill
 
 ### Scope (in)
 
@@ -1460,17 +1489,17 @@ Reject / profile:
 
 ### Acceptance
 
-- [ ] Website Path A: mobile OTP (DEV) ? optional email OTP ? registration ? pending
-- [ ] Mobile Path A: same as website (parity)
-- [ ] Website + mobile: OTP login works for admin-created / walk-in mobiles
-- [ ] Rejected customer can edit & resubmit on website **and** mobile without �sign up again� as only path
-- [ ] Material profile edit ? `PENDING_REVIEW` on both clients; self-serve ordering blocked with clear copy
-- [ ] Employee website + mobile: Path C walk-in OTP create + continue on-behalf order
-- [ ] Checkout shows tier discount when applicable; credit/blocked/suspended errors are explicit
-- [ ] No dependency on live 2factor/email/GSTIN keys to pass Phases A�D (DEV OTP sufficient)
-- [ ] Phase E: with credentials, staging/prod SMS (and email if chosen) + live GST button work; DEV off outside local
-- [ ] Phase F: mobile uniqueness / email strategy documented and migrated; CLIENT-PLAN / DEVELOPER-GUIDE status matches code
-- [ ] Admin Clients / tiers / GST button / refunds remain working (no regressions)
+- [x] Website Path A: mobile OTP (DEV) → optional email OTP → registration → pending
+- [x] Mobile Path A: same as website (parity)
+- [x] Website + mobile: OTP login works for admin-created / walk-in mobiles
+- [x] Rejected customer can edit & resubmit on website **and** mobile without “sign up again” as only path
+- [x] Material profile edit → `PENDING_REVIEW` on both clients; self-serve ordering blocked with clear copy
+- [x] Employee website + mobile: Path C walk-in (RC-06 skip OTP / history / staff-only) + continue on-behalf order
+- [x] Checkout shows tier discount when applicable; credit/blocked/suspended errors are explicit
+- [x] No dependency on live 2factor/email/GSTIN keys to pass Phases A–D (DEV OTP sufficient)
+- [ ] Phase E: with credentials, staging/prod SMS (and email if chosen) + live GST button work; DEV off outside local — **blocked on client credentials (later)**
+- [x] Phase F: mobile uniqueness / email strategy documented and migrated; CLIENT-PLAN / DEVELOPER-GUIDE status matches code
+- [x] Admin Clients / tiers / GST button / refunds remain working (no regressions)
 
 ### Suggested first PR
 

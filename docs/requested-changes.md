@@ -160,11 +160,11 @@ RX form orders stay as today. Photo prescription orders (`POST /api/orders/photo
 ### Acceptance
 
 - [x] Backend: `POST /api/orders/photo` retired (410); RX hold/list no longer treat photo as sibling
-- [ ] No combined “RX and Photo” (or equivalent) labels in admin / staff UI
-- [ ] Staff and admin RX surfaces show **RX only**
-- [ ] Mobile/web: no live photo create path (see **[RC-05](#rc-05--finish-photo-unwire-clients--null-material-parent-uniqueness)**)
-- [ ] Classification helpers no longer treat photo as an RX-hold sibling for queues
-- [ ] RX flow still works: hold → assign → release → staff see assigned RX
+- [x] No combined “RX and Photo” (or equivalent) labels in admin / staff UI
+- [x] Staff and admin RX surfaces show **RX only**
+- [x] Mobile/web: no live photo create path (see **[RC-05](#rc-05--finish-photo-unwire-clients--null-material-parent-uniqueness)**)
+- [x] Classification helpers no longer treat photo as an RX-hold sibling for queues
+- [x] RX flow still works: hold → assign → release → staff see assigned RX
 
 ### Suggested first PR
 
@@ -386,9 +386,8 @@ Change / cleanup — photo clients leftover + catalog uniqueness edge case
 ### Current state
 
 - Backend photo create is **410 Gone**; RX hold/list updated.  
-- **Mobile** shop still calls `POST /api/orders/photo` (`lib/photo-orders-api.ts` / shop tab) → broken UX.  
-- Web/mobile still **display/classify** photo orders and related copy.  
-- Parent unique index includes nullable `materialId`; Postgres treats each `NULL` as distinct, so duplicate “no material” parents can slip past the DB unique constraint (app `findParentByAttrs` helps but is not enough alone).
+- Mobile/web: no live photo create path; shop does not call `/api/orders/photo` (dead `uploadPhotoOrder` removed). Legacy rows stay readable as “Image attached”.  
+- **Null-material parent uniqueness:** partial unique indexes (`20261104160000_lens_product_null_material_unique`) + `findParentByAttrs` / create reuse — one parent per `(family, base, index, color)` when material is absent.
 
 ### Locked behaviour / sub-tasks
 
@@ -426,16 +425,16 @@ Change / cleanup — photo clients leftover + catalog uniqueness edge case
 
 ### Acceptance
 
-- [ ] Mobile shop never calls `/api/orders/photo`  
-- [ ] No photo-order create UI; RX surfaces are RX-only (no “RX and Photo” product framing)  
-- [ ] Legacy photo rows (if any) do not block RX; no new photo creates possible  
-- [ ] Two creates with same attrs and **no** material reuse one parent (or hard-reject duplicate), never two parents  
-- [ ] SKU/name still omit material when absent; no “None” token required in UI  
-- [ ] CLIENT-PLAN uniqueness note matches  
+- [x] Mobile shop never calls `/api/orders/photo`  
+- [x] No photo-order create UI; RX surfaces are RX-only (no “RX and Photo” product framing)  
+- [x] Legacy photo rows (if any) do not block RX; no new photo creates possible  
+- [x] Two creates with same attrs and **no** material reuse one parent (or hard-reject duplicate), never two parents  
+- [x] SKU/name still omit material when absent; no “None” token required in UI  
+- [x] CLIENT-PLAN uniqueness note matches  
 
 ### Suggested first PR
 
-Mobile + web photo create/UI removal. Then null-material uniqueness (DB + `findParentByAttrs` / create path) + tests.
+**Shipped** — client photo create removed; null-material parent uniqueness via partial indexes + create reuse + integration test.
 
 ### Related
 
@@ -533,13 +532,13 @@ Do **not** weaken the separate **Order on behalf** picker for approved customers
 
 ### Acceptance
 
-- [ ] Staff-created + mobile verified → walk-in skips OTP and continues to on-behalf order  
-- [ ] New mobile → OTP → create with `createdByStaffId` → order (unchanged happy path)  
-- [ ] Path A mobile typed into walk-in → cannot be selected / created via walk-in; clear error  
-- [ ] WALK_IN OTP verify no longer hands Path A users into walk-in `onCreated`  
-- [ ] Walk-in history lists only staff-created customers; pick works for pending and verified per locked rules  
-- [ ] Pending staff-created on-behalf still works; CLOSED/BLOCKED excluded  
-- [ ] `customer-account` CLIENT-PLAN Path C matches this RC
+- [x] Staff-created + mobile verified → walk-in skips OTP and continues to on-behalf order  
+- [x] New mobile → OTP → create with `createdByStaffId` → order (unchanged happy path)  
+- [x] Path A mobile typed into walk-in → cannot be selected / created via walk-in; clear error  
+- [x] WALK_IN OTP verify no longer hands Path A users into walk-in `onCreated`  
+- [x] Walk-in history lists only staff-created customers; pick works for pending and verified per locked rules  
+- [x] Pending staff-created on-behalf still works; CLOSED/BLOCKED excluded  
+- [x] `customer-account` CLIENT-PLAN Path C matches this RC
 
 ### Suggested first PR
 

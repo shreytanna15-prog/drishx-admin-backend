@@ -1422,7 +1422,9 @@ model LensProduct {
   color      LensColor            @relation(fields: [colorId], references: [id])
   variants   LensProductVariant[]
 
-  @@unique([familyId, baseId, materialId, indexId, colorId])
+  /// Uniqueness when material is set / null is enforced by partial unique indexes
+  /// (see migration 20261104160000_lens_product_null_material_unique). Prisma cannot
+  /// express NULLS NOT DISTINCT / partial uniques in @@unique.
   @@index([familyId, isActive])
   @@index([baseId])
   @@index([materialId])

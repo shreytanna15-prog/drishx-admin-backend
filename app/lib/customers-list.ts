@@ -80,6 +80,26 @@ export function buildCustomersListWhere(
         },
       ],
     };
+  } else if (
+    params.status === "staff-created" ||
+    params.status === "walk-in-history"
+  ) {
+    // RC-06 walk-in history: staff-created only (Path B/C), not Path A.
+    where = {
+      role: "CUSTOMER",
+      createdByStaffId: { not: null },
+      accountAction: { notIn: ["CLOSED", "BLOCKED"] },
+      OR: [
+        {
+          isApproved: true,
+          approvalStatus: "APPROVED",
+          isActive: true,
+        },
+        {
+          approvalStatus: "PENDING_REVIEW",
+        },
+      ],
+    };
   } else {
     where = {
       role: "CUSTOMER",

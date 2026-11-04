@@ -647,7 +647,9 @@ Paths are indicative; exact URLs can match existing `/api/...` style.
 |----------|-----------|---------|
 | `GET /api/users/customers` | Admin / employee list | Paginated/filtered client table |
 | `POST /api/users/customers` | Admin add page | Create client (full form) |
-| `POST /api/users/customers/walk-in` | Employee / Admin | Create by mobile after OTP; pending Admin setup |
+| `GET /api/users/customers/walk-in/lookup?mobile=` | Employee / Admin | RC-06: classify mobile (none / Path A reject / staff-created skip-OTP or need OTP) |
+| `GET /api/users/customers?status=staff-created` | Employee / Admin | RC-06 walk-in history (staff-created only) |
+| `POST /api/users/customers/walk-in` | Employee / Admin | Create by mobile after OTP; pending Admin setup; 409 Path A vs existing staff-created |
 | `GET /api/users/customers/:id` | Admin detail | Full client profile |
 | `PATCH /api/users/customers/:id` | Admin edit | Update fields (no re-approval) |
 | `POST /api/users/:id/approve` | Admin detail | approve / reject / reopen (existing pattern, extended) |
@@ -736,8 +738,8 @@ Every one of these creates an audit / activity trail entry:
 - [ ] Address verified on Approve; later address change → unverified until Admin verifies  
 - [ ] Mobile/email change → re-verify; verified GST/PAN locked  
 - [ ] Admin can click **Verify GST** on client review (on demand; result stored; not auto on signup)  
-- [ ] Employee walk-in: staff-created only; skip OTP when verified; history pick; new mobile uses phone + OTP; account goes to Admin for setup (RC-06)  
-- [ ] Employee can place a **walk-in live order** for that customer (GSTIN optional)  
+- [x] Employee walk-in: staff-created only; skip OTP when verified; history pick; new mobile uses phone + OTP; account goes to Admin for setup (RC-06)  
+- [x] Employee can place a **walk-in live order** for that customer (GSTIN optional)  
 - [ ] After OTP, customer can log in and complete registration form  
 - [ ] Customer profile edit returns account to **pending**; **self-serve cannot order** until approved again  
 - [ ] Admin edit does **not** force re-approval  

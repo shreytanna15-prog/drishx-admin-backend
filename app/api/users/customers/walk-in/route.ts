@@ -16,6 +16,10 @@ import { assertWalkInMobileVerified } from "../../../../lib/otp/walk-in-challeng
 import { prisma } from "../../../../lib/prisma";
 import { getSessionOrUnauthorized } from "../../../../lib/session-auth";
 import { toSafeUser } from "../../../../lib/user-public";
+import {
+  classifyWalkInCustomer,
+  isStaffCreatedCustomer,
+} from "../../../../lib/walk-in-classify";
 
 /**
  * Path C — Employee/Admin walk-in create after mobile OTP (WALK_IN).
@@ -61,10 +65,35 @@ export async function POST(req: NextRequest) {
       where: { role: "CUSTOMER", mobileNumber },
     });
     if (existing) {
+      const walkIn = classifyWalkInCustomer(existing);
+      if (walkIn.kind === "path_a") {
+        return NextResponse.json(
+          {
+            error:
+              walkIn.message ??
+              "This mobile belongs to a self-signup customer. Use Order on behalf instead.",
+            code: "WALK_IN_PATH_A",
+          },
+          { status: 409 }
+        );
+      }
+      if (!walkIn.orderable) {
+        return NextResponse.json(
+          {
+            error: walkIn.message ?? "This customer cannot be used for walk-in.",
+            code: "WALK_IN_NOT_ORDERABLE",
+          },
+          { status: 409 }
+        );
+      }
+      // Staff-created: return existing so client can select (no duplicate create).
       return NextResponse.json(
         {
-          error: "A customer with this mobile number already exists.",
-          customer: toSafeUser(existing),
+          error: "A staff-created customer with this mobile already exists.",
+          code: "WALK_IN_EXISTS",
+          customer: isStaffCreatedCustomer(existing)
+            ? toSafeUser(existing)
+            : null,
         },
         { status: 409 }
       );

@@ -18,6 +18,7 @@ import {
 } from "../../../../../lib/otp";
 import { createCustomerFromMobileOtp } from "../../../../../lib/otp/signup-from-mobile";
 import { toSafeUser } from "../../../../../lib/user-public";
+import { classifyWalkInCustomer } from "../../../../../lib/walk-in-classify";
 
 export async function POST(req: NextRequest) {
   const auditCtx = buildAuditRequestContext(req);
@@ -151,6 +152,67 @@ export async function POST(req: NextRequest) {
       return issueAuthTokens(req, user);
     }
 
+    // RC-06: classify before mutating Path A on WALK_IN.
+    if (purpose === "WALK_IN") {
+      const walkIn = classifyWalkInCustomer(user);
+      if (walkIn.kind === "path_a") {
+        await recordSecurityEvent(prisma, {
+          action: SecurityAction.OTP_VERIFIED,
+          actorUserId: user?.id ?? null,
+          actorEmail: user?.email ?? null,
+          result: "SUCCESS",
+          request: auditCtx,
+          message: "WALK_IN OTP verified but Path A rejected for walk-in",
+          context: {
+            channel: "MOBILE",
+            purpose,
+            destinationSuffix: mobileNumber.slice(-4),
+            challengeId: verified.challengeId,
+            code: "WALK_IN_PATH_A",
+          },
+        });
+        return NextResponse.json({
+          ok: true,
+          purpose,
+          mobileNumber,
+          mobileVerified: false,
+          challengeId: verified.challengeId,
+          user: null,
+          walkInKind: "path_a",
+          code: "WALK_IN_PATH_A",
+          message: walkIn.message,
+        });
+      }
+      if (walkIn.kind === "staff_created" && !walkIn.orderable) {
+        await recordSecurityEvent(prisma, {
+          action: SecurityAction.OTP_VERIFIED,
+          actorUserId: user?.id ?? null,
+          actorEmail: user?.email ?? null,
+          result: "SUCCESS",
+          request: auditCtx,
+          message: "WALK_IN OTP verified but customer not orderable",
+          context: {
+            channel: "MOBILE",
+            purpose,
+            destinationSuffix: mobileNumber.slice(-4),
+            challengeId: verified.challengeId,
+            code: "WALK_IN_NOT_ORDERABLE",
+          },
+        });
+        return NextResponse.json({
+          ok: true,
+          purpose,
+          mobileNumber,
+          mobileVerified: Boolean(user?.mobileVerifiedAt),
+          challengeId: verified.challengeId,
+          user: null,
+          walkInKind: "staff_created",
+          code: "WALK_IN_NOT_ORDERABLE",
+          message: walkIn.message,
+        });
+      }
+    }
+
     if (user) {
       await prisma.user.update({
         where: { id: user.id },
@@ -199,6 +261,24 @@ export async function POST(req: NextRequest) {
         context: { role: user.role, via: "MOBILE_OTP" },
       });
       return issueAuthTokens(req, user);
+    }
+
+    // RC-06: only staff-created (or none) reach here for WALK_IN.
+    if (purpose === "WALK_IN") {
+      const walkIn = classifyWalkInCustomer(user);
+      const selectableUser =
+        walkIn.kind === "staff_created" && walkIn.selectable && user
+          ? toSafeUser(user)
+          : null;
+      return NextResponse.json({
+        ok: true,
+        purpose,
+        mobileNumber,
+        mobileVerified: true,
+        challengeId: verified.challengeId,
+        user: selectableUser,
+        walkInKind: walkIn.kind,
+      });
     }
 
     return NextResponse.json({

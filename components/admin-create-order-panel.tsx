@@ -19,8 +19,11 @@ import {
 } from "@/app/lib/admin-orders";
 import {
   createWalkInCustomer,
+  fetchWalkInHistory,
+  lookupWalkInMobile,
   sendWalkInMobileOtp,
   verifyWalkInMobileOtp,
+  type AdminCustomer,
 } from "@/app/lib/admin-customers";
 import {
   filterEligibleCreateOrderCustomers,
@@ -174,9 +177,13 @@ export function AdminCreateOrderPanel() {
   const [walkInChallengeId, setWalkInChallengeId] = useState<string | null>(
     null
   );
-  const [walkInOtpVerified, setWalkInOtpVerified] = useState(false);
+  const [walkInPhase, setWalkInPhase] = useState<
+    "idle" | "need_otp" | "need_create"
+  >("idle");
   const [walkInBusy, setWalkInBusy] = useState(false);
   const [walkInError, setWalkInError] = useState<string | null>(null);
+  const [walkInHistory, setWalkInHistory] = useState<AdminCustomer[]>([]);
+  const [walkInHistoryLoading, setWalkInHistoryLoading] = useState(false);
 
   useEffect(() => {
     const t = window.setTimeout(
@@ -223,11 +230,81 @@ export function AdminCreateOrderPanel() {
   const customersError = customersQueryError?.message ?? null;
   const customersHasMore = Boolean(customersPage?.hasMore);
 
+  useEffect(() => {
+    if (customerMode !== "walkin") return;
+    let cancelled = false;
+    setWalkInHistoryLoading(true);
+    void fetchWalkInHistory({ page: 1, limit: 20 })
+      .then((page) => {
+        if (!cancelled) setWalkInHistory(page.items);
+      })
+      .catch(() => {
+        if (!cancelled) setWalkInHistory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setWalkInHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerMode]);
+
+  function selectWalkInCustomer(customer: AdminCustomer) {
+    if (!isEligibleCreateOrderCustomer(customer)) {
+      setWalkInError("This customer is not eligible for create-order.");
+      return;
+    }
+    setSelectedCustomer(customer);
+    setCustomerMode("search");
+    setWalkInPhase("idle");
+    setCustomerPage(1);
+    void refetchCustomers();
+  }
+
+  async function handleWalkInLookup() {
+    setWalkInError(null);
+    setWalkInBusy(true);
+    setWalkInPhase("idle");
+    setWalkInChallengeId(null);
+    setWalkInSessionId(null);
+    setWalkInCode("");
+    try {
+      const result = await lookupWalkInMobile(walkInMobile.trim());
+      setWalkInMobile(result.mobileNumber || walkInMobile.trim());
+      if (result.kind === "path_a") {
+        setWalkInError(
+          result.message ??
+            "This mobile is a self-signup customer. Use Search instead."
+        );
+        return;
+      }
+      if (result.kind === "staff_created" && !result.orderable) {
+        setWalkInError(
+          result.message ?? "This customer cannot be used for walk-in."
+        );
+        return;
+      }
+      if (
+        result.kind === "staff_created" &&
+        result.skipOtp &&
+        result.customer
+      ) {
+        selectWalkInCustomer(result.customer);
+        return;
+      }
+      setWalkInPhase("need_otp");
+    } catch (err) {
+      setWalkInError(
+        err instanceof AdminApiError ? err.message : "Failed to look up mobile."
+      );
+    } finally {
+      setWalkInBusy(false);
+    }
+  }
+
   async function handleWalkInSendOtp() {
     setWalkInError(null);
     setWalkInBusy(true);
-    setWalkInOtpVerified(false);
-    setWalkInChallengeId(null);
     try {
       const res = await sendWalkInMobileOtp(walkInMobile.trim());
       setWalkInSessionId(res.providerSessionId);
@@ -251,12 +328,27 @@ export function AdminCreateOrderPanel() {
         sessionId: walkInSessionId,
       });
       setWalkInChallengeId(res.challengeId);
-      setWalkInOtpVerified(true);
       setWalkInMobile(res.mobileNumber);
-      if (res.user && isEligibleCreateOrderCustomer(res.user)) {
-        setSelectedCustomer(res.user);
-        setCustomerMode("search");
+      if (res.walkInKind === "path_a" || res.code === "WALK_IN_PATH_A") {
+        setWalkInError(
+          res.message ??
+            "This mobile is a self-signup customer. Use Search instead."
+        );
+        setWalkInPhase("idle");
+        return;
       }
+      if (res.code === "WALK_IN_NOT_ORDERABLE") {
+        setWalkInError(
+          res.message ?? "This customer cannot be used for walk-in."
+        );
+        setWalkInPhase("idle");
+        return;
+      }
+      if (res.user && isEligibleCreateOrderCustomer(res.user)) {
+        selectWalkInCustomer(res.user);
+        return;
+      }
+      setWalkInPhase("need_create");
     } catch (err) {
       setWalkInError(
         err instanceof AdminApiError ? err.message : "Failed to verify OTP."
@@ -280,10 +372,7 @@ export function AdminCreateOrderPanel() {
         name: walkInName.trim() || undefined,
         shopName: walkInShop.trim() || undefined,
       });
-      setSelectedCustomer(customer);
-      setCustomerMode("search");
-      setCustomerPage(1);
-      void refetchCustomers();
+      selectWalkInCustomer(customer);
     } catch (err) {
       setWalkInError(
         err instanceof AdminApiError
@@ -546,49 +635,69 @@ export function AdminCreateOrderPanel() {
             {customerMode === "walkin" ? (
               <div className="space-y-3 rounded-xl border border-(--brand-card-border) p-4">
                 <p className="text-sm text-(--brand-text-muted)">
-                  Verify mobile OTP, then create a pending customer and place the
-                  order immediately.
+                  Staff-created only. Verified mobiles skip OTP; new mobiles need
+                  OTP then create.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                   <Input
                     value={walkInMobile}
-                    onChange={(e) => setWalkInMobile(e.target.value)}
+                    onChange={(e) => {
+                      setWalkInMobile(e.target.value);
+                      if (walkInPhase !== "idle") setWalkInPhase("idle");
+                    }}
                     placeholder="10-digit mobile"
                     className="h-11 rounded-xl"
                     inputMode="tel"
-                    disabled={walkInBusy || walkInOtpVerified}
+                    disabled={walkInBusy || walkInPhase === "need_create"}
                   />
                   <Button
                     type="button"
-                    disabled={walkInBusy || !walkInMobile.trim()}
-                    onClick={() => void handleWalkInSendOtp()}
-                    className="h-11 rounded-xl font-bold"
-                  >
-                    {walkInBusy ? "…" : "Send OTP"}
-                  </Button>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                  <Input
-                    value={walkInCode}
-                    onChange={(e) => setWalkInCode(e.target.value)}
-                    placeholder="OTP code"
-                    className="h-11 rounded-xl"
-                    inputMode="numeric"
-                    disabled={walkInBusy || walkInOtpVerified}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
                     disabled={
-                      walkInBusy || !walkInCode.trim() || walkInOtpVerified
+                      walkInBusy ||
+                      !walkInMobile.trim() ||
+                      walkInPhase === "need_create"
                     }
-                    onClick={() => void handleWalkInVerifyOtp()}
+                    onClick={() => void handleWalkInLookup()}
                     className="h-11 rounded-xl font-bold"
                   >
-                    {walkInOtpVerified ? "Verified" : "Verify"}
+                    {walkInBusy && walkInPhase === "idle" ? "…" : "Continue"}
                   </Button>
                 </div>
-                {walkInOtpVerified ? (
+                {walkInPhase === "need_otp" || walkInPhase === "need_create" ? (
+                  <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto]">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={walkInBusy || walkInPhase === "need_create"}
+                      onClick={() => void handleWalkInSendOtp()}
+                      className="h-11 rounded-xl font-bold"
+                    >
+                      Send OTP
+                    </Button>
+                    <Input
+                      value={walkInCode}
+                      onChange={(e) => setWalkInCode(e.target.value)}
+                      placeholder="OTP code"
+                      className="h-11 rounded-xl"
+                      inputMode="numeric"
+                      disabled={walkInBusy || walkInPhase === "need_create"}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={
+                        walkInBusy ||
+                        !walkInCode.trim() ||
+                        walkInPhase === "need_create"
+                      }
+                      onClick={() => void handleWalkInVerifyOtp()}
+                      className="h-11 rounded-xl font-bold"
+                    >
+                      Verify
+                    </Button>
+                  </div>
+                ) : null}
+                {walkInPhase === "need_create" ? (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Input
                       value={walkInName}
@@ -617,6 +726,33 @@ export function AdminCreateOrderPanel() {
                     {walkInError}
                   </p>
                 ) : null}
+                <div className="border-t border-(--brand-card-border) pt-3">
+                  <p className="mb-2 text-xs font-semibold text-(--brand-text-muted)">
+                    Recent staff-created
+                  </p>
+                  {walkInHistoryLoading ? (
+                    <p className="text-xs text-(--brand-text-muted)">Loading…</p>
+                  ) : walkInHistory.length === 0 ? (
+                    <p className="text-xs text-(--brand-text-muted)">
+                      No prior walk-in customers yet.
+                    </p>
+                  ) : (
+                    <ul className="max-h-40 space-y-1 overflow-y-auto">
+                      {walkInHistory.map((c) => (
+                        <li key={c.id}>
+                          <button
+                            type="button"
+                            className="w-full rounded-lg px-2 py-1.5 text-left text-xs font-medium text-(--brand-text) hover:bg-(--brand-primary)/10"
+                            disabled={walkInBusy}
+                            onClick={() => selectWalkInCustomer(c)}
+                          >
+                            {formatCustomerPickerLabel(c)}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
             ) : (
               <>
