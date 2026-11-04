@@ -3,28 +3,14 @@
 import { useEffect, useState } from "react";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  getFinanceSettings,
+  updateFinanceSettings,
+  type FinanceCompanySettings,
+} from "@/app/lib/admin-finance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
-type Settings = {
-  legalName: string;
-  tradeName: string | null;
-  addressLine1: string | null;
-  city: string | null;
-  state: string;
-  stateCode: string;
-  gstin: string | null;
-  pan: string | null;
-  invoiceSeriesPrefix: string;
-  defaultHsnCode: string;
-  defaultGstRatePercent: number | string;
-  paymentTermsDays: number;
-  bankName: string | null;
-  bankAccountNumber: string | null;
-  bankIfsc: string | null;
-  invoiceFooterNotes: string | null;
-};
 
 const inputClass =
   "h-10 border-(--brand-input-border) bg-(--brand-input-bg)";
@@ -49,7 +35,7 @@ function Field({
 }
 
 export default function FinanceSettingsPage() {
-  const [form, setForm] = useState<Settings | null>(null);
+  const [form, setForm] = useState<FinanceCompanySettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -61,7 +47,7 @@ export default function FinanceSettingsPage() {
       setLoading(true);
       setError("");
       try {
-        const data = await adminFetch<Settings>("/api/finance/settings");
+        const data = await getFinanceSettings();
         if (!cancelled) setForm(data);
       } catch (err) {
         if (!cancelled) {
@@ -85,14 +71,7 @@ export default function FinanceSettingsPage() {
     setError("");
     setMessage("");
     try {
-      const updated = await adminFetch<Settings>("/api/finance/settings", {
-        method: "PUT",
-        body: JSON.stringify({
-          ...form,
-          defaultGstRatePercent: Number(form.defaultGstRatePercent),
-          paymentTermsDays: Number(form.paymentTermsDays),
-        }),
-      });
+      const updated = await updateFinanceSettings(form);
       setForm(updated);
       setMessage("Finance settings saved.");
     } catch (err) {
@@ -102,7 +81,10 @@ export default function FinanceSettingsPage() {
     }
   }
 
-  function set<K extends keyof Settings>(key: K, value: Settings[K]) {
+  function set<K extends keyof FinanceCompanySettings>(
+    key: K,
+    value: FinanceCompanySettings[K]
+  ) {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 

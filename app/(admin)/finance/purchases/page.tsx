@@ -5,29 +5,25 @@ import Link from "next/link";
 import { ExternalLink, Loader2, Paperclip } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  createPurchaseBill,
+  createPurchaseSupplier,
+  getPurchaseBillDocumentUrl,
+  listPurchaseBills,
+  listPurchaseSuppliers,
+  uploadPurchaseBillDocument,
+  type PurchaseBill,
+  type PurchaseSupplier,
+} from "@/app/lib/admin-finance-purchases";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminSelect } from "@/components/admin-select";
 
-type Supplier = { id: string; name: string; gstin: string | null; state: string | null };
-type Bill = {
-  id: string;
-  billNumber: string;
-  totalAmount: number | string;
-  status: string;
-  supplier: { name: string };
-  poReference: string | null;
-  grnReference: string | null;
-  documentFileName: string | null;
-  documentStoragePath: string | null;
-};
-
 export default function PurchasesPage() {
-  const [bills, setBills] = useState<Bill[]>([]);
+  const [bills, setBills] = useState<PurchaseBill[]>([]);
   const [billsHasMore, setBillsHasMore] = useState(false);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = useState<PurchaseSupplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [supplierName, setSupplierName] = useState("");
@@ -45,8 +41,8 @@ export default function PurchasesPage() {
     setDocBusy(billId);
     setError("");
     try {
-      const res = await adminFetch<{ url: string }>(`/api/finance/purchases/${billId}/document`);
-      window.open(res.url, "_blank", "noopener,noreferrer");
+      const url = await getPurchaseBillDocumentUrl(billId);
+      window.open(url, "_blank", "noopener,noreferrer");
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Could not open document.");
     } finally {
@@ -61,14 +57,7 @@ export default function PurchasesPage() {
     setError("");
     setNotice("");
     try {
-      const form = new FormData();
-      form.set("file", file);
-      const res = await adminAuthFetch(`/api/finance/purchases/${billId}/document`, {
-        method: "POST",
-        body: form,
-      });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new AdminApiError(data.error ?? "Upload failed.", res.status);
+      await uploadPurchaseBillDocument(billId, file);
       setNotice("Bill document stored.");
       await load();
     } catch (err) {
@@ -84,18 +73,11 @@ export default function PurchasesPage() {
     setLoading(true);
     try {
       const [b, s] = await Promise.all([
-        adminFetch<{ items?: Bill[]; hasMore?: boolean } | Bill[]>(
-          "/api/finance/purchases?page=1&limit=100"
-        ),
-        adminFetch<Supplier[]>("/api/finance/purchases?resource=suppliers"),
+        listPurchaseBills(),
+        listPurchaseSuppliers(),
       ]);
-      const billsList = Array.isArray(b)
-        ? b
-        : Array.isArray(b.items)
-          ? b.items
-          : [];
-      setBills(billsList);
-      setBillsHasMore(!Array.isArray(b) && Boolean(b.hasMore));
+      setBills(b.bills);
+      setBillsHasMore(b.hasMore);
       setSuppliers(s);
       if (s[0] && !supplierId) setSupplierId(s[0].id);
       setError("");
@@ -115,14 +97,10 @@ export default function PurchasesPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      const s = await adminFetch<Supplier>("/api/finance/purchases", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "create-supplier",
-          name: supplierName,
-          state: "Gujarat",
-          stateCode: "24",
-        }),
+      const s = await createPurchaseSupplier({
+        name: supplierName,
+        state: "Gujarat",
+        stateCode: "24",
       });
       setSupplierName("");
       setSupplierId(s.id);
@@ -139,20 +117,16 @@ export default function PurchasesPage() {
     if (!supplierId) return;
     setSaving(true);
     try {
-      await adminFetch("/api/finance/purchases", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "create-bill",
-          supplierId,
-          post: true,
-          lines: [
-            {
-              description: desc,
-              quantity: Number(qty),
-              unitPrice: Number(rate),
-            },
-          ],
-        }),
+      await createPurchaseBill({
+        supplierId,
+        post: true,
+        lines: [
+          {
+            description: desc,
+            quantity: Number(qty),
+            unitPrice: Number(rate),
+          },
+        ],
       });
       await load();
     } catch (err) {

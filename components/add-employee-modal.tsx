@@ -2,8 +2,12 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { Loader2, Plus } from "lucide-react";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-import type { AdminEmployee } from "@/app/lib/admin-employees";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  type AdminEmployee,
+  createAdminEmployee,
+} from "@/app/lib/admin-employees";
+import { listStaffRoleOptions } from "@/app/lib/admin-staff-roles";
 import { AdminModal } from "@/components/admin-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,10 +37,8 @@ export function AddEmployeeModal({
 
   useEffect(() => {
     if (!open) return;
-    void adminFetch<{ roles: { id: string; name: string }[] }>(
-      "/api/admin/staff-roles"
-    )
-      .then((data) => setRoles(Array.isArray(data.roles) ? data.roles : []))
+    void listStaffRoleOptions()
+      .then((data) => setRoles(data))
       .catch(() => setRoles([]));
   }, [open]);
 
@@ -80,19 +82,13 @@ export function AddEmployeeModal({
 
     setSubmitting(true);
     try {
-      const data = await adminFetch<{ user: AdminEmployee }>(
-        "/api/auth/employees",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            email: trimmedEmail,
-            password: trimmedPassword,
-            name: trimmedName || null,
-            staffRoleId: staffRoleId || null,
-          }),
-        }
-      );
-      onCreated(data.user);
+      const user = await createAdminEmployee({
+        email: trimmedEmail,
+        password: trimmedPassword,
+        name: trimmedName || null,
+        staffRoleId: staffRoleId || null,
+      });
+      onCreated(user);
       handleOpenChange(false);
     } catch (err) {
       setError(
@@ -185,16 +181,18 @@ export function AddEmployeeModal({
             <span className="text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)">
               Role
             </span>
-            <AdminSelect
+            <select
               value={staffRoleId}
-              onValueChange={setStaffRoleId}
-              options={[
-                { value: "", label: "Full operations (default)" },
-                ...roles.map((role) => ({ value: role.id, label: role.name })),
-              ]}
-              placeholder="Full operations (default)"
-              triggerClassName="h-11 rounded-xl border-(--brand-input-border) bg-(--brand-input-bg)"
-            />
+              onChange={(e) => setStaffRoleId(e.target.value)}
+              className="h-11 w-full rounded-xl border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text)"
+            >
+              <option value="">Full operations (default)</option>
+              {roles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.name}
+                </option>
+              ))}
+            </select>
           </label>
 
           <div className="mt-2 flex gap-2 border-t border-(--brand-card-border) pt-4">

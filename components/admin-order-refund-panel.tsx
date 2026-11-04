@@ -1,8 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-import { formatMoney } from "@/app/lib/admin-orders";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  formatMoney,
+  getAdminOrderRefund,
+  postAdminOrderRefundPayout,
+  type AdminOrderRefundSummary,
+} from "@/app/lib/admin-orders";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminSelect } from "@/components/admin-select";
@@ -19,19 +24,10 @@ type RefundPayout = {
   notes: string | null;
 };
 
-type RefundSummary = {
-  id: string;
-  amountDue: number;
-  amountPaid: number;
-  remaining: number;
-  status: string;
-  payouts: RefundPayout[];
-};
-
 const MODES = ["UPI", "BANK", "CASH", "CARD", "CHEQUE", "OTHER"] as const;
 
 export function AdminOrderRefundPanel({ orderId }: { orderId: string }) {
-  const [refund, setRefund] = useState<RefundSummary | null | undefined>(
+  const [refund, setRefund] = useState<AdminOrderRefundSummary | null | undefined>(
     undefined
   );
   const [error, setError] = useState("");
@@ -46,12 +42,10 @@ export function AdminOrderRefundPanel({ orderId }: { orderId: string }) {
   const load = useCallback(async () => {
     setError("");
     try {
-      const data = await adminFetch<{ refund: RefundSummary | null }>(
-        `/api/orders/${orderId}/refund`
-      );
-      setRefund(data.refund);
-      if (data.refund && data.refund.remaining > 0) {
-        setAmount(String(data.refund.remaining));
+      const summary = await getAdminOrderRefund(orderId);
+      setRefund(summary);
+      if (summary && summary.remaining > 0) {
+        setAmount(String(summary.remaining));
       }
     } catch (e) {
       setRefund(null);
@@ -67,23 +61,16 @@ export function AdminOrderRefundPanel({ orderId }: { orderId: string }) {
     setPending(true);
     setError("");
     try {
-      const data = await adminFetch<{ refund: RefundSummary }>(
-        `/api/orders/${orderId}/refund/payouts`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            amount: Number(amount),
-            mode,
-            paidAt: new Date(paidAt).toISOString(),
-            reference: reference.trim() || null,
-          }),
-        }
-      );
-      setRefund(data.refund);
+      const updated = await postAdminOrderRefundPayout(orderId, {
+        amount: Number(amount),
+        mode,
+        paidAt: new Date(paidAt).toISOString(),
+        reference: reference.trim() || null,
+      });
+      setRefund(updated);
       setReference("");
-      if (data.refund.remaining > 0) {
-        setAmount(String(data.refund.remaining));
+      if (updated.remaining > 0) {
+        setAmount(String(updated.remaining));
       } else {
         setAmount("");
       }

@@ -15,4 +15,14 @@ describe("adminAuthFetch refresh gate (RW-01)", () => {
     assert.match(src, /MISSING_PERMISSION/);
     assert.match(src, /responseAuthCode/);
   });
+
+  it("retries refresh once after transient before surfacing 401", () => {
+    const src = readFileSync(
+      join(process.cwd(), "app/lib/admin-auth-fetch.ts"),
+      "utf8"
+    );
+    assert.match(src, /outcome\.status === "transient"/);
+    assert.match(src, /setTimeout\(r, 400\)/);
+    assert.match(src, /second refresh|backoff|transient/i);
+  });
 });

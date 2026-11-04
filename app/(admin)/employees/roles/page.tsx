@@ -3,35 +3,23 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ChevronRight, Plus } from "lucide-react";
-import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { listStaffRoles, type StaffRoleSummary } from "@/app/lib/admin-staff-roles";
 import { AdminPage } from "@/components/admin-shell";
 import { ListSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type StaffRoleRow = {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  isSystem: boolean;
-  permissions: string[];
-  memberCount?: number;
-};
-
 export default function StaffRolesPage() {
-  const [roles, setRoles] = useState<StaffRoleRow[]>([]);
+  const [roles, setRoles] = useState<StaffRoleSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   async function loadRoles() {
     setLoading(true);
     setError("");
     try {
-      const data = await adminFetch<{ roles: StaffRoleRow[] }>(
-        "/api/admin/staff-roles"
-      );
-      setRoles(Array.isArray(data.roles) ? data.roles : []);
+      setRoles(await listStaffRoles());
     } catch (err) {
       setError(
         err instanceof AdminApiError ? err.message : "Failed to load roles."

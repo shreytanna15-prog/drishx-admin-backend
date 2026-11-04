@@ -21,7 +21,11 @@ import { DetailSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  getAdminCustomer,
+  setCustomerApprovalAction,
+} from "@/app/lib/admin-customers";
 import {
   type AccountActionValue,
   type AdminCustomer,
@@ -228,20 +232,11 @@ function ClientDetailContent() {
       setLoading(true);
       setError("");
       try {
-        const data = await adminFetch<{
-          customer: AdminCustomer;
-          finance?: {
-            outstanding: number;
-            creditLimit: number | null;
-            availableCredit: number | null;
-            creditAllowed: boolean;
-            accountAction: string;
-          };
-        }>(`/api/users/customers/${id}`);
+        const data = await getAdminCustomer(id);
         if (!cancelled) {
           const row = data.customer ?? null;
           setCustomer(row);
-          setFinance(data.finance ?? null);
+          setFinance(data.finance);
           if (row) {
             setCreditLimitDraft(row.creditLimit ?? "");
             setCreditAllowedDraft(row.creditAllowed ?? true);
@@ -296,24 +291,19 @@ function ClientDetailContent() {
     setActing(true);
     setActionError("");
     try {
-      const data = await adminFetch<{ user: AdminCustomer }>(
-        `/api/users/${customer.id}/approve`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            action,
-            ...(rejectionReason ? { rejectionReason } : {}),
-          }),
-        }
+      const user = await setCustomerApprovalAction(
+        customer.id,
+        action,
+        rejectionReason
       );
-      setCustomer(data.user);
+      setCustomer(user);
 
       if (action === "approve") {
         router.push("/clients?tab=approved");
       } else if (action === "reject") {
         router.push("/clients?tab=rejected");
       } else if (action === "reopen") {
-        const next = data.user.gstNumber
+        const next = user.gstNumber
           ? "/clients?tab=pending"
           : "/clients?tab=incomplete";
         router.push(next);

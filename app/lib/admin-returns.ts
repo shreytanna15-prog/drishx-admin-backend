@@ -388,3 +388,65 @@ export async function listAdminReturns(
   );
   return normalizeReturnsListResponse(data);
 }
+
+export async function getAdminReturn(id: string): Promise<AdminReturnRequest> {
+  return adminFetch<AdminReturnRequest>(`/api/returns/${id}`);
+}
+
+export type SubmitReturnDecisionPayload = {
+  decision: "CREDIT" | "REPLACEMENT" | "REJECT";
+  remarks: string;
+  approvedAmount?: number;
+  stockDisposition: string;
+  assignedEmployeeId?: string;
+};
+
+export async function submitAdminReturnDecision(
+  returnId: string,
+  payload: SubmitReturnDecisionPayload
+): Promise<void> {
+  await adminFetch(`/api/returns/${returnId}/decision`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function patchAdminReturn(
+  returnId: string,
+  body: Record<string, unknown>
+): Promise<void> {
+  await adminFetch(`/api/returns/${returnId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function createAdminReturn(
+  body: Record<string, unknown>
+): Promise<{ id: string; requestNumber?: string }> {
+  return adminFetch<{ id: string; requestNumber?: string }>("/api/returns", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function uploadAdminReturnImage(
+  returnId: string,
+  file: File
+): Promise<void> {
+  const { adminAuthFetch } = await import("@/app/lib/admin-auth-fetch");
+  const formData = new FormData();
+  formData.set("photo", file);
+  const res = await adminAuthFetch(`/api/returns/${returnId}/images`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof (data as { error?: string })?.error === "string"
+        ? (data as { error: string }).error
+        : "Return created but photo upload failed."
+    );
+  }
+}

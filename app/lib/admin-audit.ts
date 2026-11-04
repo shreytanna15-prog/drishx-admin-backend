@@ -106,3 +106,13 @@ export function auditExportUrl(params: Record<string, string | undefined>) {
   }
   return `/api/audit/events/export?${search.toString()}`;
 }
+
+export async function downloadAuditExport(
+  params: Record<string, string | undefined>
+): Promise<Blob> {
+  const { adminAuthFetch } = await import("@/app/lib/admin-auth-fetch");
+  const url = auditExportUrl(params);
+  const res = await adminAuthFetch(url, { method: "GET" });
+  if (!res.ok) throw new Error("Export failed");
+  return res.blob();
+}

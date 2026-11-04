@@ -17,7 +17,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  bulkSaveReorderRules,
+  fetchReorderRules,
+  runReorderCheck,
+} from "@/app/lib/admin-reorder";
 import {
   formatLensName,
   formatPowerValue,
@@ -94,9 +99,7 @@ export default function PowerWiseStockPage() {
       // Unconfigured SKUs have no minimum — never mix them into "below minimum".
       if (!onlyBelowMin) params.set("includeUnconfigured", "true");
 
-      const res = await adminFetch<ReorderRulesResponse>(
-        `/api/inventory/reorder-rules?${params.toString()}`
-      );
+      const res = await fetchReorderRules(params);
       setData(res);
 
       const configured: EditableRow[] = res.rules.map((rule) => {
@@ -201,20 +204,17 @@ export default function PowerWiseStockPage() {
     setSaving(true);
     setError("");
     try {
-      await adminFetch("/api/inventory/reorder-rules/bulk", {
-        method: "POST",
-        body: JSON.stringify({
-          items: rowsToSave.map((row) => ({
-            lensType: row.lensType,
-            lensId: row.lensId,
-            minStock: Number(row.draft.minStock || 0),
-            targetStock: Number(row.draft.targetStock || 0),
-            autoProcure: row.draft.autoProcure,
-            preferredSupplierId: row.draft.preferredSupplierId || null,
-            moq: row.draft.moq === "" ? null : Number(row.draft.moq),
-          })),
-        }),
-      });
+      await bulkSaveReorderRules(
+        rowsToSave.map((row) => ({
+          lensType: row.lensType,
+          lensId: row.lensId,
+          minStock: Number(row.draft.minStock || 0),
+          targetStock: Number(row.draft.targetStock || 0),
+          autoProcure: row.draft.autoProcure,
+          preferredSupplierId: row.draft.preferredSupplierId || null,
+          moq: row.draft.moq === "" ? null : Number(row.draft.moq),
+        }))
+      );
       setNotice(`Saved ${rowsToSave.length} reorder rule${rowsToSave.length === 1 ? "" : "s"}.`);
       await load();
     } catch (err) {
@@ -229,9 +229,7 @@ export default function PowerWiseStockPage() {
     setError("");
     setNotice("");
     try {
-      const res = await adminFetch<ReorderCheckResponse>("/api/inventory/reorder-check", {
-        method: "POST",
-      });
+      const res = await runReorderCheck();
       setLastCheck(new Date().toISOString());
       setNotice(
         `Checked ${res.scanned} SKU${res.scanned === 1 ? "" : "s"} — ` +

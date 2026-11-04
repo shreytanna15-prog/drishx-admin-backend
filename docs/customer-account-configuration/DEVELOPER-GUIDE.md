@@ -26,6 +26,9 @@
 | Approve / suspend | `app/api/users/[id]/approve/route.ts` |
 | Customers list | `app/api/users/customers/route.ts`, `app/(admin)/clients/page.tsx` |
 | Client detail | `app/(admin)/clients/[id]/page.tsx` |
+| Client edit (RC-01) | `app/(admin)/clients/[id]/edit/page.tsx`, `app/lib/admin-customer-write.ts` |
+| Change history (RC-01) | `app/(admin)/clients/[id]/change-history/page.tsx`, `CustomerAdminChange` model |
+| Address verify (RC-01) | `app/api/users/[id]/verify-address/route.ts`, `User.addressVerifiedAt` |
 | Credit warn-only | `app/lib/finance/credit-limit.ts` |
 | Ledger posts | `app/lib/finance/customer-ledger.ts` |
 | Payments | `app/lib/finance/payments.ts`, `Payment` model |
@@ -261,10 +264,12 @@ Sidebar: already under Client & CRM → Clients. Add nav only if tiers live unde
 | POST | `/api/users/customers` | **Admin only** | **Path B** — full create form; require mobile; optional email; optional tier D + credit; default `PENDING_REVIEW`; set `createdByStaffId`; customer completes mobile OTP on invite / first login |
 | POST | `/api/users/customers/walk-in` | **Employee or Admin** | **Path C** — after mobile OTP (`purpose=WALK_IN`); create minimal CUSTOMER `PENDING_REVIEW`; set `createdByStaffId`; **do not** set tier/credit (Admin setup later) |
 | GET | `/api/users/customers/[id]` | Admin (employee: limited fields OK for picker) | Include tier, ledger summary, accountAction, GST verify fields |
-| PATCH | `/api/users/customers/[id]` | Admin | Direct apply; **do not** flip to pending |
+| PATCH | `/api/users/customers/[id]` | Admin | Direct apply; **do not** flip to pending; **require `notes`** (RC-01); unverify mobile/email/address on change; lock verified GST/PAN |
+| GET | `/api/users/customers/[id]/change-history` | Admin | RC-01 Admin update history (datetime, actor, note, human field labels) |
 | POST | `/api/users/[id]/account-action` | Admin | `{ action: BLOCKED \| CREDIT_SUSPENDED \| CLOSED \| NONE }` |
 | POST | `/api/users/[id]/verify-gst` | **Admin only** | On-demand GSTIN.cloud check — see §5.4 |
-| Extend | `/api/users/[id]/approve` | Admin | Keep approve/reject/reopen; align suspend with `accountAction` |
+| POST | `/api/users/[id]/verify-address` | **Admin only** | RC-01: set `addressVerifiedAt` (no OTP) |
+| Extend | `/api/users/[id]/approve` | Admin | Keep approve/reject/reopen; on approve set `addressVerifiedAt`; align suspend with `accountAction` |
 
 **Recommendation:**  
 
@@ -282,6 +287,8 @@ Sidebar: already under Client & CRM → Clients. Add nav only if tiers live unde
 | Change tier / credit / accountAction | ✓ | ✗ |
 | Approve / reject | ✓ | ✗ |
 | **Verify GST** button | ✓ | ✗ |
+| **Verify address** (RC-01) | ✓ | ✗ |
+| Edit client + required notes + change history (RC-01) | ✓ | ✗ |
 
 ### 5.4 On-demand GST verify — **GSTIN.cloud** (Admin button only)
 
@@ -421,6 +428,18 @@ Ensure rejected users **can authenticate** (OTP) enough to edit; do not treat RE
 v1 simple rule: **any** customer-initiated profile PATCH triggers pending.  
 (Optional later: only GST/address/legal fields.)
 
+### 7.4 RC-01 — Admin edit / verify / history (shipped)
+
+| Behaviour | Implementation |
+|-----------|----------------|
+| Detail UX | Full-width `/clients/[id]` (not skinny card stack) |
+| Edit | `/clients/[id]/edit` reuses create form prefilled; save stays **Approved** |
+| Required notes | Admin PATCH body must include `notes`; persisted on `CustomerAdminChange` |
+| Change history | `/clients/[id]/change-history` lists datetime, admin, note, human field labels (`admin-customer-field-labels.ts`) |
+| Mobile / email | Client or Admin change → clear that channel’s `*VerifiedAt`; user re-verifies via OTP |
+| Address | Approve sets `addressVerifiedAt`; later address change clears it; Admin **Verify address** (`POST …/verify-address`); banner while pending |
+| GST / PAN lock | Once verified, neither client nor Admin may change those fields |
+
 ---
 
 ## 8. Cancel → refund (Phase F)
@@ -530,7 +549,9 @@ Wire these into existing auth error parsing on web/mobile where applicable.
 | Same pending user self-serve checkout | 403 ACCOUNT_PENDING |
 | Reject → edit → resubmit | Pending again |
 | Approved edit profile | Pending; self-serve order 403 |
-| Admin edit profile | Stays approved |
+| Admin edit profile | Stays approved; notes required; history row written |
+| Address change (anyone) | `addressVerifiedAt` cleared until Admin Verify address |
+| Verified GST/PAN edit | Rejected for client and Admin |
 | Verify GST button | Calls GSTIN.cloud once; stores status; audit |
 | Signup/OTP does **not** call GSTIN.cloud | No provider hit |
 | Tier 10% | Checkout subtotal discounted before tax |

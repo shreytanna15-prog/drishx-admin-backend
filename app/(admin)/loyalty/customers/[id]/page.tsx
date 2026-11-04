@@ -8,7 +8,13 @@ import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  adjustLoyaltyPoints,
+  getLoyaltyTransactions,
+  getLoyaltyWallet,
+  listLoyaltyCustomers,
+} from "@/app/lib/admin-loyalty";
 
 type WalletSummary = {
   availablePoints: number;
@@ -57,17 +63,13 @@ export default function LoyaltyCustomerDetailPage() {
     setError("");
     try {
       const [walletData, ledgerData, customersData] = await Promise.all([
-        adminFetch<WalletSummary & { rupeeValue?: number }>(
-          `/api/loyalty/wallet?customerId=${encodeURIComponent(customerId)}`
-        ),
-        adminFetch<{ transactions: LedgerRow[] }>(
-          `/api/loyalty/transactions?customerId=${encodeURIComponent(customerId)}`
-        ),
-        adminFetch<{ customers: CustomerInfo[] }>("/api/loyalty/customers"),
+        getLoyaltyWallet(customerId),
+        getLoyaltyTransactions(customerId),
+        listLoyaltyCustomers(),
       ]);
       setWallet(walletData);
-      setTransactions(ledgerData.transactions ?? []);
-      const match = customersData.customers?.find((c) => c.id === customerId);
+      setTransactions(ledgerData);
+      const match = customersData.items.find((c) => c.id === customerId);
       if (match) {
         setCustomer(match);
       } else {
@@ -98,13 +100,10 @@ export default function LoyaltyCustomerDetailPage() {
     setError("");
     setMessage("");
     try {
-      await adminFetch("/api/loyalty/adjust", {
-        method: "POST",
-        body: JSON.stringify({
-          customerId,
-          points,
-          reason: adjustReason.trim(),
-        }),
+      await adjustLoyaltyPoints({
+        customerId,
+        points,
+        reason: adjustReason.trim(),
       });
       setAdjustPoints("");
       setAdjustReason("");

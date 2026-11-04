@@ -15,7 +15,8 @@ import {
   Warehouse,
   Wallet,
 } from "lucide-react";
-import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { fetchAdminDashboard } from "@/app/lib/admin-dashboard";
 import {
   LOW_STOCK_MAX,
   type AdminDashboardPayload,
@@ -111,9 +112,7 @@ export function AdminDashboard() {
     setLoading(true);
     setError("");
     try {
-      const payload = await adminFetch<AdminDashboardPayload>(
-        `/api/admin/dashboard?range=${nextRange}`
-      );
+      const payload = await fetchAdminDashboard(nextRange);
       setData(payload);
       setRange(parseDashboardRange(payload.range));
     } catch (err) {

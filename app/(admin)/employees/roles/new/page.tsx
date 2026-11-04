@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, Loader2 } from "lucide-react";
-import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { createStaffRole } from "@/app/lib/admin-staff-roles";
 import { STAFF_PERMISSION_GROUPS } from "@/app/lib/staff-permissions";
 import { AdminPage } from "@/components/admin-shell";
 import { Button } from "@/components/ui/button";
@@ -31,18 +32,12 @@ export default function NewStaffRolePage() {
     setSubmitting(true);
     setError("");
     try {
-      const data = await adminFetch<{ role?: { id?: string } }>(
-        "/api/admin/staff-roles",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            name: name.trim(),
-            description: description.trim() || null,
-            permissions: selected,
-          }),
-        }
-      );
-      const id = data?.role?.id;
+      const data = await createStaffRole({
+        name: name.trim(),
+        description: description.trim() || null,
+        permissions: selected,
+      });
+      const id = data.id;
       router.push(id ? `/employees/roles/${id}` : "/employees/roles");
     } catch (err) {
       setError(

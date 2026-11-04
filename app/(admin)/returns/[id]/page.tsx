@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 
-import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { listAdminEmployees } from "@/app/lib/admin-employees";
 import {
   formatReturnDate,
   formatReturnMoney,
@@ -19,6 +20,9 @@ import {
   returnStatusBadgeClass,
   type AdminReturnOrderContext,
   type AdminReturnRequest,
+  getAdminReturn,
+  patchAdminReturn,
+  submitAdminReturnDecision,
 } from "@/app/lib/admin-returns";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
@@ -163,13 +167,18 @@ export default function ReturnDetailPage() {
       setError("");
       try {
         const [data, employeesRes] = await Promise.all([
-          adminFetch<AdminReturnRequest>(`/api/returns/${id}`),
-          adminFetch<{ employees: EmployeeOption[] }>("/api/users/employees").catch(
-            () => ({ employees: [] as EmployeeOption[] })
-          ),
+          getAdminReturn(id),
+          listAdminEmployees().catch(() => [] as EmployeeOption[]),
         ]);
         setRequest(data);
-        setEmployees(employeesRes.employees ?? []);
+        setEmployees(
+          employeesRes.map((e) => ({
+            id: e.id,
+            name: e.name,
+            email: e.email,
+            isActive: e.isActive,
+          }))
+        );
         setApprovedAmount(data.approvedAmount ? String(data.approvedAmount) : "");
         setAssignedEmployeeId(data.assignedEmployee?.id ?? "");
         setReassignEmployeeId(data.assignedEmployee?.id ?? "");
@@ -212,17 +221,14 @@ export default function ReturnDetailPage() {
     setSubmitting(true);
     setError("");
     try {
-      await adminFetch(`/api/returns/${request.id}/decision`, {
-        method: "POST",
-        body: JSON.stringify({
-          decision,
-          remarks,
-          approvedAmount: approvedAmount.trim() ? Number(approvedAmount) : undefined,
-          stockDisposition,
-          ...(decision !== "REJECT" ? { assignedEmployeeId } : {}),
-        }),
+      await submitAdminReturnDecision(request.id, {
+        decision,
+        remarks,
+        approvedAmount: approvedAmount.trim() ? Number(approvedAmount) : undefined,
+        stockDisposition,
+        ...(decision !== "REJECT" ? { assignedEmployeeId } : {}),
       });
-      const refreshed = await adminFetch<AdminReturnRequest>(`/api/returns/${request.id}`);
+      const refreshed = await getAdminReturn(request.id);
       setRequest(refreshed);
       setReassignEmployeeId(refreshed.assignedEmployee?.id ?? "");
       setRemarks("");
@@ -243,15 +249,12 @@ export default function ReturnDetailPage() {
     setSubmitting(true);
     setError("");
     try {
-      await adminFetch(`/api/returns/${request.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          action: "assign",
-          assignedEmployeeId: reassignEmployeeId,
-          remarks: remarks || undefined,
-        }),
+      await patchAdminReturn(request.id, {
+        action: "assign",
+        assignedEmployeeId: reassignEmployeeId,
+        remarks: remarks || undefined,
       });
-      const refreshed = await adminFetch<AdminReturnRequest>(`/api/returns/${request.id}`);
+      const refreshed = await getAdminReturn(request.id);
       setRequest(refreshed);
       setReassignEmployeeId(refreshed.assignedEmployee?.id ?? "");
     } catch (err) {

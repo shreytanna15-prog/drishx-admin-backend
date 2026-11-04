@@ -298,3 +298,7 @@ export async function listAdminInvoices(
   );
   return normalizeInvoicesListResponse(data);
 }
+
+export async function getAdminInvoice<T = unknown>(id: string): Promise<T> {
+  return adminFetch<T>(`/api/invoices/${id}`);
+}

@@ -5,24 +5,14 @@ import { AdminPage } from "@/components/admin-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminSelect } from "@/components/admin-select";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-
-type DeliveryService = {
-  id: string;
-  courierCompany: string;
-  serviceName: string;
-  serviceType: string;
-  isActive: boolean;
-  customerRate: number;
-  billingMethod: string;
-  flatCharge: number;
-  minCharge: number;
-  minWeight: number;
-  weightRounding: string;
-  internalCostRate: number;
-  internalMinCost: number;
-  etaText: string | null;
-};
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  createDeliveryService,
+  deleteDeliveryService,
+  listDeliveryServices,
+  updateDeliveryService,
+  type AdminDeliveryService,
+} from "@/app/lib/admin-delivery";
 
 type DeliveryForm = {
   courierCompany: string;
@@ -59,7 +49,7 @@ const inputClass =
 const labelClass = "mb-1 block text-xs font-semibold text-(--brand-label)";
 
 export default function DeliverySettingsPage() {
-  const [services, setServices] = useState<DeliveryService[]>([]);
+  const [services, setServices] = useState<AdminDeliveryService[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -71,8 +61,7 @@ export default function DeliverySettingsPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await adminFetch<DeliveryService[]>("/api/delivery-services?all=1");
-      setServices(Array.isArray(data) ? data : []);
+      setServices(await listDeliveryServices({ all: true }));
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Failed to load delivery services.");
     } finally {
@@ -88,7 +77,7 @@ export default function DeliverySettingsPage() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  function startEdit(s: DeliveryService) {
+  function startEdit(s: AdminDeliveryService) {
     setEditingId(s.id);
     setForm({
       courierCompany: s.courierCompany,
@@ -122,17 +111,12 @@ export default function DeliverySettingsPage() {
     setError("");
     setMessage("");
     try {
+      const payload = { ...form, etaText: form.etaText || null };
       if (editingId) {
-        await adminFetch(`/api/delivery-services/${editingId}`, {
-          method: "PUT",
-          body: JSON.stringify({ ...form, etaText: form.etaText || null }),
-        });
+        await updateDeliveryService(editingId, payload);
         setMessage("Delivery service updated.");
       } else {
-        await adminFetch("/api/delivery-services", {
-          method: "POST",
-          body: JSON.stringify(form),
-        });
+        await createDeliveryService(payload);
         setMessage("Delivery service created.");
       }
       resetForm();
@@ -144,14 +128,11 @@ export default function DeliverySettingsPage() {
     }
   }
 
-  async function handleToggleActive(s: DeliveryService) {
+  async function handleToggleActive(s: AdminDeliveryService) {
     setBusy(true);
     setError("");
     try {
-      await adminFetch(`/api/delivery-services/${s.id}`, {
-        method: "PUT",
-        body: JSON.stringify({ isActive: !s.isActive }),
-      });
+      await updateDeliveryService(s.id, { isActive: !s.isActive });
       await load();
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Update failed.");
@@ -160,12 +141,12 @@ export default function DeliverySettingsPage() {
     }
   }
 
-  async function handleDelete(s: DeliveryService) {
+  async function handleDelete(s: AdminDeliveryService) {
     if (!window.confirm(`Delete "${s.serviceName}"? Used services are deactivated instead.`)) return;
     setBusy(true);
     setError("");
     try {
-      await adminFetch(`/api/delivery-services/${s.id}`, { method: "DELETE" });
+      await deleteDeliveryService(s.id);
       setMessage("Delivery service removed (or deactivated if already used).");
       await load();
     } catch (err) {

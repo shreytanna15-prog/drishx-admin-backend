@@ -20,17 +20,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
 import {
   type AdminCustomer,
   type AccountActionValue,
+  approveAdminCustomer,
   customerDisplayName,
   customerPersonName,
   formatAccountAction,
   formatCustomerDate,
   isSuspendedCustomer,
   listAdminCustomers,
+  listIncompleteSignupCustomers,
+  listPendingApprovalCustomers,
   matchesCustomerSearch,
+  rejectAdminCustomer,
 } from "@/app/lib/admin-customers";
 import { useInfiniteScrollSentinel } from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
@@ -144,10 +148,7 @@ function ClientsPageContent() {
   const loadPending = useCallback(async () => {
     setLoadingPending(true);
     try {
-      const data = await adminFetch<{ users: AdminCustomer[] }>(
-        "/api/users/pending?bucket=ready"
-      );
-      setPending(Array.isArray(data.users) ? data.users : []);
+      setPending(await listPendingApprovalCustomers());
     } catch (err) {
       setError(
         err instanceof AdminApiError
@@ -162,10 +163,7 @@ function ClientsPageContent() {
   const loadIncomplete = useCallback(async () => {
     setLoadingIncomplete(true);
     try {
-      const data = await adminFetch<{ users: AdminCustomer[] }>(
-        "/api/users/pending?bucket=incomplete"
-      );
-      setIncomplete(Array.isArray(data.users) ? data.users : []);
+      setIncomplete(await listIncompleteSignupCustomers());
     } catch (err) {
       setError(
         err instanceof AdminApiError
@@ -266,10 +264,7 @@ function ClientsPageContent() {
     setActingId(customer.id);
     setActionError("");
     try {
-      await adminFetch(`/api/users/${customer.id}/approve`, {
-        method: "PUT",
-        body: JSON.stringify({ action: "approve" }),
-      });
+      await approveAdminCustomer(customer.id);
       setPending((prev) => prev.filter((item) => item.id !== customer.id));
       await loadApproved();
     } catch (err) {
@@ -297,10 +292,7 @@ function ClientsPageContent() {
     setActingId(customer.id);
     setActionError("");
     try {
-      await adminFetch(`/api/users/${customer.id}/approve`, {
-        method: "PUT",
-        body: JSON.stringify({ action: "reject", rejectionReason }),
-      });
+      await rejectAdminCustomer(customer.id, rejectionReason);
       setPending((prev) => prev.filter((item) => item.id !== customer.id));
       setIncomplete((prev) => prev.filter((item) => item.id !== customer.id));
       await loadRejected();

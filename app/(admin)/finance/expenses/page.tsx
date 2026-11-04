@@ -15,36 +15,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
 import { readListCache, writeListCache } from "@/app/lib/admin-cache";
 import {
+  type FinanceExpenseRequestRow,
   type ProcurementExpense,
   formatExpenseDate,
   formatExpenseMoney,
+  listPendingFinanceExpenseRequests,
+  listProcurementExpenses,
   matchesExpenseSearch,
   parseStockDescription,
+  reviewFinanceExpenseRequest,
   staffLabel,
 } from "@/app/lib/admin-expenses";
 import { useProgressiveList } from "@/hooks/use-progressive-list";
 import { cn } from "@/lib/utils";
 
-type ExpenseRequestRow = {
-  id: string;
-  category: string;
-  amount: number | string;
-  status: string;
-  billAvailable: boolean;
-  noBillReason: string | null;
-  employee: { name: string | null; email: string };
-};
-
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<ProcurementExpense[]>(
     () => readListCache<ProcurementExpense[]>("expenses") ?? []
   );
-  const [pendingRequests, setPendingRequests] = useState<ExpenseRequestRow[]>(
-    []
-  );
+  const [pendingRequests, setPendingRequests] = useState<
+    FinanceExpenseRequestRow[]
+  >([]);
   const [pendingHasMore, setPendingHasMore] = useState(false);
   const [loading, setLoading] = useState(expenses.length === 0);
   const [error, setError] = useState("");
@@ -63,28 +57,15 @@ export default function ExpensesPage() {
       }
       setError("");
       try {
-        const [data, pending] = await Promise.all([
-          adminFetch<ProcurementExpense[]>("/api/expenses/procurement"),
-          adminFetch<
-            | { items?: ExpenseRequestRow[]; hasMore?: boolean }
-            | ExpenseRequestRow[]
-          >(
-            "/api/finance/expenses?status=PENDING&page=1&limit=100"
-          ).catch(() => [] as ExpenseRequestRow[]),
+        const [list, pending] = await Promise.all([
+          listProcurementExpenses(),
+          listPendingFinanceExpenseRequests(),
         ]);
         if (!cancelled) {
-          const list = Array.isArray(data) ? data : [];
           writeListCache("expenses", list);
           setExpenses(list);
-          const pendingItems = Array.isArray(pending)
-            ? pending
-            : Array.isArray((pending as { items?: ExpenseRequestRow[] }).items)
-              ? (pending as { items: ExpenseRequestRow[] }).items
-              : [];
-          setPendingRequests(pendingItems);
-          setPendingHasMore(
-            !Array.isArray(pending) && Boolean(pending.hasMore)
-          );
+          setPendingRequests(pending.items);
+          setPendingHasMore(pending.hasMore);
         }
       } catch (err) {
         if (!cancelled && !cached) {
@@ -107,10 +88,7 @@ export default function ExpensesPage() {
 
   async function reviewRequest(id: string, action: "approve" | "reject") {
     try {
-      await adminFetch("/api/finance/expenses", {
-        method: "POST",
-        body: JSON.stringify({ action, id }),
-      });
+      await reviewFinanceExpenseRequest(id, action);
       setPendingRequests((prev) => prev.filter((r) => r.id !== id));
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Action failed.");

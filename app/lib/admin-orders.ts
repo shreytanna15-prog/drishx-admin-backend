@@ -471,10 +471,10 @@ export function isColorLensOrder(order: Pick<AdminOrder, "notes">) {
 }
 
 /** RX form (or warehouse hold) — subject to admin hold → warehouse release. RC-02: no photo. */
+/** RC-02: Rx Lab = RX notes only (not warehouseHold alone / photo). */
 export function isPrescriptionLabOrder(
   order: Pick<AdminOrder, "notes" | "warehouseHold">
 ) {
-  if (order.warehouseHold) return true;
   return isRxOrder(order);
 }
 
@@ -897,4 +897,160 @@ export async function listAdminOrders(
     `/api/orders${buildOrdersQueryString(params)}`
   );
   return normalizeOrdersListResponse(data);
+}
+
+export async function getAdminOrder(orderId: string): Promise<AdminOrder> {
+  return adminFetch<AdminOrder>(`/api/orders/${orderId}`);
+}
+
+export async function putAdminOrder(
+  orderId: string,
+  body: Record<string, unknown>
+): Promise<AdminOrder> {
+  return adminFetch<AdminOrder>(`/api/orders/${orderId}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function patchAdminOrder(
+  orderId: string,
+  body: Record<string, unknown>
+): Promise<AdminOrder> {
+  return adminFetch<AdminOrder>(`/api/orders/${orderId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteAdminOrder(orderId: string): Promise<void> {
+  await adminFetch(`/api/orders/${orderId}`, { method: "DELETE" });
+}
+
+export async function warehouseReleaseAdminOrder(
+  orderId: string
+): Promise<{ order: AdminOrder; message?: string }> {
+  return adminFetch<{ order: AdminOrder; message?: string }>(
+    `/api/orders/${orderId}/warehouse-release`,
+    { method: "POST", body: "{}" }
+  );
+}
+
+export async function dispatchAdminOrderToCourier(
+  orderId: string,
+  input: { courierName: string; trackingNumber: string }
+): Promise<{ order: AdminOrder; duplicateWarning?: string | null }> {
+  return adminFetch<{ order: AdminOrder; duplicateWarning?: string | null }>(
+    `/api/orders/${orderId}/dispatch`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function markAdminOrderProcurementNotAvailable(
+  orderId: string,
+  body: { notes: string; supplierOptions: Array<{ lensId: string; etaDays: number }> }
+): Promise<void> {
+  await adminFetch(`/api/orders/${orderId}/procurement/not-available`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export type AdminOrderRefundPayout = {
+  id: string;
+  amount: number;
+  mode: string;
+  paidAt: string;
+  reference: string | null;
+  notes: string | null;
+};
+
+export type AdminOrderRefundSummary = {
+  id: string;
+  amountDue: number;
+  amountPaid: number;
+  remaining: number;
+  status: string;
+  payouts: AdminOrderRefundPayout[];
+};
+
+export async function getAdminOrderRefund(
+  orderId: string
+): Promise<AdminOrderRefundSummary | null> {
+  const data = await adminFetch<{ refund: AdminOrderRefundSummary | null }>(
+    `/api/orders/${orderId}/refund`
+  );
+  return data.refund;
+}
+
+export async function postAdminOrderRefundPayout(
+  orderId: string,
+  body: {
+    amount: number;
+    mode: string;
+    paidAt: string;
+    reference: string | null;
+  }
+): Promise<AdminOrderRefundSummary> {
+  const data = await adminFetch<{ refund: AdminOrderRefundSummary }>(
+    `/api/orders/${orderId}/refund/payouts`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+  return data.refund;
+}
+
+export async function createAdminCatalogOrder(
+  body: Record<string, unknown>
+): Promise<{ order: { id: string } }> {
+  return adminFetch<{ order: { id: string } }>("/api/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function createAdminRxOrder(
+  body: Record<string, unknown>
+): Promise<{ order: { id: string } }> {
+  return adminFetch<{ order: { id: string } }>("/api/orders/rx", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export type CatalogLensSearchHit = {
+  id: string;
+  lensType: string;
+  sph?: number | null;
+  cyl?: number | null;
+  axis?: number | null;
+  add?: number | null;
+  eye?: string | null;
+  brand?: string | null;
+  item?: string | null;
+  coating?: string | null;
+};
+
+export async function searchAdminCatalogLenses(params: {
+  type: string;
+  search: string;
+  page?: number;
+  limit?: number;
+}): Promise<CatalogLensSearchHit[]> {
+  const qs = new URLSearchParams({
+    type: params.type,
+    search: params.search,
+    page: String(params.page ?? 1),
+    limit: String(params.limit ?? 20),
+  });
+  const data = await adminFetch<{
+    items?: CatalogLensSearchHit[];
+    lenses?: CatalogLensSearchHit[];
+  }>(`/api/lenses?${qs}`);
+  return data.items ?? data.lenses ?? [];
 }

@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { AdminApiError, adminFetch } from "@/app/lib/admin-api";
-import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  createAdminReturn,
+  uploadAdminReturnImage,
+} from "@/app/lib/admin-returns";
 import {
   type AdminOrder,
   formatCatalogSummary,
@@ -328,34 +331,15 @@ export function AdminCreateReturnPanel({
 
     setSubmitting(true);
     try {
-      const created = await adminFetch<{ id: string; requestNumber?: string }>(
-        "/api/returns",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            requestType,
-            customerRemarks: remarks,
-            items,
-          }),
-        }
-      );
+      const created = await createAdminReturn({
+        requestType,
+        customerRemarks: remarks,
+        items,
+      });
 
       if (files.length > 0) {
         for (const file of files) {
-          const formData = new FormData();
-          formData.set("photo", file);
-          const res = await adminAuthFetch(`/api/returns/${created.id}/images`, {
-            method: "POST",
-            body: formData,
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            throw new Error(
-              typeof data?.error === "string"
-                ? data.error
-                : "Return created but photo upload failed."
-            );
-          }
+          await uploadAdminReturnImage(created.id, file);
         }
       }
 

@@ -1,3 +1,5 @@
+import { adminFetch } from "@/app/lib/admin-api";
+
 export type ExpenseStaff = {
   id: string;
   name: string | null;
@@ -102,6 +104,52 @@ export function parseStockDescription(
     notes,
     raw,
   };
+}
+
+export type FinanceExpenseRequestRow = {
+  id: string;
+  category: string;
+  amount: number | string;
+  status: string;
+  billAvailable: boolean;
+  noBillReason: string | null;
+  employee: { name: string | null; email: string };
+};
+
+export async function listProcurementExpenses(): Promise<ProcurementExpense[]> {
+  const data = await adminFetch<ProcurementExpense[]>(
+    "/api/expenses/procurement"
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+export async function listPendingFinanceExpenseRequests(): Promise<{
+  items: FinanceExpenseRequestRow[];
+  hasMore: boolean;
+}> {
+  const pending = await adminFetch<
+    | { items?: FinanceExpenseRequestRow[]; hasMore?: boolean }
+    | FinanceExpenseRequestRow[]
+  >("/api/finance/expenses?status=PENDING&page=1&limit=100").catch(
+    () => [] as FinanceExpenseRequestRow[]
+  );
+  if (Array.isArray(pending)) {
+    return { items: pending, hasMore: false };
+  }
+  return {
+    items: Array.isArray(pending.items) ? pending.items : [],
+    hasMore: Boolean(pending.hasMore),
+  };
+}
+
+export async function reviewFinanceExpenseRequest(
+  id: string,
+  action: "approve" | "reject"
+): Promise<void> {
+  await adminFetch("/api/finance/expenses", {
+    method: "POST",
+    body: JSON.stringify({ action, id }),
+  });
 }
 
 export function matchesExpenseSearch(

@@ -261,6 +261,64 @@ export async function listAdminCustomers(
   return normalizeCustomersListResponse(data);
 }
 
+/** Pending approvals ready for Admin (GST / registration complete). */
+export async function listPendingApprovalCustomers(): Promise<AdminCustomer[]> {
+  const data = await adminFetch<{ users: AdminCustomer[] }>(
+    "/api/users/pending?bucket=ready"
+  );
+  return Array.isArray(data.users) ? data.users : [];
+}
+
+/** Abandoned / incomplete Path A signups. */
+export async function listIncompleteSignupCustomers(): Promise<AdminCustomer[]> {
+  const data = await adminFetch<{ users: AdminCustomer[] }>(
+    "/api/users/pending?bucket=incomplete"
+  );
+  return Array.isArray(data.users) ? data.users : [];
+}
+
+export async function approveAdminCustomer(id: string): Promise<void> {
+  await adminFetch(`/api/users/${id}/approve`, {
+    method: "PUT",
+    body: JSON.stringify({ action: "approve" }),
+  });
+}
+
+export async function rejectAdminCustomer(
+  id: string,
+  rejectionReason: string
+): Promise<void> {
+  await adminFetch(`/api/users/${id}/approve`, {
+    method: "PUT",
+    body: JSON.stringify({ action: "reject", rejectionReason }),
+  });
+}
+
+export type CustomerApprovalAction =
+  | "approve"
+  | "reject"
+  | "reopen"
+  | "suspend"
+  | "activate";
+
+export async function setCustomerApprovalAction(
+  id: string,
+  action: CustomerApprovalAction,
+  rejectionReason?: string
+): Promise<AdminCustomer> {
+  const data = await adminFetch<{ user: AdminCustomer }>(
+    `/api/users/${id}/approve`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        action,
+        ...(rejectionReason ? { rejectionReason } : {}),
+      }),
+    }
+  );
+  return data.user;
+}
+
 export type CustomerFinanceSummary = {
   outstanding: number;
   creditLimit: number | null;

@@ -19,7 +19,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminSelect } from "@/components/admin-select";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import {
+  fetchStockMatrixList,
+  fetchStockMatrixProduct,
+  saveStockMatrixRules,
+} from "@/app/lib/admin-inventory";
 import {
   cellKey,
   parseQuantityInput,
@@ -143,7 +148,7 @@ export default function StockMatrixPage() {
       if (index) params.set("index", index);
       if (coating) params.set("coating", coating);
       if (search) params.set("search", search);
-      const res = await adminFetch<ListResponse>(`/api/inventory/stock-matrix?${params}`);
+      const res = await fetchStockMatrixList(params);
       if (id !== listRequest.current) return;
       setList(res);
     } catch (err) {
@@ -165,9 +170,7 @@ export default function StockMatrixPage() {
       setProductLoading(true);
       setProductError("");
       try {
-        const res = await adminFetch<ProductResponse>(
-          `/api/inventory/stock-matrix/product?lensType=${lensType}&key=${encodeURIComponent(key)}`
-        );
+        const res = await fetchStockMatrixProduct(lensType, key);
         if (id !== productRequest.current) return;
         setProduct(res);
         setDrafts({});
@@ -273,10 +276,7 @@ export default function StockMatrixPage() {
           expectedUpdatedAt: cell.rule?.updatedAt ?? null,
         };
       });
-      const res = await adminFetch<{ saved: number }>("/api/inventory/stock-matrix/rules", {
-        method: "PUT",
-        body: JSON.stringify({ lensType, edits }),
-      });
+      const res = await saveStockMatrixRules({ lensType, edits });
       setNotice(
         `Saved ${res.saved} threshold/target change(s). Stock quantities were not changed.`
       );

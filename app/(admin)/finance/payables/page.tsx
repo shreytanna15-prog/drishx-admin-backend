@@ -3,28 +3,16 @@
 import { useEffect, useState } from "react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
-
-type Payables = {
-  totalPayable: number;
-  hasMore?: boolean;
-  bills: Array<{
-    id: string;
-    billNumber: string;
-    amountOutstanding: number | string;
-    supplier: { name: string };
-  }>;
-};
+import { AdminApiError } from "@/app/lib/admin-api";
+import { getFinancePayables, type PayablesSummary } from "@/app/lib/admin-finance";
 
 export default function PayablesPage() {
-  const [data, setData] = useState<Payables | null>(null);
+  const [data, setData] = useState<PayablesSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void adminFetch<Payables>(
-      "/api/finance/purchases?resource=payables&page=1&limit=100"
-    )
+    void getFinancePayables()
       .then(setData)
       .catch((err) =>
         setError(err instanceof AdminApiError ? err.message : "Failed to load.")

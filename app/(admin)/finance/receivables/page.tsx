@@ -4,24 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
+import { getFinanceReceivables, type ReceivablesSummary } from "@/app/lib/admin-finance";
 import { Button } from "@/components/ui/button";
-
-type ReceivablesData = {
-  totalReceivable: number;
-  dueToday: number;
-  overdue: number;
-  aging: Record<string, number>;
-  pendingClaims: number;
-  invoices: Array<{
-    id: string;
-    invoiceNumber: string;
-    amountOutstanding: number | string;
-    status: string;
-    issuedAt: string | null;
-    user: { businessName: string | null; name: string | null; email: string };
-  }>;
-};
 
 function money(n: number) {
   return new Intl.NumberFormat("en-IN", {
@@ -32,15 +17,13 @@ function money(n: number) {
 }
 
 export default function ReceivablesPage() {
-  const [data, setData] = useState<ReceivablesData | null>(null);
+  const [data, setData] = useState<ReceivablesSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    void adminFetch<ReceivablesData & { hasMore?: boolean; total?: number }>(
-      "/api/finance/receivables?page=1&limit=100"
-    )
+    void getFinanceReceivables()
       .then((d) => {
         if (!cancelled) setData(d);
       })

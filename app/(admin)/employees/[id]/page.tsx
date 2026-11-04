@@ -10,17 +10,21 @@ import { AssignTaskModal } from "@/components/assign-task-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AdminSelect } from "@/components/admin-select";
-import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
+import { AdminApiError } from "@/app/lib/admin-api";
 import {
   type AdminEmployee,
   employeeDisplayName,
   formatEmployeeDate,
   formatEmployeeStatus,
+  getAdminEmployee,
+  patchEmployeeStaffRole,
 } from "@/app/lib/admin-employees";
+import { listStaffRoleOptions } from "@/app/lib/admin-staff-roles";
 import {
   type AdminTask,
   formatTaskDueDate,
   formatTaskStatus,
+  listAdminTasks,
   taskStatusBadgeClass,
 } from "@/app/lib/admin-tasks";
 import { cn } from "@/lib/utils";
@@ -64,12 +68,10 @@ export default function EmployeeDetailPage() {
       setLoading(true);
       setError("");
       try {
-        const data = await adminFetch<{ employee: AdminEmployee }>(
-          `/api/users/employees/${id}`
-        );
+        const employeeRow = await getAdminEmployee(id);
         if (!cancelled) {
-          setEmployee(data.employee ?? null);
-          setStaffRoleId(data.employee?.staffRole?.id ?? "");
+          setEmployee(employeeRow);
+          setStaffRoleId(employeeRow?.staffRole?.id ?? "");
         }
       } catch (err) {
         if (!cancelled) {
@@ -89,10 +91,8 @@ export default function EmployeeDetailPage() {
       setTasksLoading(true);
       setTasksError("");
       try {
-        const data = await adminFetch<AdminTask[]>(
-          `/api/tasks?employeeId=${encodeURIComponent(id)}`
-        );
-        if (!cancelled) setTasks(Array.isArray(data) ? data : []);
+        const taskList = await listAdminTasks(id);
+        if (!cancelled) setTasks(taskList);
       } catch (err) {
         if (!cancelled) {
           setTasks([]);
@@ -109,11 +109,9 @@ export default function EmployeeDetailPage() {
 
     void loadEmployee();
     void loadEmployeeTasks();
-    void adminFetch<{ roles: { id: string; name: string }[] }>(
-      "/api/admin/staff-roles"
-    )
+    void listStaffRoleOptions()
       .then((data) => {
-        if (!cancelled) setRoles(Array.isArray(data.roles) ? data.roles : []);
+        if (!cancelled) setRoles(data);
       })
       .catch(() => {
         if (!cancelled) setRoles([]);
@@ -255,17 +253,12 @@ export default function EmployeeDetailPage() {
                       setRoleSaving(true);
                       setError("");
                       try {
-                        const data = await adminFetch<{ employee: AdminEmployee }>(
-                          `/api/users/employees/${id}/staff-role`,
-                          {
-                            method: "PATCH",
-                            body: JSON.stringify({
-                              staffRoleId: staffRoleId || null,
-                            }),
-                          }
+                        const updated = await patchEmployeeStaffRole(
+                          id,
+                          staffRoleId || null
                         );
-                        setEmployee(data.employee);
-                        setStaffRoleId(data.employee.staffRole?.id ?? "");
+                        setEmployee(updated);
+                        setStaffRoleId(updated.staffRole?.id ?? "");
                         setSuccessMessage("Job role updated.");
                       } catch (err) {
                         setError(
