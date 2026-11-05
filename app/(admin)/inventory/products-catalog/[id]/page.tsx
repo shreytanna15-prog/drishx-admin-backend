@@ -26,6 +26,7 @@ import {
   type LensProduct,
 } from "@/app/lib/admin-lens-catalog";
 import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
+import { formatPowerRangeCompact } from "@/app/lib/catalog/catalog-power-select-options";
 
 const CATALOG_HREF = "/inventory/products-catalog";
 
@@ -159,12 +160,12 @@ export default function LensProductParentDetailPage() {
           </div>
           <div>
             <dt className="text-(--brand-label)">Index</dt>
-            <dd className="font-semibold">{product.index.code}</dd>
+            <dd className="font-semibold">{product.index?.code ?? "—"}</dd>
           </div>
           <div>
             <dt className="text-(--brand-label)">Color</dt>
             <dd className="font-semibold">
-              {product.color.name || product.color.code}
+              {product.color?.name || product.color?.code || "—"}
             </dd>
           </div>
         </dl>
@@ -227,8 +228,13 @@ export default function LensProductParentDetailPage() {
         <PowerRangeMultiSelect
           options={powerRanges.map((r) => ({
             id: r.id,
-            label: r.label,
-            cylSummary: r.cylSummary,
+            label: formatPowerRangeCompact(
+              r.sphMin,
+              r.sphMax,
+              r.cylMin,
+              r.cylMax
+            ),
+            cylSummary: "",
             disabled: usedRangeIds.has(r.id),
           }))}
           selectedIds={addIds}

@@ -1,18 +1,23 @@
 /**
  * RC-04 LensProductVariant SKU + name builders.
  *
- * SKU:  [MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}
- * Name: [Material] [Index] [Family] [Base] [Color] -6.00/+2.00
+ * SKU:  [MATERIAL-]BASE[-INDEX]-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}
+ * Name: [Material] [Index] [Family] [Base] [Color] {max_SPH}/{max_CYL}
  * Coating is never included.
  */
 
-import { formatPowerRangeLabel } from "./catalog-power-select-options";
+import {
+  extremePowerBound,
+  formatPowerRangeCompact,
+  formatPowerRangeSpan,
+  normalizePowerValue,
+} from "./catalog-power-select-options";
 
 export type LensProductSkuParts = {
   familyCode: string;
   baseCode: string;
   materialCode?: string | null;
-  indexCode: string;
+  indexCode?: string | null;
   colorCode?: string | null;
   sphMin: number;
   sphMax: number;
@@ -24,17 +29,18 @@ export type LensProductNameParts = {
   familyCode: string;
   baseCode: string;
   materialCode?: string | null;
-  indexCode: string;
+  indexCode?: string | null;
   /**
-   * Human color word for the name (CLIENT-PLAN: `… Green -6.00/+2.00`).
+   * Human color word for the name (CLIENT-PLAN: `… Green -6.00/-2.00`).
    * Prefer attribute display name; fall back to `colorCode` if omitted.
    */
   colorLabel?: string | null;
   /** @deprecated Prefer `colorLabel` for names; kept for older call sites. */
   colorCode?: string | null;
-  /** SPH bounds for human label `-6.00/+2.00` */
   sphMin: number;
   sphMax: number;
+  cylMin: number;
+  cylMax: number;
 };
 
 /** SKU-safe token from an attribute code (uppercase, `.` → `P`, strip other junk). */
@@ -65,14 +71,13 @@ export function buildLensProductBaseCode(parts: {
   familyCode: string;
   baseCode: string;
   materialCode?: string | null;
-  indexCode: string;
+  indexCode?: string | null;
   colorCode?: string | null;
 }): string {
   const family = sanitizeSkuCodePart(parts.familyCode);
   const base = sanitizeSkuCodePart(parts.baseCode);
-  const index = sanitizeSkuCodePart(parts.indexCode);
-  if (!family || !base || !index) {
-    throw new Error("familyCode, baseCode, and indexCode are required.");
+  if (!family || !base) {
+    throw new Error("familyCode and baseCode are required.");
   }
 
   const tokens: string[] = [];
@@ -80,7 +85,12 @@ export function buildLensProductBaseCode(parts: {
     const m = sanitizeSkuCodePart(String(parts.materialCode));
     if (m) tokens.push(m);
   }
-  tokens.push(base, index, family);
+  tokens.push(base);
+  if (parts.indexCode != null && String(parts.indexCode).trim() !== "") {
+    const index = sanitizeSkuCodePart(String(parts.indexCode));
+    if (index) tokens.push(index);
+  }
+  tokens.push(family);
   if (parts.colorCode != null && String(parts.colorCode).trim() !== "") {
     const c = sanitizeSkuCodePart(String(parts.colorCode));
     if (c) tokens.push(c);
@@ -90,6 +100,7 @@ export function buildLensProductBaseCode(parts: {
 
 export function buildLensProductSkuCode(parts: LensProductSkuParts): string {
   const base = buildLensProductBaseCode(parts);
+  // SKU still encodes both bounds in numeric order for stable identity.
   const sphMin = Math.min(parts.sphMin, parts.sphMax);
   const sphMax = Math.max(parts.sphMin, parts.sphMax);
   const cylMin = Math.min(parts.cylMin, parts.cylMax);
@@ -102,21 +113,49 @@ export function buildLensProductSkuCode(parts: LensProductSkuParts): string {
   ].join("-");
 }
 
+/**
+ * Compact `{max_SPH}/{max_CYL}` for names.
+ * When a bound is not plano→extreme (other end ≠ 0), append spans so two
+ * ranges that share the same extremes still get unique names.
+ */
+export function buildPowerNameToken(
+  sphMin: number,
+  sphMax: number,
+  cylMin: number,
+  cylMax: number
+): string {
+  const compact = formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax);
+  const sphExt = extremePowerBound(sphMin, sphMax);
+  const cylExt = extremePowerBound(cylMin, cylMax);
+  const sphOther =
+    normalizePowerValue(sphMin) === sphExt
+      ? normalizePowerValue(sphMax)
+      : normalizePowerValue(sphMin);
+  const cylOther =
+    normalizePowerValue(cylMin) === cylExt
+      ? normalizePowerValue(cylMax)
+      : normalizePowerValue(cylMin);
+  if (sphOther === 0 && cylOther === 0) return compact;
+  return `${compact} (${formatPowerRangeSpan(sphMin, sphMax)} / ${formatPowerRangeSpan(cylMin, cylMax)})`;
+}
+
 /** Human-readable variant name; Admin does not type this. */
 export function buildLensProductName(parts: LensProductNameParts): string {
   const words: string[] = [];
   if (parts.materialCode != null && String(parts.materialCode).trim() !== "") {
     words.push(String(parts.materialCode).trim());
   }
+  if (parts.indexCode != null && String(parts.indexCode).trim() !== "") {
+    words.push(String(parts.indexCode).trim());
+  }
   words.push(
-    String(parts.indexCode).trim(),
     String(parts.familyCode).trim(),
     String(parts.baseCode).trim()
   );
   const colorWord = String(parts.colorLabel ?? parts.colorCode ?? "").trim();
   if (colorWord) words.push(colorWord);
-  const sphMin = Math.min(parts.sphMin, parts.sphMax);
-  const sphMax = Math.max(parts.sphMin, parts.sphMax);
-  words.push(formatPowerRangeLabel(sphMin, sphMax));
+  words.push(
+    buildPowerNameToken(parts.sphMin, parts.sphMax, parts.cylMin, parts.cylMax)
+  );
   return words.filter(Boolean).join(" ");
 }

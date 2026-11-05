@@ -84,13 +84,13 @@ export type LensProductVariant = {
     familyId: string;
     baseId: string;
     materialId: string | null;
-    indexId: string;
-    colorId: string;
+    indexId: string | null;
+    colorId: string | null;
     family: LensAttrRef;
     base: LensAttrRef;
     material: LensAttrRef | null;
-    index: LensAttrRef & { value: number | null };
-    color: LensAttrRef;
+    index: (LensAttrRef & { value: number | null }) | null;
+    color: LensAttrRef | null;
     attributeSummary: string;
   };
 };
@@ -101,16 +101,16 @@ export type LensProduct = {
   familyId: string;
   baseId: string;
   materialId: string | null;
-  indexId: string;
-  colorId: string;
+  indexId: string | null;
+  colorId: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
   family: LensAttrRef;
   base: LensAttrRef;
   material: LensAttrRef | null;
-  index: LensAttrRef & { value: number | null };
-  color: LensAttrRef;
+  index: (LensAttrRef & { value: number | null }) | null;
+  color: LensAttrRef | null;
   attributeSummary: string;
   variantCount: number;
   variants: LensProductVariant[];
@@ -305,6 +305,8 @@ export { steppedRange as steppedPowerRange } from "./catalog/lens-product-range"
 export {
   formatCylSummary,
   formatPowerLabel,
+  formatPowerRangeCompact,
   formatPowerRangeLabel,
+  formatPowerRangeSpan,
   getPowerSelectOptions,
 } from "./catalog/catalog-power-select-options";

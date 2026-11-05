@@ -114,9 +114,11 @@ export function PowerRangeMultiSelect({
                   <span className="font-semibold text-(--brand-text)">
                     {opt.label}
                   </span>
-                  <span className="mt-0.5 block text-xs text-(--brand-text-muted)">
-                    {opt.cylSummary}
-                  </span>
+                  {opt.cylSummary ? (
+                    <span className="mt-0.5 block text-xs text-(--brand-text-muted)">
+                      {opt.cylSummary}
+                    </span>
+                  ) : null}
                 </span>
               </label>
             );
