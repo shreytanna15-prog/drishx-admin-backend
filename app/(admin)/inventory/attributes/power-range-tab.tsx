@@ -48,15 +48,18 @@ type FormState = {
   sortOrder: string;
 };
 
+/** Open create at 0 so both SPH/CYL lists start there; scroll up/down for rest. */
 const EMPTY_FORM: FormState = {
-  sphMin: "",
-  sphMax: "",
-  cylMin: "",
-  cylMax: "",
+  sphMin: "0",
+  sphMax: "0",
+  cylMin: "0",
+  cylMax: "0",
   sortOrder: "0",
 };
 
 const POWER_OPTIONS = getPowerSelectOptions();
+/** ~8 visible rows (item ~2.25rem); fixed height, scroll for the rest. */
+const POWER_SELECT_CONTENT_CLASS = "max-h-[18rem]";
 
 function BoundSelect({
   label,
@@ -73,13 +76,14 @@ function BoundSelect({
       <AdminSelect
         value={value}
         onValueChange={onChange}
-        options={[
-          { value: "", label: "Select…" },
-          ...POWER_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
-        ]}
-        placeholder="Select…"
+        options={POWER_OPTIONS.map((o) => ({
+          value: o.value,
+          label: o.label,
+        }))}
+        placeholder="0.00"
         size="sm"
         triggerClassName={selectClass}
+        contentClassName={POWER_SELECT_CONTENT_CLASS}
       />
     </label>
   );
@@ -272,11 +276,11 @@ export function PowerRangeTab({
             </label>
             <div className="space-y-1.5">
               <span className={labelClass}>Label (auto)</span>
-              <div className="flex min-h-10 flex-col justify-center text-sm">
+              <div className="flex min-h-10 flex-col justify-center gap-0.5 text-sm">
                 {preview ? (
                   <>
                     <span className="font-mono font-bold">{preview.label}</span>
-                    <span className="text-xs text-(--brand-text-muted)">
+                    <span className="font-mono font-bold text-(--brand-text-muted)">
                       {preview.cyl}
                     </span>
                   </>

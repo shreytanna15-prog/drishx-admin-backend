@@ -26,6 +26,8 @@ type AdminSelectProps = {
   className?: string;
   /** Defaults to full width of parent; pass e.g. `w-[12rem]` for filters */
   triggerClassName?: string;
+  /** Applied to the dropdown panel (e.g. fixed max-height for long lists) */
+  contentClassName?: string;
   size?: "sm" | "default";
   id?: string;
   "aria-label"?: string;
@@ -43,6 +45,7 @@ export function AdminSelect({
   disabled,
   className,
   triggerClassName,
+  contentClassName,
   size = "default",
   id,
   "aria-label": ariaLabel,
@@ -65,7 +68,7 @@ export function AdminSelect({
       >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className={contentClassName}>
         {options.map((opt) => {
           const itemValue = opt.value === "" ? EMPTY_VALUE : opt.value;
           return (

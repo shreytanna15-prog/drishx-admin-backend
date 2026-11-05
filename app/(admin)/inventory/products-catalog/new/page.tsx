@@ -213,6 +213,7 @@ export default function NewLensProductPage() {
       title="New product"
       subtitle="Pick attributes once, then one or more power ranges → variants"
     >
+      <div className="mx-auto w-full max-w-4xl">
       <div className="mb-4">
         <Button asChild variant="ghost" className="h-9 gap-1.5 px-2">
           <Link href={CATALOG_HREF}>
@@ -231,7 +232,7 @@ export default function NewLensProductPage() {
 
       <form
         onSubmit={(e) => void onSubmit(e)}
-        className="grid max-w-4xl gap-5 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5 shadow-(--brand-card-shadow) sm:p-6"
+        className="grid gap-5 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5 shadow-(--brand-card-shadow) sm:p-6"
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <CatalogSelectField
@@ -338,6 +339,7 @@ export default function NewLensProductPage() {
           </Button>
         </div>
       </form>
+      </div>
     </AdminPage>
   );
 }
