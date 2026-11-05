@@ -83,8 +83,8 @@ export async function POST(req: NextRequest) {
         familyId: String(body.familyId ?? ""),
         baseId: String(body.baseId ?? ""),
         materialId: body.materialId ? String(body.materialId) : null,
-        indexId: String(body.indexId ?? ""),
-        colorId: String(body.colorId ?? ""),
+        indexId: body.indexId ? String(body.indexId) : null,
+        colorId: body.colorId ? String(body.colorId) : null,
         powerRangeIds,
       });
       return NextResponse.json({ preview });
@@ -94,8 +94,8 @@ export async function POST(req: NextRequest) {
       familyId: String(body.familyId ?? ""),
       baseId: String(body.baseId ?? ""),
       materialId: body.materialId ? String(body.materialId) : null,
-      indexId: String(body.indexId ?? ""),
-      colorId: String(body.colorId ?? ""),
+      indexId: body.indexId ? String(body.indexId) : null,
+      colorId: body.colorId ? String(body.colorId) : null,
       powerRangeIds,
       defaultPrice: body.defaultPrice != null ? Number(body.defaultPrice) : null,
       isActive: body.isActive,

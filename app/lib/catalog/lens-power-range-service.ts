@@ -6,8 +6,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { AuditAction, AuditModule, recordAuditEvent } from "../audit";
 import {
-  formatCylSummary,
-  formatPowerRangeLabel,
+  formatPowerRangeSpan,
   normalizePowerValue,
   validatePowerRangeBounds,
 } from "./catalog-power-select-options";
@@ -43,8 +42,8 @@ export function serializePowerRange(row: PowerRangeRow) {
   const cylMax = Number(row.cylMax);
   return {
     id: row.id,
-    label: formatPowerRangeLabel(sphMin, sphMax),
-    cylSummary: formatCylSummary(cylMin, cylMax),
+    label: formatPowerRangeSpan(sphMin, sphMax),
+    cylSummary: formatPowerRangeSpan(cylMin, cylMax),
     sphMin,
     sphMax,
     cylMin,

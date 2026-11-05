@@ -64,23 +64,50 @@ export function getPowerSelectOptions(): PowerSelectOption[] {
   }));
 }
 
-/** SPH display label: `-6.00/+2.00` (min/max). */
-export function formatPowerRangeLabel(sphMin: number, sphMax: number): string {
-  const lo = Math.min(sphMin, sphMax);
-  const hi = Math.max(sphMin, sphMax);
-  return `${formatPowerLabel(lo)}/${formatPowerLabel(hi)}`;
+/**
+ * Bound with larger absolute value (sign preserved).
+ * Used for compact UI/name labels: `{max_SPH}/{max_CYL}`.
+ */
+export function extremePowerBound(a: number, b: number): number {
+  const na = normalizePowerValue(a);
+  const nb = normalizePowerValue(b);
+  const aa = Math.abs(na);
+  const bb = Math.abs(nb);
+  if (aa > bb) return na;
+  if (bb > aa) return nb;
+  if (na === 0) return nb;
+  if (nb === 0) return na;
+  return na;
 }
 
 /**
- * CYL summary shown beside SPH label, e.g. `Cyl 0.00/-2.00`.
- * Minus-cyl ranges list the zero-side bound first.
+ * Attribute-page span: values as stored (no min/max sort), e.g. `0.00 to -6.00`.
  */
+export function formatPowerRangeSpan(a: number, b: number): string {
+  return `${formatPowerLabel(a)} to ${formatPowerLabel(b)}`;
+}
+
+/**
+ * Compact SPH/CYL label for names + catalog UI (not attribute table, not SKU):
+ * e.g. `+4.00/+2.00`, `-6.00/-4.00`.
+ */
+export function formatPowerRangeCompact(
+  sphMin: number,
+  sphMax: number,
+  cylMin: number,
+  cylMax: number
+): string {
+  return `${formatPowerLabel(extremePowerBound(sphMin, sphMax))}/${formatPowerLabel(extremePowerBound(cylMin, cylMax))}`;
+}
+
+/** @deprecated Prefer formatPowerRangeSpan (attrs) or formatPowerRangeCompact (UI/name). */
+export function formatPowerRangeLabel(sphMin: number, sphMax: number): string {
+  return formatPowerRangeSpan(sphMin, sphMax);
+}
+
+/** @deprecated Prefer formatPowerRangeSpan for attribute CYL column. */
 export function formatCylSummary(cylMin: number, cylMax: number): string {
-  const lo = Math.min(cylMin, cylMax);
-  const hi = Math.max(cylMin, cylMax);
-  const a = hi <= 0 ? hi : lo;
-  const b = hi <= 0 ? lo : hi;
-  return `Cyl ${formatPowerLabel(a)}/${formatPowerLabel(b)}`;
+  return formatPowerRangeSpan(cylMin, cylMax);
 }
 
 export type PowerRangeBounds = {
@@ -92,7 +119,8 @@ export type PowerRangeBounds = {
 
 /**
  * Returns an error message when bounds are invalid, otherwise `null`.
- * Bounds must be on the stepped grid and min ≤ max for both axes.
+ * Bounds must be on the stepped grid. Field order is not compared mathematically
+ * (admin may enter 0.00 then −6.00).
  */
 export function validatePowerRangeBounds(b: PowerRangeBounds): string | null {
   const entries: [string, number][] = [
@@ -106,7 +134,5 @@ export function validatePowerRangeBounds(b: PowerRangeBounds): string | null {
       return `${label} must be a power between ${POWER_OPTION_MIN} and +${POWER_OPTION_MAX} on the allowed step grid.`;
     }
   }
-  if (b.sphMin > b.sphMax) return "sphMin must be less than or equal to sphMax.";
-  if (b.cylMin > b.cylMax) return "cylMin must be less than or equal to cylMax.";
   return null;
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Pencil, Plus } from "lucide-react";
 import { AdminModal } from "@/components/admin-modal";
 import { AdminPage } from "@/components/admin-shell";
@@ -40,6 +41,10 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "power-range", label: "Power range" },
 ];
 
+function isTabId(value: string | null): value is TabId {
+  return TABS.some((t) => t.id === value);
+}
+
 const labelClass =
   "text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)";
 const inputClass =
@@ -61,7 +66,13 @@ type FormState = {
 const EMPTY_FORM: FormState = { code: "", name: "", sortOrder: "0", value: "" };
 
 export default function InventoryAttributesPage() {
-  const [tab, setTab] = useState<TabId>("family");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const [tab, setTab] = useState<TabId>(() =>
+    isTabId(tabFromUrl) ? tabFromUrl : "family"
+  );
   const isPowerRange = tab === "power-range";
   // Name/code list state + handlers only run for the non-power-range tabs.
   const attrTab: LensAttributeType = tab === "power-range" ? "family" : tab;
@@ -74,6 +85,25 @@ export default function InventoryAttributesPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState("");
+
+  useEffect(() => {
+    if (isTabId(tabFromUrl) && tabFromUrl !== tab) {
+      setTab(tabFromUrl);
+      setShowForm(false);
+    }
+    // Only sync when the URL tab changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional URL→state sync
+  }, [tabFromUrl]);
+
+  function selectTab(next: TabId) {
+    setTab(next);
+    setShowForm(false);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "family") params.delete("tab");
+    else params.set("tab", next);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
 
   const load = useCallback(async () => {
     if (isPowerRange) {
@@ -178,10 +208,7 @@ export default function InventoryAttributesPage() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => {
-                  setTab(item.id);
-                  setShowForm(false);
-                }}
+                onClick={() => selectTab(item.id)}
                 className={cn(
                   "rounded-xl border px-4 py-2 text-sm font-bold transition",
                   tab === item.id
