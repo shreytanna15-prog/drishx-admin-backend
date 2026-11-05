@@ -7,7 +7,10 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
 import { AdminTable } from "@/components/admin-table";
-import { PowerRangeMultiSelect } from "@/components/catalog/catalog-field";
+import {
+  AxisMultiSelect,
+  PowerRangeMultiSelect,
+} from "@/components/catalog/catalog-field";
 import { SkuChip } from "@/components/catalog/sku-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +25,9 @@ import {
 import { AdminApiError } from "@/app/lib/admin-api";
 import {
   addLensProductVariantsRequest,
+  fetchLensAttributes,
   fetchLensProduct,
+  type LensAttribute,
   type LensProduct,
 } from "@/app/lib/admin-lens-catalog";
 import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
@@ -44,6 +49,8 @@ export default function LensProductParentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [addIds, setAddIds] = useState<string[]>([]);
+  const [axisIds, setAxisIds] = useState<string[]>([]);
+  const [axes, setAxes] = useState<LensAttribute[]>([]);
   const [addBusy, setAddBusy] = useState(false);
 
   const { data: powerRangeData } = useGetPowerRanges({ activeOnly: true });
@@ -71,10 +78,22 @@ export default function LensProductParentDetailPage() {
     void load();
   }, [load]);
 
-  const usedRangeIds = useMemo(
-    () => new Set(product?.variants.map((v) => v.powerRangeId) ?? []),
-    [product]
-  );
+  const supportsAxis = Boolean(product?.family.supportsAxis);
+
+  useEffect(() => {
+    if (!supportsAxis) {
+      setAxes([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetchLensAttributes("axis", { activeOnly: true });
+        setAxes(res.items);
+      } catch {
+        setAxes([]);
+      }
+    })();
+  }, [supportsAxis]);
 
   async function addRanges() {
     if (!product || addIds.length === 0) return;
@@ -83,9 +102,11 @@ export default function LensProductParentDetailPage() {
     try {
       const res = await addLensProductVariantsRequest(product.id, {
         powerRangeIds: addIds,
+        axisIds: supportsAxis ? axisIds : [],
       });
       setProduct(res.product);
       setAddIds([]);
+      setAxisIds([]);
     } catch (err) {
       setError(errorMessage(err, "Failed to add power ranges."));
     } finally {
@@ -168,6 +189,22 @@ export default function LensProductParentDetailPage() {
               {product.color?.name || product.color?.code || "—"}
             </dd>
           </div>
+          <div>
+            <dt className="text-(--brand-label)">Addition</dt>
+            <dd className="font-semibold">
+              {product.addition?.name || product.addition?.code || "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-(--brand-label)">Diameter</dt>
+            <dd className="font-semibold">
+              {product.diameter?.name || product.diameter?.code || "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-(--brand-label)">Eye</dt>
+            <dd className="font-semibold">{product.eye ?? "—"}</dd>
+          </div>
         </dl>
       </section>
 
@@ -182,6 +219,7 @@ export default function LensProductParentDetailPage() {
                 <TableHead>SKU</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Range</TableHead>
+                <TableHead>Axis</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Open</TableHead>
               </TableRow>
@@ -189,7 +227,7 @@ export default function LensProductParentDetailPage() {
             <TableBody>
               {product.variants.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-(--brand-text-muted)">
+                  <TableCell colSpan={6} className="text-center text-(--brand-text-muted)">
                     No variants yet.
                   </TableCell>
                 </TableRow>
@@ -203,6 +241,7 @@ export default function LensProductParentDetailPage() {
                       {v.name}
                     </TableCell>
                     <TableCell>{v.rangeLabel}</TableCell>
+                    <TableCell>{v.axis ?? "—"}</TableCell>
                     <TableCell>
                       {v.isActive ? "Active" : "Inactive"}
                     </TableCell>
@@ -223,7 +262,7 @@ export default function LensProductParentDetailPage() {
 
       <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
         <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
-          Add power range
+          Add power range{supportsAxis ? " / axis" : ""}
         </h2>
         <PowerRangeMultiSelect
           options={powerRanges.map((r) => ({
@@ -235,11 +274,22 @@ export default function LensProductParentDetailPage() {
               r.cylMax
             ),
             cylSummary: "",
-            disabled: usedRangeIds.has(r.id),
           }))}
           selectedIds={addIds}
           onChange={setAddIds}
         />
+        {supportsAxis ? (
+          <div className="mt-4">
+            <AxisMultiSelect
+              options={axes.map((a) => ({
+                id: a.id,
+                label: a.name || String(a.value ?? a.code),
+              }))}
+              selectedIds={axisIds}
+              onChange={setAxisIds}
+            />
+          </div>
+        ) : null}
         <Button
           type="button"
           className="mt-4 h-9 rounded-xl bg-(--brand-primary) px-3 font-bold text-black"
@@ -252,7 +302,7 @@ export default function LensProductParentDetailPage() {
               Adding…
             </>
           ) : (
-            "Add selected ranges"
+            "Add selected"
           )}
         </Button>
       </section>

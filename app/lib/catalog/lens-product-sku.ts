@@ -1,17 +1,12 @@
 /**
  * RC-04 LensProductVariant SKU + name builders.
  *
- * SKU:  [MATERIAL-]BASE[-INDEX]-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}
- * Name: [Material] [Index] [Family] [Base] [Color] {max_SPH}/{max_CYL}
+ * SKU:  [MATERIAL-]BASE[-INDEX]-FAMILY[-COLOR][-ADD…][-D…][-LEFT|RIGHT]-S…-C…[-A{axis}]
+ * Name: [Material] [Index] [Family] [Base] [Color] {max_SPH}/{max_CYL} [axis]
  * Coating is never included.
  */
 
-import {
-  extremePowerBound,
-  formatPowerRangeCompact,
-  formatPowerRangeSpan,
-  normalizePowerValue,
-} from "./catalog-power-select-options";
+import { formatPowerRangeCompact } from "./catalog-power-select-options";
 
 export type LensProductSkuParts = {
   familyCode: string;
@@ -19,6 +14,10 @@ export type LensProductSkuParts = {
   materialCode?: string | null;
   indexCode?: string | null;
   colorCode?: string | null;
+  additionCode?: string | null;
+  diameterCode?: string | null;
+  eye?: "LEFT" | "RIGHT" | null;
+  axisValue?: number | null;
   sphMin: number;
   sphMax: number;
   cylMin: number;
@@ -31,12 +30,13 @@ export type LensProductNameParts = {
   materialCode?: string | null;
   indexCode?: string | null;
   /**
-   * Human color word for the name (CLIENT-PLAN: `… Green -6.00/-2.00`).
+   * Human color word for the name (e.g. `… Green -6.00/-2.00`).
    * Prefer attribute display name; fall back to `colorCode` if omitted.
    */
   colorLabel?: string | null;
   /** @deprecated Prefer `colorLabel` for names; kept for older call sites. */
   colorCode?: string | null;
+  axisValue?: number | null;
   sphMin: number;
   sphMax: number;
   cylMin: number;
@@ -73,6 +73,9 @@ export function buildLensProductBaseCode(parts: {
   materialCode?: string | null;
   indexCode?: string | null;
   colorCode?: string | null;
+  additionCode?: string | null;
+  diameterCode?: string | null;
+  eye?: "LEFT" | "RIGHT" | null;
 }): string {
   const family = sanitizeSkuCodePart(parts.familyCode);
   const base = sanitizeSkuCodePart(parts.baseCode);
@@ -95,6 +98,17 @@ export function buildLensProductBaseCode(parts: {
     const c = sanitizeSkuCodePart(String(parts.colorCode));
     if (c) tokens.push(c);
   }
+  if (parts.additionCode != null && String(parts.additionCode).trim() !== "") {
+    const a = sanitizeSkuCodePart(String(parts.additionCode));
+    if (a) tokens.push(a);
+  }
+  if (parts.diameterCode != null && String(parts.diameterCode).trim() !== "") {
+    const d = sanitizeSkuCodePart(String(parts.diameterCode));
+    if (d) tokens.push(d);
+  }
+  if (parts.eye === "LEFT" || parts.eye === "RIGHT") {
+    tokens.push(parts.eye);
+  }
   return tokens.join("-");
 }
 
@@ -106,17 +120,24 @@ export function buildLensProductSkuCode(parts: LensProductSkuParts): string {
   const cylMin = Math.min(parts.cylMin, parts.cylMax);
   const cylMax = Math.max(parts.cylMin, parts.cylMax);
 
-  return [
+  const tokens = [
     base,
     `S${encodeSkuPower(sphMin)}T${encodeSkuPower(sphMax)}`,
     `C${encodeSkuPower(cylMin)}T${encodeSkuPower(cylMax)}`,
-  ].join("-");
+  ];
+  if (
+    parts.axisValue != null &&
+    Number.isFinite(parts.axisValue) &&
+    Math.trunc(parts.axisValue) === parts.axisValue
+  ) {
+    tokens.push(`A${Math.trunc(parts.axisValue)}`);
+  }
+  return tokens.join("-");
 }
 
 /**
- * Compact `{max_SPH}/{max_CYL}` for names.
- * When a bound is not plano→extreme (other end ≠ 0), append spans so two
- * ranges that share the same extremes still get unique names.
+ * Compact `{max_SPH}/{max_CYL}` for names / catalog UI.
+ * Only the extreme bounds (larger |value|); e.g. SPH −2…+4 → `+4.00`.
  */
 export function buildPowerNameToken(
   sphMin: number,
@@ -124,19 +145,7 @@ export function buildPowerNameToken(
   cylMin: number,
   cylMax: number
 ): string {
-  const compact = formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax);
-  const sphExt = extremePowerBound(sphMin, sphMax);
-  const cylExt = extremePowerBound(cylMin, cylMax);
-  const sphOther =
-    normalizePowerValue(sphMin) === sphExt
-      ? normalizePowerValue(sphMax)
-      : normalizePowerValue(sphMin);
-  const cylOther =
-    normalizePowerValue(cylMin) === cylExt
-      ? normalizePowerValue(cylMax)
-      : normalizePowerValue(cylMin);
-  if (sphOther === 0 && cylOther === 0) return compact;
-  return `${compact} (${formatPowerRangeSpan(sphMin, sphMax)} / ${formatPowerRangeSpan(cylMin, cylMax)})`;
+  return formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax);
 }
 
 /** Human-readable variant name; Admin does not type this. */
@@ -157,5 +166,12 @@ export function buildLensProductName(parts: LensProductNameParts): string {
   words.push(
     buildPowerNameToken(parts.sphMin, parts.sphMax, parts.cylMin, parts.cylMax)
   );
+  if (
+    parts.axisValue != null &&
+    Number.isFinite(parts.axisValue) &&
+    Math.trunc(parts.axisValue) === parts.axisValue
+  ) {
+    words.push(String(Math.trunc(parts.axisValue)));
+  }
   return words.filter(Boolean).join(" ");
 }

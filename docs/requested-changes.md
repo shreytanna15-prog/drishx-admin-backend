@@ -25,6 +25,7 @@
 | RC-04 | Product catalog: parent + variants, new SKU/name builders | backend (admin panel); APIs as needed |
 | RC-05 | Finish photo unwire (clients) + null-material parent uniqueness | backend, website, mobile |
 | RC-06 | Walk-in: skip OTP when staff-created+verified; history; staff-only | backend, website, mobile |
+| RC-07 | Product catalog: Axis / Addition / Diameter / Eye | backend (admin panel); APIs as needed |
 
 ---
 
@@ -549,4 +550,25 @@ Backend lookup + harden WALK_IN verify / walk-in create responses + tests. Then 
 - Builds on Path C in [`customer-account-configuration/CLIENT-PLAN.md`](./customer-account-configuration/CLIENT-PLAN.md)  
 - On-behalf gate: `app/lib/customer-order-eligibility.ts`  
 - Surfaces: web `EmployeeWalkInCreatePanel` / mobile `employee-walk-in-create-panel`; `POST /api/users/customers/walk-in`
+
+---
+
+## RC-07 — Product catalog: Axis / Addition / Diameter / Eye
+
+### Type
+
+Change — product catalog attributes (admin)
+
+### Goal
+
+Gate Axis / ADD / Eye by `LensFamily` flags; Axis multi-select → cartesian variants with power ranges; optional Addition + Diameter + Eye on parent; SKU includes new fields when set; name appends axis only.
+
+### Current state
+
+**Shipped (admin):** masters `LensAxis` / `LensAddition` / `LensDiameter`; family `supportsAxis` / `supportsAdd` / `supportsEye`; Attributes tabs; create/preview/add-ranges cartesian; parent uniqueness includes addition/diameter/eye.
+
+### Related
+
+- Contract: [`product-catalog/CLIENT-PLAN.md`](./product-catalog/CLIENT-PLAN.md)  
+- Extends **[RC-03](#rc-03--product-catalog-optional-material--power-range-as-attribute)** / **[RC-04](#rc-04--product-catalog-parent--variants-new-skuname-builders)**
 

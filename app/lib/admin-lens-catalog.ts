@@ -11,7 +11,10 @@ export type LensAttributeType =
   | "material"
   | "index"
   | "coating"
-  | "color";
+  | "color"
+  | "axis"
+  | "addition"
+  | "diameter";
 
 export type LensAttribute = {
   id: string;
@@ -20,6 +23,9 @@ export type LensAttribute = {
   isActive: boolean;
   sortOrder: number;
   value?: number;
+  supportsAxis?: boolean;
+  supportsAdd?: boolean;
+  supportsEye?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -48,10 +54,17 @@ export type LensPowerRangeBounds = {
 
 export type LensAttrRef = { id: string; code: string; name: string };
 
+export type LensFamilyRef = LensAttrRef & {
+  supportsAxis: boolean;
+  supportsAdd: boolean;
+  supportsEye: boolean;
+};
+
 export type LensProductVariant = {
   id: string;
   productId: string;
   powerRangeId: string;
+  axisId: string | null;
   skuCode: string;
   name: string;
   rangeType: string;
@@ -76,6 +89,7 @@ export type LensProductVariant = {
     cylMin: number;
     cylMax: number;
   };
+  axisRef: LensAttrRef | null;
   rangeLabel: string;
   rangeSummary: string;
   product: {
@@ -86,11 +100,16 @@ export type LensProductVariant = {
     materialId: string | null;
     indexId: string | null;
     colorId: string | null;
-    family: LensAttrRef;
+    additionId: string | null;
+    diameterId: string | null;
+    eye: "LEFT" | "RIGHT" | null;
+    family: LensFamilyRef;
     base: LensAttrRef;
     material: LensAttrRef | null;
     index: (LensAttrRef & { value: number | null }) | null;
     color: LensAttrRef | null;
+    addition: (LensAttrRef & { value: number | null }) | null;
+    diameter: (LensAttrRef & { value: number }) | null;
     attributeSummary: string;
   };
 };
@@ -103,14 +122,19 @@ export type LensProduct = {
   materialId: string | null;
   indexId: string | null;
   colorId: string | null;
+  additionId: string | null;
+  diameterId: string | null;
+  eye: "LEFT" | "RIGHT" | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  family: LensAttrRef;
+  family: LensFamilyRef;
   base: LensAttrRef;
   material: LensAttrRef | null;
   index: (LensAttrRef & { value: number | null }) | null;
   color: LensAttrRef | null;
+  addition: (LensAttrRef & { value: number | null }) | null;
+  diameter: (LensAttrRef & { value: number }) | null;
   attributeSummary: string;
   variantCount: number;
   variants: LensProductVariant[];
@@ -132,6 +156,8 @@ export type CompatibilityResponse = {
 
 export type VariantPreview = {
   powerRangeId: string;
+  axisId: string | null;
+  axisLabel: string | null;
   skuCode: string;
   name: string;
   rangeLabel: string;
@@ -283,7 +309,11 @@ export function previewLensProductRequest(body: Record<string, unknown>) {
 
 export function addLensProductVariantsRequest(
   productId: string,
-  body: { powerRangeIds: string[]; defaultPrice?: number | null }
+  body: {
+    powerRangeIds: string[];
+    axisIds?: string[];
+    defaultPrice?: number | null;
+  }
 ) {
   return adminFetch<{ product: LensProduct }>(
     `/api/admin/catalog/lens-products/${productId}`,
@@ -310,3 +340,11 @@ export {
   formatPowerRangeSpan,
   getPowerSelectOptions,
 } from "./catalog/catalog-power-select-options";
+export {
+  formatAdditionLabel,
+  formatAxisLabel,
+  formatDiameterLabel,
+  getAdditionSelectOptions,
+  getAxisSelectOptions,
+  getDiameterSelectOptions,
+} from "./catalog/catalog-axis-add-diameter-options";

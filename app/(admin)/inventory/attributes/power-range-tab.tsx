@@ -236,7 +236,7 @@ export function PowerRangeTab({
         onOpenChange={onShowFormChange}
         size="md"
         title={editing ? "Edit Power range" : "Add Power range"}
-        description="Pick SPH and CYL bounds from the stepped lists (−40 … +8). The label is generated from SPH, e.g. -6.00/+2.00."
+        description="Pick SPH and CYL bounds from the stepped lists (−40 … +8). The attribute label is a span as stored, e.g. 0.00 to +4.00."
       >
         <div className="flex flex-col gap-4">
           {formError ? (

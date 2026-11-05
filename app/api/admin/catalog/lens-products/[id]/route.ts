@@ -49,9 +49,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const powerRangeIds = Array.isArray(body?.powerRangeIds)
       ? body.powerRangeIds.map((x: unknown) => String(x ?? "").trim()).filter(Boolean)
       : [];
+    const axisIds = Array.isArray(body?.axisIds)
+      ? body.axisIds.map((x: unknown) => String(x ?? "").trim()).filter(Boolean)
+      : [];
     const product = await addLensProductVariants({
       productId: id,
       powerRangeIds,
+      axisIds,
       defaultPrice: body.defaultPrice != null ? Number(body.defaultPrice) : null,
       actorUserId: auth.session.userId,
     });

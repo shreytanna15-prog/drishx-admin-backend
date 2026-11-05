@@ -429,6 +429,7 @@ DrishX models a **wholesale optical price sheet**:
 
 ## Related docs
 
+- [`lens-industry-reference.md`](./lens-industry-reference.md) — industry glossary + catalog worlds (legacy / new / white-catalog)
 - [`intro.md`](./intro.md) — three-repo overview
 - [`lens-logic-handover.md`](./lens-logic-handover.md) — core lens business rules (handover notes)
 - [`DrishX_Operations_Role_Capability_Specification.md`](./DrishX_Operations_Role_Capability_Specification.md) — full ops spec

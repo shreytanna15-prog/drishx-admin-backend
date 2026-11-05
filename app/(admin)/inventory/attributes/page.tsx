@@ -22,10 +22,22 @@ import { AdminApiError } from "@/app/lib/admin-api";
 import {
   createLensAttributeRequest,
   fetchLensAttributes,
+  getAdditionSelectOptions,
+  getAxisSelectOptions,
+  getDiameterSelectOptions,
   updateLensAttributeRequest,
   type LensAttribute,
   type LensAttributeType,
 } from "@/app/lib/admin-lens-catalog";
+import {
+  additionCodeFromValue,
+  axisCodeFromValue,
+  diameterCodeFromValue,
+  formatAdditionLabel,
+  formatAxisLabel,
+  formatDiameterLabel,
+} from "@/app/lib/catalog/catalog-axis-add-diameter-options";
+import { AdminSelect } from "@/components/admin-select";
 import { cn } from "@/lib/utils";
 import { PowerRangeTab } from "./power-range-tab";
 
@@ -38,8 +50,13 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "index", label: "Index" },
   { id: "coating", label: "Coating" },
   { id: "color", label: "Color" },
+  { id: "axis", label: "Axis" },
+  { id: "addition", label: "Addition" },
+  { id: "diameter", label: "Diameter" },
   { id: "power-range", label: "Power range" },
 ];
+
+const NUMERIC_TABS = new Set<TabId>(["axis", "addition", "diameter"]);
 
 function isTabId(value: string | null): value is TabId {
   return TABS.some((t) => t.id === value);
@@ -150,25 +167,60 @@ export default function InventoryAttributesPage() {
     setFormBusy(true);
     setFormError("");
     try {
-      const payload = {
-        code: form.code.trim(),
-        name: form.name.trim(),
-        sortOrder: Number(form.sortOrder) || 0,
-        value:
-          tab === "index" && form.value.trim() !== ""
-            ? Number(form.value)
-            : tab === "index"
-              ? null
-              : undefined,
-      };
-      if (!payload.code || !payload.name) {
-        setFormError("Code and name are required.");
-        return;
-      }
-      if (editing) {
-        await updateLensAttributeRequest(attrTab, editing.id, payload);
+      if (NUMERIC_TABS.has(tab)) {
+        const raw = Number(form.value);
+        if (!Number.isFinite(raw)) {
+          setFormError("Select a value from the list.");
+          return;
+        }
+        const value =
+          tab === "addition" ? Number(raw.toFixed(2)) : Math.trunc(raw);
+        const code =
+          form.code.trim() ||
+          (tab === "axis"
+            ? axisCodeFromValue(value)
+            : tab === "addition"
+              ? additionCodeFromValue(value)
+              : diameterCodeFromValue(value));
+        const name =
+          form.name.trim() ||
+          (tab === "axis"
+            ? formatAxisLabel(value)
+            : tab === "addition"
+              ? formatAdditionLabel(value)
+              : formatDiameterLabel(value));
+        const payload = {
+          code,
+          name,
+          sortOrder: Number(form.sortOrder) || 0,
+          value,
+        };
+        if (editing) {
+          await updateLensAttributeRequest(attrTab, editing.id, payload);
+        } else {
+          await createLensAttributeRequest(attrTab, payload);
+        }
       } else {
-        await createLensAttributeRequest(attrTab, payload);
+        const payload = {
+          code: form.code.trim(),
+          name: form.name.trim(),
+          sortOrder: Number(form.sortOrder) || 0,
+          value:
+            tab === "index" && form.value.trim() !== ""
+              ? Number(form.value)
+              : tab === "index"
+                ? null
+                : undefined,
+        };
+        if (!payload.code || !payload.name) {
+          setFormError("Code and name are required.");
+          return;
+        }
+        if (editing) {
+          await updateLensAttributeRequest(attrTab, editing.id, payload);
+        } else {
+          await createLensAttributeRequest(attrTab, payload);
+        }
       }
       setShowForm(false);
       await load();
@@ -199,7 +251,7 @@ export default function InventoryAttributesPage() {
   return (
     <AdminPage
       title="Attributes"
-      subtitle="Master lists for Family, Base, Material, Index, Coating, Color, and Power range. Inactive values are hidden from Create product."
+      subtitle="Master lists for Family, Base, Material, Index, Coating, Color, Axis, Addition, Diameter, and Power range. Inactive values are hidden from Create product. Eye is a create-product field (not a tab)."
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -259,28 +311,73 @@ export default function InventoryAttributesPage() {
               </div>
             ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1.5">
-                <span className={labelClass}>Code</span>
-                <Input
-                  className={inputClass}
-                  value={form.code}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, code: e.target.value }))
-                  }
-                  placeholder="e.g. TINTABLE"
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className={labelClass}>Name</span>
-                <Input
-                  className={inputClass}
-                  value={form.name}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, name: e.target.value }))
-                  }
-                  placeholder="Display name"
-                />
-              </label>
+              {NUMERIC_TABS.has(tab) ? (
+                <label className="space-y-1.5 sm:col-span-2">
+                  <span className={labelClass}>Value</span>
+                  <AdminSelect
+                    value={form.value}
+                    onValueChange={(v) => {
+                      const n = Number(v);
+                      if (tab === "axis") {
+                        setForm({
+                          code: axisCodeFromValue(n),
+                          name: formatAxisLabel(n),
+                          sortOrder: String(n),
+                          value: String(n),
+                        });
+                      } else if (tab === "addition") {
+                        setForm({
+                          code: additionCodeFromValue(n),
+                          name: formatAdditionLabel(n),
+                          sortOrder: String(Math.round(n * 100)),
+                          value: String(n),
+                        });
+                      } else {
+                        setForm({
+                          code: diameterCodeFromValue(n),
+                          name: formatDiameterLabel(n),
+                          sortOrder: String(n),
+                          value: String(n),
+                        });
+                      }
+                    }}
+                    options={
+                      tab === "axis"
+                        ? getAxisSelectOptions()
+                        : tab === "addition"
+                          ? getAdditionSelectOptions()
+                          : getDiameterSelectOptions()
+                    }
+                    placeholder="Select…"
+                    triggerClassName={inputClass}
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="space-y-1.5">
+                    <span className={labelClass}>Code</span>
+                    <Input
+                      className={inputClass}
+                      value={form.code}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, code: e.target.value }))
+                      }
+                      placeholder="e.g. TINTABLE"
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelClass}>Name</span>
+                    <Input
+                      className={inputClass}
+                      value={form.name}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, name: e.target.value }))
+                      }
+                      placeholder="Display name"
+                    />
+                  </label>
+                </>
+              )}
               <label className="space-y-1.5">
                 <span className={labelClass}>Sort order</span>
                 <Input
@@ -358,6 +455,25 @@ export default function InventoryAttributesPage() {
                       {row.value != null ? (
                         <span className="ml-2 text-xs text-(--brand-text-muted)">
                           ({row.value})
+                        </span>
+                      ) : null}
+                      {tab === "family" ? (
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {row.supportsAxis ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              Axis
+                            </Badge>
+                          ) : null}
+                          {row.supportsAdd ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              ADD
+                            </Badge>
+                          ) : null}
+                          {row.supportsEye ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              Eye
+                            </Badge>
+                          ) : null}
                         </span>
                       ) : null}
                     </TableCell>

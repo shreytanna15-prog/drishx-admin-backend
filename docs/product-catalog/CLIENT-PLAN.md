@@ -107,13 +107,17 @@ Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and 
 
 | Tab | Examples | On create product? |
 |-----|----------|--------------------|
-| Family | SV, KT, V2 | Yes (all families in SKU) |
+| Family | SV, KT, V2 (flags: Axis / ADD / Eye) | Yes (all families in SKU) |
 | Base | HC, BRC, ARC, BR, … | Yes |
 | Material | Plain, UC, Tintable, Poly, PG, PG Poly | Optional |
-| Index | 1.49, 1.56, 1.61, 1.67, 1.74 | Yes |
-| Color | Green, Blue, Grey, Brown, Violet, … | Yes (identity; not “tint only”) |
-| **Power range** | `-6.00/+2.00`, … | On **variant** (multi) |
+| Index | 1.49, 1.56, 1.61, 1.67, 1.74 | Optional |
+| Color | Green, Blue, Grey, Brown, Violet, … | Optional |
+| Axis | 10…180 step 10 + 45 + 135 | Multi → variants (KT/V2 only) |
+| Addition | 0, 0.25…6.00 | Optional single on parent (KT/V2) |
+| Diameter | 55…120 step 5 mm | Optional single on parent (any family) |
+| **Power range** | span / compact labels | On **variant** (multi) |
 | Coating | (optional master) | **Not** identity / SKU / name |
+| Eye | LEFT / RIGHT | Optional field on parent (V2) — **not** an Attributes tab |
 
 ### 5.2 What Admin can do on each tab
 
@@ -157,11 +161,13 @@ Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and 
 
 **Path:** `/inventory/products-catalog/new`
 
-1. **Family** → **Base** → **Material** (optional) → **Index** → **Color**  
-2. **Power ranges** — multi-select active power-range attributes (≥1)  
-3. Optional default price (copied to new variants as starting price)  
-4. **Preview** each variant’s auto SKU + auto name (read-only)  
-5. **Save** → one parent + N variants  
+1. **Family** → **Base** → **Material** (optional) → **Index** → **Color** → **Diameter** (optional)  
+2. If family supports ADD → optional **Addition**; if supports Eye → optional **LEFT/RIGHT**  
+3. **Power ranges** — multi-select (≥1)  
+4. If family supports Axis → optional **Axes** multi-select (cartesian with ranges)  
+5. Optional default price (copied to new variants as starting price)  
+6. **Preview** each variant’s auto SKU + auto name (read-only)  
+7. **Save** → one parent + N variants (ranges × axes, or ranges alone if no axis)  
 
 If the attribute combo already exists → do not duplicate parent; go to that parent and add the new ranges.
 

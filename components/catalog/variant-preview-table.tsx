@@ -13,6 +13,8 @@ import {
 
 export type VariantPreviewRow = {
   powerRangeId: string;
+  axisId?: string | null;
+  axisLabel?: string | null;
   skuCode: string;
   name: string;
   rangeLabel: string;
@@ -35,6 +37,8 @@ export function VariantPreviewTable({
     );
   }
 
+  const showAxis = rows.some((r) => r.axisLabel);
+
   return (
     <div className="grid gap-2">
       {existingParentHint ? (
@@ -45,14 +49,20 @@ export function VariantPreviewTable({
           <TableHeader>
             <TableRow>
               <TableHead>Power range</TableHead>
+              {showAxis ? <TableHead>Axis</TableHead> : null}
               <TableHead>SKU</TableHead>
               <TableHead>Name</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.powerRangeId}>
+              <TableRow
+                key={`${row.powerRangeId}:${row.axisId ?? "none"}`}
+              >
                 <TableCell className="font-semibold">{row.rangeLabel}</TableCell>
+                {showAxis ? (
+                  <TableCell>{row.axisLabel ?? "—"}</TableCell>
+                ) : null}
                 <TableCell>
                   <SkuChip sku={row.skuCode} />
                 </TableCell>
