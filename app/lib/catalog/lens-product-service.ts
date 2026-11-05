@@ -10,10 +10,7 @@ import {
   assertMaterialAllowedForBase,
   LensAttributeServiceError,
 } from "./lens-attribute-service";
-import {
-  formatCylSummary,
-  formatPowerRangeLabel,
-} from "./catalog-power-select-options";
+import { formatPowerRangeCompact } from "./catalog-power-select-options";
 import { steppedRange } from "./lens-product-range";
 import {
   buildLensProductBaseCode,
@@ -114,8 +111,8 @@ function serializePowerRange(pr: {
   const cylMax = Number(pr.cylMax);
   return {
     id: pr.id,
-    label: formatPowerRangeLabel(sphMin, sphMax),
-    cylSummary: formatCylSummary(cylMin, cylMax),
+    label: formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax),
+    cylSummary: formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax),
     sphMin,
     sphMax,
     cylMin,
@@ -149,8 +146,8 @@ export function serializeLensProductVariant(row: VariantRow) {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     powerRange: serializePowerRange(row.powerRange),
-    rangeLabel: formatPowerRangeLabel(sphMin, sphMax),
-    rangeSummary: `SPH ${sphMin}…${sphMax} / CYL ${cylMin}…${cylMax}`,
+    rangeLabel: formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax),
+    rangeSummary: formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax),
     product: {
       id: p.id,
       baseCode: p.baseCode,
@@ -162,17 +159,19 @@ export function serializeLensProductVariant(row: VariantRow) {
       family: attrRef(p.family),
       base: attrRef(p.base),
       material: p.material ? attrRef(p.material) : null,
-      index: {
-        ...attrRef(p.index),
-        value: num(p.index.value),
-      },
-      color: attrRef(p.color),
+      index: p.index
+        ? {
+            ...attrRef(p.index),
+            value: num(p.index.value),
+          }
+        : null,
+      color: p.color ? attrRef(p.color) : null,
       attributeSummary: [
         p.family.code,
         p.base.code,
         p.material?.code,
-        p.index.code,
-        p.color.code,
+        p.index?.code,
+        p.color?.code,
       ]
         .filter(Boolean)
         .join(" · "),
@@ -195,14 +194,16 @@ export function serializeLensProduct(row: ParentRow) {
     family: attrRef(row.family),
     base: attrRef(row.base),
     material: row.material ? attrRef(row.material) : null,
-    index: { ...attrRef(row.index), value: num(row.index.value) },
-    color: attrRef(row.color),
+    index: row.index
+      ? { ...attrRef(row.index), value: num(row.index.value) }
+      : null,
+    color: row.color ? attrRef(row.color) : null,
     attributeSummary: [
       row.family.code,
       row.base.code,
       row.material?.code,
-      row.index.code,
-      row.color.code,
+      row.index?.code,
+      row.color?.code,
     ]
       .filter(Boolean)
       .join(" · "),
@@ -268,8 +269,8 @@ type ParentAttrs = {
   familyId: string;
   baseId: string;
   materialId: string | null;
-  indexId: string;
-  colorId: string;
+  indexId: string | null;
+  colorId: string | null;
 };
 
 async function loadParentAttrs(ids: ParentAttrs) {
@@ -279,8 +280,12 @@ async function loadParentAttrs(ids: ParentAttrs) {
     ids.materialId
       ? prisma.lensMaterial.findUnique({ where: { id: ids.materialId } })
       : Promise.resolve(null),
-    prisma.lensIndex.findUnique({ where: { id: ids.indexId } }),
-    prisma.lensColor.findUnique({ where: { id: ids.colorId } }),
+    ids.indexId
+      ? prisma.lensIndex.findUnique({ where: { id: ids.indexId } })
+      : Promise.resolve(null),
+    ids.colorId
+      ? prisma.lensColor.findUnique({ where: { id: ids.colorId } })
+      : Promise.resolve(null),
   ]);
 
   await assertActiveFk("Family", ids.familyId, async () => family);
@@ -289,11 +294,17 @@ async function loadParentAttrs(ids: ParentAttrs) {
   await assertActiveFk("Index", ids.indexId, async () => indexRow);
   await assertActiveFk("Color", ids.colorId, async () => color);
 
-  if (!family || !base || !indexRow || !color) {
+  if (!family || !base) {
     throw new LensProductServiceError("Attribute not found.", 400, "INVALID_FK");
   }
   if (ids.materialId && !material) {
     throw new LensProductServiceError("Material not found.", 400, "INVALID_FK");
+  }
+  if (ids.indexId && !indexRow) {
+    throw new LensProductServiceError("Index not found.", 400, "INVALID_FK");
+  }
+  if (ids.colorId && !color) {
+    throw new LensProductServiceError("Color not found.", 400, "INVALID_FK");
   }
   if (ids.materialId) {
     await ensureBaseMaterialCompat(ids.baseId, ids.materialId);
@@ -303,10 +314,10 @@ async function loadParentAttrs(ids: ParentAttrs) {
     familyCode: family.code,
     baseCode: base.code,
     materialCode: material?.code ?? null,
-    indexCode: indexRow.code,
-    colorCode: color.code,
+    indexCode: indexRow?.code ?? null,
+    colorCode: color?.code ?? null,
     /** CLIENT-PLAN name uses display color (e.g. Green), not SKU token GREEN. */
-    colorLabel: color.name?.trim() || color.code,
+    colorLabel: color ? color.name?.trim() || color.code : null,
   };
 
   return { family, base, material, indexRow, color, codeParts };
@@ -329,8 +340,8 @@ export type CreateLensProductInput = {
   familyId: string;
   baseId: string;
   materialId?: string | null;
-  indexId: string;
-  colorId: string;
+  indexId?: string | null;
+  colorId?: string | null;
   /** One or more active power-range masters → variants */
   powerRangeIds: string[];
   defaultPrice?: number | null;
@@ -350,8 +361,8 @@ export async function previewLensProductVariants(input: {
   familyId: string;
   baseId: string;
   materialId?: string | null;
-  indexId: string;
-  colorId: string;
+  indexId?: string | null;
+  colorId?: string | null;
   powerRangeIds: string[];
 }): Promise<{
   baseCode: string;
@@ -362,8 +373,8 @@ export async function previewLensProductVariants(input: {
     familyId: requireId("familyId", input.familyId),
     baseId: requireId("baseId", input.baseId),
     materialId: normalizeOptionalId(input.materialId),
-    indexId: requireId("indexId", input.indexId),
-    colorId: requireId("colorId", input.colorId),
+    indexId: normalizeOptionalId(input.indexId),
+    colorId: normalizeOptionalId(input.colorId),
   };
   const { codeParts } = await loadParentAttrs(ids);
   const baseCode = buildLensProductBaseCode(codeParts);
@@ -414,10 +425,14 @@ export async function previewLensProductVariants(input: {
         materialCode: codeParts.materialCode,
         indexCode: codeParts.indexCode,
         colorLabel: codeParts.colorLabel,
-        sphMin: bounds.sphMin,
-        sphMax: bounds.sphMax,
+        ...bounds,
       }),
-      rangeLabel: formatPowerRangeLabel(bounds.sphMin, bounds.sphMax),
+      rangeLabel: formatPowerRangeCompact(
+        bounds.sphMin,
+        bounds.sphMax,
+        bounds.cylMin,
+        bounds.cylMax
+      ),
     });
   }
 
@@ -434,7 +449,7 @@ async function createVariantsForParent(opts: {
     familyCode: string;
     baseCode: string;
     materialCode?: string | null;
-    indexCode: string;
+    indexCode?: string | null;
     colorCode?: string | null;
     colorLabel?: string | null;
   };
@@ -460,7 +475,7 @@ async function createVariantsForParent(opts: {
     });
     if (existing) {
       throw new LensProductServiceError(
-        `Variant for power range ${formatPowerRangeLabel(Number(pr.sphMin), Number(pr.sphMax))} already exists on this parent.`,
+        `Variant for power range ${formatPowerRangeCompact(Number(pr.sphMin), Number(pr.sphMax), Number(pr.cylMin), Number(pr.cylMax))} already exists on this parent.`,
         409,
         "DUPLICATE_VARIANT",
         { variantId: existing.id, skuCode: existing.skuCode }
@@ -481,8 +496,7 @@ async function createVariantsForParent(opts: {
       indexCode: opts.codeParts.indexCode,
       colorLabel:
         opts.codeParts.colorLabel ?? opts.codeParts.colorCode ?? null,
-      sphMin: bounds.sphMin,
-      sphMax: bounds.sphMax,
+      ...bounds,
     });
 
     try {
@@ -530,8 +544,8 @@ export async function createLensProduct(input: CreateLensProductInput) {
     familyId: requireId("familyId", input.familyId),
     baseId: requireId("baseId", input.baseId),
     materialId: normalizeOptionalId(input.materialId),
-    indexId: requireId("indexId", input.indexId),
-    colorId: requireId("colorId", input.colorId),
+    indexId: normalizeOptionalId(input.indexId),
+    colorId: normalizeOptionalId(input.colorId),
   };
 
   const rangeIds = [

@@ -22,6 +22,7 @@ import {
   type VariantPreview,
 } from "@/app/lib/admin-lens-catalog";
 import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
+import { formatPowerRangeCompact } from "@/app/lib/catalog/catalog-power-select-options";
 import type { AdminSelectOption } from "@/components/admin-select";
 
 const CATALOG_HREF = "/inventory/products-catalog";
@@ -143,8 +144,7 @@ export default function NewLensProductPage() {
   }, [materials, allowedMaterialIds]);
 
   const canPreview =
-    Boolean(familyId && baseId && indexId && colorId) &&
-    powerRangeIds.length > 0;
+    Boolean(familyId && baseId) && powerRangeIds.length > 0;
 
   useEffect(() => {
     if (!canPreview) {
@@ -160,8 +160,8 @@ export default function NewLensProductPage() {
             familyId,
             baseId,
             materialId: materialId || null,
-            indexId,
-            colorId,
+            indexId: indexId || null,
+            colorId: colorId || null,
             powerRangeIds,
           });
           if (!cancelled) setPreview(res.preview);
@@ -181,8 +181,8 @@ export default function NewLensProductPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    if (!familyId || !baseId || !indexId || !colorId) {
-      setError("Family, base, index, and color are required.");
+    if (!familyId || !baseId) {
+      setError("Family and base are required.");
       return;
     }
     if (powerRangeIds.length === 0) {
@@ -195,8 +195,8 @@ export default function NewLensProductPage() {
         familyId,
         baseId,
         materialId: materialId || null,
-        indexId,
-        colorId,
+        indexId: indexId || null,
+        colorId: colorId || null,
         powerRangeIds,
         defaultPrice: defaultPrice.trim() ? Number(defaultPrice) : null,
       });
@@ -264,21 +264,19 @@ export default function NewLensProductPage() {
           />
           <CatalogSelectField
             label="Index"
-            required
             value={indexId}
             onValueChange={setIndexId}
-            options={toOptions(indexes)}
+            options={toOptions(indexes, "None (optional)")}
             disabled={attrsLoading}
-            placeholder="Select index"
+            placeholder="Optional"
           />
           <CatalogSelectField
             label="Color"
-            required
             value={colorId}
             onValueChange={setColorId}
-            options={toOptions(colors)}
+            options={toOptions(colors, "None (optional)")}
             disabled={attrsLoading}
-            placeholder="Select color"
+            placeholder="Optional"
           />
           <label className="grid gap-1.5">
             <span className={catalogLabelClass}>Default price (₹)</span>
@@ -295,8 +293,13 @@ export default function NewLensProductPage() {
         <PowerRangeMultiSelect
           options={powerRanges.map((r) => ({
             id: r.id,
-            label: r.label,
-            cylSummary: r.cylSummary,
+            label: formatPowerRangeCompact(
+              r.sphMin,
+              r.sphMax,
+              r.cylMin,
+              r.cylMax
+            ),
+            cylSummary: "",
           }))}
           selectedIds={powerRangeIds}
           onChange={setPowerRangeIds}

@@ -18,12 +18,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  formatCylSummary,
-  formatPowerRangeLabel,
   getPowerSelectOptions,
   type LensPowerRange,
 } from "@/app/lib/admin-lens-catalog";
-import { validatePowerRangeBounds } from "@/app/lib/catalog/catalog-power-select-options";
+import {
+  formatPowerRangeSpan,
+  validatePowerRangeBounds,
+} from "@/app/lib/catalog/catalog-power-select-options";
 import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
 import { useCreatePowerRange } from "@/app/lib/modules/lens-catalog/mutation/use-create-power-range";
 import {
@@ -157,8 +158,8 @@ export function PowerRangeTab({
     if (!bounds) return null;
     if (validatePowerRangeBounds(bounds)) return null;
     return {
-      label: formatPowerRangeLabel(bounds.sphMin, bounds.sphMax),
-      cyl: formatCylSummary(bounds.cylMin, bounds.cylMax),
+      label: formatPowerRangeSpan(bounds.sphMin, bounds.sphMax),
+      cyl: formatPowerRangeSpan(bounds.cylMin, bounds.cylMax),
     };
   }, [bounds]);
 
@@ -339,7 +340,7 @@ export function PowerRangeTab({
                   <TableCell className="font-mono text-sm font-bold">
                     {row.label}
                   </TableCell>
-                  <TableCell className="text-sm text-(--brand-text-muted)">
+                  <TableCell className="font-mono text-sm font-bold text-(--brand-text-muted)">
                     {row.cylSummary}
                   </TableCell>
                   <TableCell>{row.sortOrder}</TableCell>

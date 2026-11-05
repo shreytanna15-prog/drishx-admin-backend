@@ -1410,24 +1410,27 @@ model LensProduct {
   baseId     String
   /// Optional — omitted from SKU/name when absent.
   materialId String?
-  indexId    String
-  colorId    String
+  /// Optional — omitted from SKU/name when absent.
+  indexId    String?
+  /// Optional — omitted from SKU/name when absent.
+  colorId    String?
   isActive   Boolean              @default(true)
   createdAt  DateTime             @default(now())
   updatedAt  DateTime             @updatedAt
   family     LensFamily           @relation(fields: [familyId], references: [id])
   base       LensBase             @relation(fields: [baseId], references: [id])
   material   LensMaterial?        @relation(fields: [materialId], references: [id])
-  index      LensIndex            @relation(fields: [indexId], references: [id])
-  color      LensColor            @relation(fields: [colorId], references: [id])
+  index      LensIndex?           @relation(fields: [indexId], references: [id])
+  color      LensColor?           @relation(fields: [colorId], references: [id])
   variants   LensProductVariant[]
 
-  /// Uniqueness when material is set / null is enforced by partial unique indexes
-  /// (see migration 20261104160000_lens_product_null_material_unique). Prisma cannot
-  /// express NULLS NOT DISTINCT / partial uniques in @@unique.
+  /// Uniqueness across optional attrs is enforced by a NULLS NOT DISTINCT unique
+  /// index (see migration 20261105190000_lens_product_optional_index_color).
   @@index([familyId, isActive])
   @@index([baseId])
   @@index([materialId])
+  @@index([indexId])
+  @@index([colorId])
   @@index([isActive, updatedAt])
 }
 

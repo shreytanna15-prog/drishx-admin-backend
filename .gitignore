@@ -13,6 +13,14 @@
 # testing
 /coverage
 
+# Local QA screenshots / screen recordings (never commit)
+/screenshots/
+**/screenshots/
+*.screenshot.png
+*.screenshot.jpg
+page-*.png
+page-*.jpg
+
 # next.js
 /.next/
 /out/
