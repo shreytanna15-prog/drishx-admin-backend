@@ -2,12 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   POWER_SELECT_VALUES,
-  extremePowerBound,
   formatCylSummary,
   formatPowerLabel,
-  formatPowerRangeCompact,
   formatPowerRangeLabel,
-  formatPowerRangeSpan,
   getPowerSelectOptions,
   isAllowedPowerValue,
   validatePowerRangeBounds,
@@ -20,6 +17,7 @@ describe("catalog power select options", () => {
     for (let i = 1; i < POWER_SELECT_VALUES.length; i++) {
       assert.ok(POWER_SELECT_VALUES[i] > POWER_SELECT_VALUES[i - 1]);
     }
+    // 49 values (−40…−16 @0.5) + 80+... computed explicitly
     // −40…−16 step .5 => 49; −15.75…4 step .25 => 80; 4.5…8 step .5 => 8
     assert.equal(POWER_SELECT_VALUES.length, 49 + 80 + 8);
   });
@@ -53,35 +51,19 @@ describe("catalog power select options", () => {
     assert.equal(isAllowedPowerValue(Number.NaN), false);
   });
 
-  it("formats attribute spans as stored (no min/max sort)", () => {
+  it("formats labels like -6.00/+2.00", () => {
     assert.equal(formatPowerLabel(-6), "-6.00");
     assert.equal(formatPowerLabel(2), "+2.00");
     assert.equal(formatPowerLabel(0), "0.00");
     assert.equal(formatPowerLabel(-0.25), "-0.25");
-    assert.equal(formatPowerRangeSpan(0, 4), "0.00 to +4.00");
-    assert.equal(formatPowerRangeSpan(0, -6), "0.00 to -6.00");
-    assert.equal(formatPowerRangeSpan(2, -6), "+2.00 to -6.00");
-    assert.equal(formatPowerRangeLabel(0, 4), "0.00 to +4.00");
-    assert.equal(formatCylSummary(0, -2), "0.00 to -2.00");
-    assert.equal(formatCylSummary(0, 4), "0.00 to +4.00");
+    assert.equal(formatPowerRangeLabel(-6, 2), "-6.00/+2.00");
+    assert.equal(formatPowerRangeLabel(2, -6), "-6.00/+2.00");
   });
 
-  it("formats compact UI/name as extreme SPH / extreme CYL", () => {
-    assert.equal(extremePowerBound(0, 4), 4);
-    assert.equal(extremePowerBound(0, -6), -6);
-    assert.equal(extremePowerBound(-2, 4), 4);
-    assert.equal(
-      formatPowerRangeCompact(0, 4, 0, 2),
-      "+4.00/+2.00"
-    );
-    assert.equal(
-      formatPowerRangeCompact(0, -6, 0, 4),
-      "-6.00/+4.00"
-    );
-    assert.equal(
-      formatPowerRangeCompact(-2, 4, -1, 2),
-      "+4.00/+2.00"
-    );
+  it("formats CYL summary beside the SPH label", () => {
+    assert.equal(formatCylSummary(-2, 0), "Cyl 0.00/-2.00");
+    assert.equal(formatCylSummary(0, -2), "Cyl 0.00/-2.00");
+    assert.equal(formatCylSummary(0, 4), "Cyl 0.00/+4.00");
   });
 
   it("builds select options with string values and labels", () => {
@@ -91,27 +73,21 @@ describe("catalog power select options", () => {
     assert.ok(opts.some((o) => o.value === "0" && o.label === "0.00"));
   });
 
-  it("validates range bounds on the step grid only (no min≤max math)", () => {
+  it("validates range bounds", () => {
     assert.equal(
       validatePowerRangeBounds({ sphMin: -6, sphMax: 2, cylMin: -2, cylMax: 0 }),
       null
     );
-    // Reversed field order is allowed (e.g. 0.00 then −6.00).
-    assert.equal(
-      validatePowerRangeBounds({ sphMin: 2, sphMax: -6, cylMin: -2, cylMax: 0 }),
-      null
-    );
-    assert.equal(
-      validatePowerRangeBounds({ sphMin: -6, sphMax: 2, cylMin: 0, cylMax: -2 }),
-      null
+    assert.match(
+      validatePowerRangeBounds({ sphMin: 2, sphMax: -6, cylMin: -2, cylMax: 0 })!,
+      /sphMin/
     );
     assert.match(
-      validatePowerRangeBounds({
-        sphMin: -6.1,
-        sphMax: 2,
-        cylMin: -2,
-        cylMax: 0,
-      })!,
+      validatePowerRangeBounds({ sphMin: -6, sphMax: 2, cylMin: 0, cylMax: -2 })!,
+      /cylMin/
+    );
+    assert.match(
+      validatePowerRangeBounds({ sphMin: -6.1, sphMax: 2, cylMin: -2, cylMax: 0 })!,
       /sphMin/
     );
   });

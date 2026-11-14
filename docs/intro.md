@@ -298,7 +298,6 @@ npm start
 
 See also:
 
-- [`lens-industry-reference.md`](./lens-industry-reference.md) — **start here** for lens industry terms + how DrishX catalogs work (legacy leaves, new attributes, white-catalog)
 - [`lens-logic-handover.md`](./lens-logic-handover.md) — core lens business rules (previous developer handover)
 - [`lens-domain-logic.md`](./lens-domain-logic.md) — technical lens domain guide
 - [`lens-catalog-from-production.md`](./lens-catalog-from-production.md) — what is in production today

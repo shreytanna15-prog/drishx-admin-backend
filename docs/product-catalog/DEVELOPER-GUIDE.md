@@ -51,31 +51,28 @@
 
 ```
 Attribute masters
-  LensFamily (supportsAxis / supportsAdd / supportsEye)
-  | LensBase | LensMaterial? | LensIndex | LensColor
-  | LensAxis | LensAddition | LensDiameter
+  LensFamily | LensBase | LensMaterial? | LensIndex | LensColor
   + LensCoating (not identity)
   + LensBaseMaterialLink
-  + LensPowerRange (sph/cyl bounds; attr label e.g. 0.00 to +4.00)
+  + LensPowerRange (sph/cyl bounds, label -6.00/+2.00)
         │
         ▼
 LensProduct (parent)
-  material? · base · index · family · color · addition? · diameter? · eye?
-  unique on that combo (NULLS NOT DISTINCT); internal baseCode
-  coating NOT identity; eye is enum field (not Attributes tab)
+  material? · base · index · family · color
+  unique on that combo; internal baseCode (not shown in UI)
+  coating NOT identity
         │ 1 → many
         ▼
 LensProductVariant
-  powerRangeId + optional axisId (cartesian on create)
-  skuCode = [MATERIAL-]BASE-INDEX-FAMILY[-COLOR][-ADD…][-D…][-LEFT|RIGHT]-S…-C…[-A90]
-  name    = [Material] [Index] [Family] [Base] [Color] +4.00/+2.00 [90]
+  powerRangeId
+  skuCode = [MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S…-C…
+  name    = [Material] [Index] [Family] [Base] [Color] -6.00/+2.00
   price, isActive
   ← stock / PO / orders attach HERE later
         │
         ▼
-Admin UI — flat + grouped list; parent detail + add ranges/axes; variant matrix
+Admin UI — flat + grouped list; parent detail + add ranges; variant matrix
 ```
-
 
 **Not in this slice:** ExactPower / stock leaf rows (see stock-management).
 
@@ -126,18 +123,14 @@ Unique `(productId, powerRangeId)`.
 **Name** (`buildLensProductName`):
 
 ```
-[Material] [Index] [Family] [Base] [Color] +4.00/+2.00
+[Material] [Index] [Family] [Base] [Color] -6.00/+2.00
 ```
 
 | Rule | Detail |
 |------|--------|
 | Codes | Uppercase; `.` → `P`; strip non-alphanumeric |
-| Powers in SKU | `M` for negative; `P` for decimal; both bounds (numeric order) |
-| Axis / ADD / diameter / eye in SKU | Optional segments when set (`…-ADD3P00-D65-LEFT-…-A90`) |
-| Powers in name | Compact `{max_SPH}/{max_CYL}` only (extreme \|value\|; e.g. SPH −2…+4 → `+4.00`) |
-| Axis in name | Append degree label only among new fields (e.g. `… +4.00/+2.00 90`) |
-| Attr table | Full span as stored, e.g. `0.00 to +4.00` (not compact) |
-| Variants | Cartesian of selected power ranges × axes (or ranges alone if no axis) |
+| Powers in SKU | `M` for negative; `P` for decimal; from power-range bounds |
+| Powers in name | Human SPH label `-6.00/+2.00` |
 | Coating | Not in SKU or name |
 | Material | Optional; omit segment when absent |
 | Create | Server builds both; no typed `skuCode` or `name` |

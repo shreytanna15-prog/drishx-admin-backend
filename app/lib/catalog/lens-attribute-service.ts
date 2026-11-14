@@ -5,17 +5,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { AuditAction, AuditModule, recordAuditEvent } from "../audit";
-import {
-  additionCodeFromValue,
-  axisCodeFromValue,
-  diameterCodeFromValue,
-  formatAdditionLabel,
-  formatAxisLabel,
-  formatDiameterLabel,
-  isAllowedAdditionValue,
-  isAllowedAxisValue,
-  isAllowedDiameterValue,
-} from "./catalog-axis-add-diameter-options";
 
 export const LENS_ATTRIBUTE_TYPES = [
   "family",
@@ -24,9 +13,6 @@ export const LENS_ATTRIBUTE_TYPES = [
   "index",
   "coating",
   "color",
-  "axis",
-  "addition",
-  "diameter",
 ] as const;
 
 export type LensAttributeType = (typeof LENS_ATTRIBUTE_TYPES)[number];
@@ -55,29 +41,17 @@ type AttributeRow = {
   sortOrder: number;
   createdAt: Date;
   updatedAt: Date;
-  value?: Prisma.Decimal | number | null;
-  supportsAxis?: boolean;
-  supportsAdd?: boolean;
-  supportsEye?: boolean;
+  value?: Prisma.Decimal | null;
 };
 
 function serializeAttribute(row: AttributeRow) {
-  const value =
-    row.value != null
-      ? typeof row.value === "number"
-        ? row.value
-        : Number(row.value)
-      : undefined;
   return {
     id: row.id,
     code: row.code,
     name: row.name,
     isActive: row.isActive,
     sortOrder: row.sortOrder,
-    value,
-    supportsAxis: row.supportsAxis,
-    supportsAdd: row.supportsAdd,
-    supportsEye: row.supportsEye,
+    value: row.value != null ? Number(row.value) : undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -111,12 +85,6 @@ async function listByType(
       return prisma.lensCoating.findMany({ where, orderBy });
     case "color":
       return prisma.lensColor.findMany({ where, orderBy });
-    case "axis":
-      return prisma.lensAxis.findMany({ where, orderBy });
-    case "addition":
-      return prisma.lensAddition.findMany({ where, orderBy });
-    case "diameter":
-      return prisma.lensDiameter.findMany({ where, orderBy });
   }
 }
 
@@ -126,65 +94,6 @@ export async function listLensAttributes(
 ) {
   const rows = await listByType(type, activeOnly);
   return rows.map(serializeAttribute);
-}
-
-function resolveNumericCreate(
-  type: "axis" | "addition" | "diameter",
-  input: { code: string; name: string; value?: number | null }
-): { code: string; name: string; value: number; sortOrder: number } {
-  const rawValue =
-    input.value != null && Number.isFinite(input.value)
-      ? input.value
-      : Number(input.code.replace(/^A|^ADD_|^D/i, "").replace("P", ".").replace("M", "-"));
-
-  if (type === "axis") {
-    const value = Math.trunc(Number(input.value ?? rawValue));
-    if (!isAllowedAxisValue(value)) {
-      throw new LensAttributeServiceError(
-        "Axis must be 10…180 step 10, or 45 / 135.",
-        400,
-        "INVALID_AXIS"
-      );
-    }
-    return {
-      code: normalizeCode(input.code) || axisCodeFromValue(value),
-      name: normalizeName(input.name) || formatAxisLabel(value),
-      value,
-      sortOrder: value,
-    };
-  }
-
-  if (type === "addition") {
-    const value = Number(Number(input.value ?? rawValue).toFixed(2));
-    if (!isAllowedAdditionValue(value)) {
-      throw new LensAttributeServiceError(
-        "Addition must be 0 or 0.25…6.00 step 0.25.",
-        400,
-        "INVALID_ADDITION"
-      );
-    }
-    return {
-      code: normalizeCode(input.code) || additionCodeFromValue(value),
-      name: normalizeName(input.name) || formatAdditionLabel(value),
-      value,
-      sortOrder: Math.round(value * 100),
-    };
-  }
-
-  const value = Math.trunc(Number(input.value ?? rawValue));
-  if (!isAllowedDiameterValue(value)) {
-    throw new LensAttributeServiceError(
-      "Diameter must be 55…120 step 5 (mm).",
-      400,
-      "INVALID_DIAMETER"
-    );
-  }
-  return {
-    code: normalizeCode(input.code) || diameterCodeFromValue(value),
-    name: normalizeName(input.name) || formatDiameterLabel(value),
-    value,
-    sortOrder: value,
-  };
 }
 
 export async function createLensAttribute(
@@ -198,66 +107,36 @@ export async function createLensAttribute(
     actorUserId: string;
   }
 ) {
+  const code = normalizeCode(input.code);
+  const name = normalizeName(input.name);
+  if (!code || !name) {
+    throw new LensAttributeServiceError("code and name are required.");
+  }
+  const sortOrder =
+    typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
+      ? Math.trunc(input.sortOrder)
+      : 0;
   const isActive = input.isActive !== false;
 
   try {
     let row: AttributeRow;
     switch (type) {
-      case "family": {
-        const code = normalizeCode(input.code);
-        const name = normalizeName(input.name);
-        if (!code || !name) {
-          throw new LensAttributeServiceError("code and name are required.");
-        }
-        const sortOrder =
-          typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-            ? Math.trunc(input.sortOrder)
-            : 0;
+      case "family":
         row = await prisma.lensFamily.create({
           data: { code, name, sortOrder, isActive },
         });
         break;
-      }
-      case "base": {
-        const code = normalizeCode(input.code);
-        const name = normalizeName(input.name);
-        if (!code || !name) {
-          throw new LensAttributeServiceError("code and name are required.");
-        }
-        const sortOrder =
-          typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-            ? Math.trunc(input.sortOrder)
-            : 0;
+      case "base":
         row = await prisma.lensBase.create({
           data: { code, name, sortOrder, isActive },
         });
         break;
-      }
-      case "material": {
-        const code = normalizeCode(input.code);
-        const name = normalizeName(input.name);
-        if (!code || !name) {
-          throw new LensAttributeServiceError("code and name are required.");
-        }
-        const sortOrder =
-          typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-            ? Math.trunc(input.sortOrder)
-            : 0;
+      case "material":
         row = await prisma.lensMaterial.create({
           data: { code, name, sortOrder, isActive },
         });
         break;
-      }
       case "index": {
-        const code = normalizeCode(input.code);
-        const name = normalizeName(input.name);
-        if (!code || !name) {
-          throw new LensAttributeServiceError("code and name are required.");
-        }
-        const sortOrder =
-          typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-            ? Math.trunc(input.sortOrder)
-            : 0;
         const value =
           input.value != null && Number.isFinite(input.value)
             ? new Prisma.Decimal(input.value)
@@ -269,84 +148,16 @@ export async function createLensAttribute(
         });
         break;
       }
-      case "coating": {
-        const code = normalizeCode(input.code);
-        const name = normalizeName(input.name);
-        if (!code || !name) {
-          throw new LensAttributeServiceError("code and name are required.");
-        }
-        const sortOrder =
-          typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-            ? Math.trunc(input.sortOrder)
-            : 0;
+      case "coating":
         row = await prisma.lensCoating.create({
           data: { code, name, sortOrder, isActive },
         });
         break;
-      }
-      case "color": {
-        const code = normalizeCode(input.code);
-        const name = normalizeName(input.name);
-        if (!code || !name) {
-          throw new LensAttributeServiceError("code and name are required.");
-        }
-        const sortOrder =
-          typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-            ? Math.trunc(input.sortOrder)
-            : 0;
+      case "color":
         row = await prisma.lensColor.create({
           data: { code, name, sortOrder, isActive },
         });
         break;
-      }
-      case "axis": {
-        const resolved = resolveNumericCreate("axis", input);
-        row = await prisma.lensAxis.create({
-          data: {
-            code: resolved.code,
-            name: resolved.name,
-            value: resolved.value,
-            sortOrder:
-              typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-                ? Math.trunc(input.sortOrder)
-                : resolved.sortOrder,
-            isActive,
-          },
-        });
-        break;
-      }
-      case "addition": {
-        const resolved = resolveNumericCreate("addition", input);
-        row = await prisma.lensAddition.create({
-          data: {
-            code: resolved.code,
-            name: resolved.name,
-            value: resolved.value,
-            sortOrder:
-              typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-                ? Math.trunc(input.sortOrder)
-                : resolved.sortOrder,
-            isActive,
-          },
-        });
-        break;
-      }
-      case "diameter": {
-        const resolved = resolveNumericCreate("diameter", input);
-        row = await prisma.lensDiameter.create({
-          data: {
-            code: resolved.code,
-            name: resolved.name,
-            value: resolved.value,
-            sortOrder:
-              typeof input.sortOrder === "number" && Number.isFinite(input.sortOrder)
-                ? Math.trunc(input.sortOrder)
-                : resolved.sortOrder,
-            isActive,
-          },
-        });
-        break;
-      }
     }
 
     await recordAuditEvent(prisma, {
@@ -359,19 +170,18 @@ export async function createLensAttribute(
         actorUserId: input.actorUserId,
         actorName: null,
       },
-      context: { event: "LENS_ATTRIBUTE_CREATED", type, code: row.code, name: row.name },
-      activityMessage: `Catalog attribute ${type} created: ${row.code}`,
+      context: { event: "LENS_ATTRIBUTE_CREATED", type, code, name },
+      activityMessage: `Catalog attribute ${type} created: ${code}`,
     });
 
     return serializeAttribute(row);
   } catch (err) {
-    if (err instanceof LensAttributeServiceError) throw err;
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
       throw new LensAttributeServiceError(
-        `Attribute code already exists.`,
+        `Attribute code "${code}" already exists.`,
         409,
         "DUPLICATE_CODE"
       );
@@ -397,7 +207,7 @@ export async function updateLensAttribute(
     name?: string;
     sortOrder?: number;
     isActive?: boolean;
-    value?: Prisma.Decimal | number | null;
+    value?: Prisma.Decimal | null;
   } = {};
 
   if (input.code != null) {
@@ -417,42 +227,11 @@ export async function updateLensAttribute(
     data.sortOrder = Math.trunc(input.sortOrder);
   }
   if (input.isActive != null) data.isActive = Boolean(input.isActive);
-
   if (type === "index" && input.value !== undefined) {
     data.value =
       input.value != null && Number.isFinite(input.value)
         ? new Prisma.Decimal(input.value)
         : null;
-  }
-  if (type === "axis" && input.value !== undefined) {
-    if (input.value == null || !isAllowedAxisValue(Math.trunc(input.value))) {
-      throw new LensAttributeServiceError(
-        "Axis must be 10…180 step 10, or 45 / 135.",
-        400,
-        "INVALID_AXIS"
-      );
-    }
-    data.value = Math.trunc(input.value);
-  }
-  if (type === "addition" && input.value !== undefined) {
-    if (input.value == null || !isAllowedAdditionValue(Number(input.value))) {
-      throw new LensAttributeServiceError(
-        "Addition must be 0 or 0.25…6.00 step 0.25.",
-        400,
-        "INVALID_ADDITION"
-      );
-    }
-    data.value = Number(Number(input.value).toFixed(2));
-  }
-  if (type === "diameter" && input.value !== undefined) {
-    if (input.value == null || !isAllowedDiameterValue(Math.trunc(input.value))) {
-      throw new LensAttributeServiceError(
-        "Diameter must be 55…120 step 5 (mm).",
-        400,
-        "INVALID_DIAMETER"
-      );
-    }
-    data.value = Math.trunc(input.value);
   }
 
   if (Object.keys(data).length === 0) {
@@ -463,89 +242,22 @@ export async function updateLensAttribute(
     let row: AttributeRow;
     switch (type) {
       case "family":
-        row = await prisma.lensFamily.update({
-          where: { id },
-          data: {
-            code: data.code,
-            name: data.name,
-            sortOrder: data.sortOrder,
-            isActive: data.isActive,
-          },
-        });
+        row = await prisma.lensFamily.update({ where: { id }, data });
         break;
       case "base":
-        row = await prisma.lensBase.update({ where: { id }, data: data as never });
+        row = await prisma.lensBase.update({ where: { id }, data });
         break;
       case "material":
-        row = await prisma.lensMaterial.update({
-          where: { id },
-          data: data as never,
-        });
+        row = await prisma.lensMaterial.update({ where: { id }, data });
         break;
       case "index":
-        row = await prisma.lensIndex.update({
-          where: { id },
-          data: {
-            code: data.code,
-            name: data.name,
-            sortOrder: data.sortOrder,
-            isActive: data.isActive,
-            value:
-              data.value === undefined
-                ? undefined
-                : data.value == null
-                  ? null
-                  : new Prisma.Decimal(data.value as number),
-          },
-        });
+        row = await prisma.lensIndex.update({ where: { id }, data });
         break;
       case "coating":
-        row = await prisma.lensCoating.update({
-          where: { id },
-          data: data as never,
-        });
+        row = await prisma.lensCoating.update({ where: { id }, data });
         break;
       case "color":
-        row = await prisma.lensColor.update({ where: { id }, data: data as never });
-        break;
-      case "axis":
-        row = await prisma.lensAxis.update({
-          where: { id },
-          data: {
-            code: data.code,
-            name: data.name,
-            sortOrder: data.sortOrder,
-            isActive: data.isActive,
-            value: data.value === undefined ? undefined : (data.value as number),
-          },
-        });
-        break;
-      case "addition":
-        row = await prisma.lensAddition.update({
-          where: { id },
-          data: {
-            code: data.code,
-            name: data.name,
-            sortOrder: data.sortOrder,
-            isActive: data.isActive,
-            value:
-              data.value === undefined
-                ? undefined
-                : new Prisma.Decimal(data.value as number),
-          },
-        });
-        break;
-      case "diameter":
-        row = await prisma.lensDiameter.update({
-          where: { id },
-          data: {
-            code: data.code,
-            name: data.name,
-            sortOrder: data.sortOrder,
-            isActive: data.isActive,
-            value: data.value === undefined ? undefined : (data.value as number),
-          },
-        });
+        row = await prisma.lensColor.update({ where: { id }, data });
         break;
     }
 
@@ -565,7 +277,6 @@ export async function updateLensAttribute(
 
     return serializeAttribute(row);
   } catch (err) {
-    if (err instanceof LensAttributeServiceError) throw err;
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2025"

@@ -29,18 +29,6 @@ function parsePowerRangeIds(body: unknown): string[] {
   return [];
 }
 
-function parseAxisIds(body: unknown): string[] {
-  if (!body || typeof body !== "object") return [];
-  const raw = (body as { axisIds?: unknown }).axisIds;
-  if (!Array.isArray(raw)) return [];
-  return raw.map((id) => String(id ?? "").trim()).filter(Boolean);
-}
-
-function optionalId(value: unknown): string | null {
-  if (value == null || value === "") return null;
-  return String(value);
-}
-
 // GET /api/admin/catalog/lens-products?view=flat|grouped
 export async function GET(req: NextRequest) {
   const auth = requireAdmin(req);
@@ -89,27 +77,26 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const powerRangeIds = parsePowerRangeIds(body);
-    const axisIds = parseAxisIds(body);
-    const parentFields = {
-      familyId: String(body.familyId ?? ""),
-      baseId: String(body.baseId ?? ""),
-      materialId: optionalId(body.materialId),
-      indexId: optionalId(body.indexId),
-      colorId: optionalId(body.colorId),
-      additionId: optionalId(body.additionId),
-      diameterId: optionalId(body.diameterId),
-      eye: body.eye != null && body.eye !== "" ? String(body.eye) : null,
-      powerRangeIds,
-      axisIds,
-    };
 
     if (body?.preview === true) {
-      const preview = await previewLensProductVariants(parentFields);
+      const preview = await previewLensProductVariants({
+        familyId: String(body.familyId ?? ""),
+        baseId: String(body.baseId ?? ""),
+        materialId: body.materialId ? String(body.materialId) : null,
+        indexId: body.indexId ? String(body.indexId) : null,
+        colorId: body.colorId ? String(body.colorId) : null,
+        powerRangeIds,
+      });
       return NextResponse.json({ preview });
     }
 
     const product = await createLensProduct({
-      ...parentFields,
+      familyId: String(body.familyId ?? ""),
+      baseId: String(body.baseId ?? ""),
+      materialId: body.materialId ? String(body.materialId) : null,
+      indexId: body.indexId ? String(body.indexId) : null,
+      colorId: body.colorId ? String(body.colorId) : null,
+      powerRangeIds,
       defaultPrice: body.defaultPrice != null ? Number(body.defaultPrice) : null,
       isActive: body.isActive,
       actorUserId: auth.session.userId,
