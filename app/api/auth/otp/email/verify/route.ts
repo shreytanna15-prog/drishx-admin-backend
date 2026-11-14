@@ -6,35 +6,22 @@ import {
 } from "../../../../../lib/audit";
 import { jsonError } from "../../../../../lib/auth-errors";
 import { prisma, withDbRetry } from "../../../../../lib/prisma";
-import {
-  normalizeEmail,
-  parseOtpPurpose,
-  verifyOtpChallenge,
-} from "../../../../../lib/otp";
+import { verifyOtpChallenge } from "../../../../../lib/otp";
 import { isPlaceholderOtpEmail } from "../../../../../lib/otp/signup-from-mobile";
 import { getSession } from "../../../../../lib/session-auth";
 import { toSafeUser } from "../../../../../lib/user-public";
+import { emailOtpVerifyBodySchema } from "../../../../../lib/validation/otp";
+import { parseOrError } from "../../../../../lib/validation/parse";
 
 export async function POST(req: NextRequest) {
   const auditCtx = buildAuditRequestContext(req);
   try {
     const body = await req.json();
-    const purpose = parseOtpPurpose(body.purpose) ?? "VERIFY_EMAIL";
-    const email = normalizeEmail(String(body.email ?? ""));
-    const code = String(body.code ?? "").trim();
-    const providerSessionId =
-      body.sessionId != null
-        ? String(body.sessionId)
-        : body.providerSessionId != null
-          ? String(body.providerSessionId)
-          : null;
-
-    if (!email) {
-      return jsonError("OTP_INVALID", "Enter a valid email address.", 400);
+    const parsed = parseOrError(emailOtpVerifyBodySchema, body);
+    if (!parsed.ok) {
+      return jsonError("OTP_INVALID", parsed.error, 400);
     }
-    if (!code) {
-      return jsonError("OTP_INVALID", "OTP code is required.", 400);
-    }
+    const { purpose, email, code, providerSessionId } = parsed.data;
 
     const verified = await verifyOtpChallenge({
       channel: "EMAIL",

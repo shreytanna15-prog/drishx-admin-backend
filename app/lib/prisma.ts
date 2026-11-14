@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool, type PoolConfig } from "pg";
+import { getEnv } from "./env";
 
 const globalForPrisma = globalThis as typeof globalThis & {
   prisma?: PrismaClient;
@@ -73,7 +74,7 @@ function createPgPool(rawUrl: string): Pool {
   );
 
   const defaultMax = isSupabase ? 2 : 5;
-  const max = Number(process.env.DATABASE_POOL_MAX ?? defaultMax);
+  const max = Number(getEnv().DATABASE_POOL_MAX ?? defaultMax);
 
   const nextPool = new Pool({
     ...base,
@@ -92,12 +93,7 @@ function createPgPool(rawUrl: string): Pool {
   return nextPool;
 }
 
-const rawDatabaseUrl = process.env.DATABASE_URL?.trim();
-if (!rawDatabaseUrl) {
-  throw new Error(
-    "DATABASE_URL is missing. Add it to Drishx-admin-and-backend/.env and restart the server."
-  );
-}
+const rawDatabaseUrl = getEnv().DATABASE_URL;
 
 const poolKey = normalizeDatabaseUrl(rawDatabaseUrl);
 
@@ -125,7 +121,7 @@ const pool = globalForPrisma.pgPool ?? createPgPool(rawDatabaseUrl);
 const adapter = new PrismaPg(pool);
 export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
 
-if (process.env.NODE_ENV !== "production") {
+if (getEnv().NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
   globalForPrisma.pgPool = pool;
   globalForPrisma.pgPoolKey = poolKey;

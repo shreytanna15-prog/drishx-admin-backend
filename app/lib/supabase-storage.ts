@@ -1,13 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomBytes } from "crypto";
+import { getEnv } from "./env";
 
 function normalizeSupabaseUrl(raw: string) {
   return raw.replace(/\/rest\/v1\/?$/i, "").replace(/\/+$/, "");
 }
 
 export function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL?.trim();
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const env = getEnv();
+  const url = env.SUPABASE_URL;
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !serviceKey) {
     throw new Error(
@@ -21,7 +23,7 @@ export function getSupabaseAdmin() {
 }
 
 export function getOrderImagesBucket(): string {
-  return process.env.SUPABASE_ORDER_IMAGES_BUCKET?.trim() || "order-images";
+  return getEnv().SUPABASE_ORDER_IMAGES_BUCKET || "order-images";
 }
 
 /** Build a public object URL for a path inside the order-images bucket. */

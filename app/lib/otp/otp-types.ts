@@ -1,26 +1,9 @@
+import type { OtpPurpose } from "../validation/otp";
+
 export type OtpChannel = "MOBILE" | "EMAIL";
 
-export type OtpPurpose =
-  | "SIGNUP"
-  | "LOGIN"
-  | "VERIFY_EMAIL"
-  | "WALK_IN"
-  | "ADMIN_INVITE";
-
-export const OTP_PURPOSES = [
-  "SIGNUP",
-  "LOGIN",
-  "VERIFY_EMAIL",
-  "WALK_IN",
-  "ADMIN_INVITE",
-] as const;
-
-export function parseOtpPurpose(value: unknown): OtpPurpose | null {
-  const s = String(value ?? "").trim().toUpperCase();
-  return (OTP_PURPOSES as readonly string[]).includes(s)
-    ? (s as OtpPurpose)
-    : null;
-}
+export type { OtpPurpose } from "../validation/otp";
+export { OTP_PURPOSES, parseOtpPurpose } from "../validation/otp";
 
 export type OtpSendResult = {
   provider: string;

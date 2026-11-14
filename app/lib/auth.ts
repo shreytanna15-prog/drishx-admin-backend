@@ -6,6 +6,7 @@ import {
   decideRevokedRefreshPresentation,
   type RotateRefreshResult,
 } from "./auth-refresh-policy";
+import { getEnv } from "./env";
 import { prisma } from "./prisma";
 
 export {
@@ -16,8 +17,9 @@ export {
   type RotateRefreshResult,
 } from "./auth-refresh-policy";
 
-const JWT_SECRET = process.env.JWT_SECRET;
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET ?? process.env.JWT_SECRET;
+function jwtSecret(): string {
+  return getEnv().JWT_SECRET;
+}
 
 export const ACCESS_TOKEN_EXPIRY = "15m";
 export const REFRESH_TOKEN_DAYS = 30;
@@ -38,12 +40,8 @@ export type VerifyAccessResult =
   | { ok: false; code: "TOKEN_EXPIRED" | "TOKEN_INVALID" };
 
 function requireSecrets() {
-  if (!JWT_SECRET) {
-    throw new Error("JWT_SECRET environment variable is required.");
-  }
-  if (!REFRESH_TOKEN_SECRET) {
-    throw new Error("REFRESH_TOKEN_SECRET or JWT_SECRET environment variable is required.");
-  }
+  // getEnv() throws if JWT_SECRET / DATABASE_URL are missing.
+  void getEnv();
 }
 
 export async function hashPassword(password: string) {
@@ -58,7 +56,7 @@ export function signAccessToken(payload: SessionPayload) {
   requireSecrets();
   return jwt.sign(
     { userId: payload.userId, role: payload.role, typ: "access" as const },
-    JWT_SECRET!,
+    jwtSecret(),
     { expiresIn: ACCESS_TOKEN_EXPIRY }
   );
 }
@@ -71,7 +69,7 @@ export function signToken(payload: SessionPayload) {
 export function verifyAccessToken(token: string): VerifyAccessResult {
   requireSecrets();
   try {
-    const decoded = jwt.verify(token, JWT_SECRET!) as AccessTokenPayload & SessionPayload;
+    const decoded = jwt.verify(token, jwtSecret()) as AccessTokenPayload & SessionPayload;
     if (decoded.typ && decoded.typ !== "access") {
       return { ok: false, code: "TOKEN_INVALID" };
     }
@@ -259,12 +257,12 @@ export async function revokeRefreshToken(rawToken: string) {
 
 export function buildRefreshCookie(rawToken: string, expiresAt: Date) {
   const maxAge = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = getEnv().NODE_ENV === "production" ? "; Secure" : "";
   return `${REFRESH_COOKIE_NAME}=${rawToken}; HttpOnly${secure}; SameSite=Lax; Path=/api/auth; Max-Age=${maxAge}`;
 }
 
 export function clearRefreshCookie() {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = getEnv().NODE_ENV === "production" ? "; Secure" : "";
   return `${REFRESH_COOKIE_NAME}=; HttpOnly${secure}; SameSite=Lax; Path=/api/auth; Max-Age=0`;
 }
 
