@@ -12,6 +12,8 @@ import {
   setSession,
   type AuthUser,
 } from "../lib/client-auth";
+import { authLoginBodySchema } from "../lib/validation/auth-login";
+import { parseOrError } from "../lib/validation/parse";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -47,6 +49,13 @@ export default function LoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+
+    const parsed = parseOrError(authLoginBodySchema, { email, password });
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -54,7 +63,10 @@ export default function LoginPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({
+          email: parsed.data.email,
+          password: parsed.data.password,
+        }),
       });
 
       const data = (await res.json()) as {
@@ -148,7 +160,7 @@ export default function LoginPage() {
             Sign in with your admin credentials to continue.
           </p>
 
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} noValidate>
             {error ? (
               <div className="auth-alert-error" role="alert">
                 {error}
@@ -163,7 +175,6 @@ export default function LoginPage() {
                 id="email"
                 type="email"
                 autoComplete="email"
-                required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="auth-input"
@@ -180,7 +191,6 @@ export default function LoginPage() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
-                  required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="auth-input auth-input--with-action"

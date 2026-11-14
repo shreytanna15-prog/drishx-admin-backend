@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import { getEnv } from "./env";
 
 /** Constant-time string comparison that tolerates differing lengths. */
 function safeEqual(a: string, b: string): boolean {
@@ -25,7 +26,7 @@ function safeEqual(a: string, b: string): boolean {
  * Returns `null` when the request is authorised, otherwise the error response.
  */
 export function authorizeCronRequest(req: NextRequest): NextResponse | null {
-  const secret = process.env.CRON_SECRET?.trim();
+  const secret = getEnv().CRON_SECRET;
   if (!secret) {
     console.error(
       "CRON_SECRET is not configured — refusing to run the cron endpoint."
