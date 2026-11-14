@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import {
-  AxisMultiSelect,
   CatalogSelectField,
   PowerRangeMultiSelect,
 } from "@/components/catalog/catalog-field";
@@ -45,8 +44,7 @@ function toOptions(
 ): AdminSelectOption[] {
   const opts = items.map((a) => ({
     value: a.id,
-    label:
-      a.value != null ? `${a.name} (${a.value})` : `${a.code} — ${a.name}`,
+    label: `${a.code} — ${a.name}`,
   }));
   return emptyLabel ? [{ value: "", label: emptyLabel }, ...opts] : opts;
 }
@@ -60,9 +58,6 @@ export default function NewLensProductPage() {
   const [materials, setMaterials] = useState<LensAttribute[]>([]);
   const [indexes, setIndexes] = useState<LensAttribute[]>([]);
   const [colors, setColors] = useState<LensAttribute[]>([]);
-  const [axes, setAxes] = useState<LensAttribute[]>([]);
-  const [additions, setAdditions] = useState<LensAttribute[]>([]);
-  const [diameters, setDiameters] = useState<LensAttribute[]>([]);
   const [allowedMaterialIds, setAllowedMaterialIds] = useState<Set<string>>(
     new Set()
   );
@@ -73,11 +68,7 @@ export default function NewLensProductPage() {
   const [materialId, setMaterialId] = useState("");
   const [indexId, setIndexId] = useState("");
   const [colorId, setColorId] = useState("");
-  const [additionId, setAdditionId] = useState("");
-  const [diameterId, setDiameterId] = useState("");
-  const [eye, setEye] = useState("");
   const [powerRangeIds, setPowerRangeIds] = useState<string[]>([]);
-  const [axisIds, setAxisIds] = useState<string[]>([]);
   const [defaultPrice, setDefaultPrice] = useState("");
   const [preview, setPreview] = useState<{
     baseCode: string;
@@ -85,14 +76,6 @@ export default function NewLensProductPage() {
     variants: VariantPreview[];
   } | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-
-  const selectedFamily = useMemo(
-    () => families.find((f) => f.id === familyId) ?? null,
-    [families, familyId]
-  );
-  const supportsAxis = Boolean(selectedFamily?.supportsAxis);
-  const supportsAdd = Boolean(selectedFamily?.supportsAdd);
-  const supportsEye = Boolean(selectedFamily?.supportsEye);
 
   const {
     data: powerRangeData,
@@ -108,24 +91,18 @@ export default function NewLensProductPage() {
     void (async () => {
       setAttrsLoading(true);
       try {
-        const [f, b, m, i, col, ax, add, dia] = await Promise.all([
+        const [f, b, m, i, col] = await Promise.all([
           fetchLensAttributes("family", { activeOnly: true }),
           fetchLensAttributes("base", { activeOnly: true }),
           fetchLensAttributes("material", { activeOnly: true }),
           fetchLensAttributes("index", { activeOnly: true }),
           fetchLensAttributes("color", { activeOnly: true }),
-          fetchLensAttributes("axis", { activeOnly: true }),
-          fetchLensAttributes("addition", { activeOnly: true }),
-          fetchLensAttributes("diameter", { activeOnly: true }),
         ]);
         setFamilies(f.items);
         setBases(b.items);
         setMaterials(m.items);
         setIndexes(i.items);
         setColors(col.items);
-        setAxes(ax.items);
-        setAdditions(add.items);
-        setDiameters(dia.items);
       } catch (err) {
         setError(errorMessage(err, "Failed to load attributes."));
       } finally {
@@ -158,12 +135,6 @@ export default function NewLensProductPage() {
     }
   }, [allowedMaterialIds, materialId]);
 
-  useEffect(() => {
-    if (!supportsAxis) setAxisIds([]);
-    if (!supportsAdd) setAdditionId("");
-    if (!supportsEye) setEye("");
-  }, [supportsAxis, supportsAdd, supportsEye]);
-
   const materialOptions = useMemo(() => {
     const filtered =
       allowedMaterialIds.size > 0
@@ -191,11 +162,7 @@ export default function NewLensProductPage() {
             materialId: materialId || null,
             indexId: indexId || null,
             colorId: colorId || null,
-            additionId: additionId || null,
-            diameterId: diameterId || null,
-            eye: eye || null,
             powerRangeIds,
-            axisIds: supportsAxis ? axisIds : [],
           });
           if (!cancelled) setPreview(res.preview);
         } catch {
@@ -209,20 +176,7 @@ export default function NewLensProductPage() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [
-    canPreview,
-    familyId,
-    baseId,
-    materialId,
-    indexId,
-    colorId,
-    additionId,
-    diameterId,
-    eye,
-    powerRangeIds,
-    axisIds,
-    supportsAxis,
-  ]);
+  }, [canPreview, familyId, baseId, materialId, indexId, colorId, powerRangeIds]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -243,11 +197,7 @@ export default function NewLensProductPage() {
         materialId: materialId || null,
         indexId: indexId || null,
         colorId: colorId || null,
-        additionId: additionId || null,
-        diameterId: diameterId || null,
-        eye: eye || null,
         powerRangeIds,
-        axisIds: supportsAxis ? axisIds : [],
         defaultPrice: defaultPrice.trim() ? Number(defaultPrice) : null,
       });
       router.push(`${CATALOG_HREF}/${res.product.id}`);
@@ -261,7 +211,7 @@ export default function NewLensProductPage() {
   return (
     <AdminPage
       title="New product"
-      subtitle="Pick attributes once, then power ranges (and optional axes) → variants"
+      subtitle="Pick attributes once, then one or more power ranges → variants"
     >
       <div className="mx-auto w-full max-w-4xl">
       <div className="mb-4">
@@ -328,38 +278,6 @@ export default function NewLensProductPage() {
             disabled={attrsLoading}
             placeholder="Optional"
           />
-          <CatalogSelectField
-            label="Diameter"
-            value={diameterId}
-            onValueChange={setDiameterId}
-            options={toOptions(diameters, "None (optional)")}
-            disabled={attrsLoading}
-            placeholder="Optional"
-          />
-          {supportsAdd ? (
-            <CatalogSelectField
-              label="Addition"
-              value={additionId}
-              onValueChange={setAdditionId}
-              options={toOptions(additions, "None (optional)")}
-              disabled={attrsLoading}
-              placeholder="Optional"
-            />
-          ) : null}
-          {supportsEye ? (
-            <CatalogSelectField
-              label="Eye"
-              value={eye}
-              onValueChange={setEye}
-              options={[
-                { value: "", label: "None (optional)" },
-                { value: "LEFT", label: "LEFT" },
-                { value: "RIGHT", label: "RIGHT" },
-              ]}
-              disabled={attrsLoading}
-              placeholder="Optional"
-            />
-          ) : null}
           <label className="grid gap-1.5">
             <span className={catalogLabelClass}>Default price (₹)</span>
             <Input
@@ -387,18 +305,6 @@ export default function NewLensProductPage() {
           onChange={setPowerRangeIds}
           disabled={powerRangesLoading}
         />
-
-        {supportsAxis ? (
-          <AxisMultiSelect
-            options={axes.map((a) => ({
-              id: a.id,
-              label: a.name || String(a.value ?? a.code),
-            }))}
-            selectedIds={axisIds}
-            onChange={setAxisIds}
-            disabled={attrsLoading}
-          />
-        ) : null}
 
         <div className="grid gap-2">
           <span className={catalogLabelClass}>

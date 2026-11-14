@@ -61,17 +61,14 @@ const parentInclude = {
   material: true,
   index: true,
   color: true,
-  addition: true,
-  diameter: true,
   variants: {
-    include: { powerRange: true, axisRef: true },
+    include: { powerRange: true },
     orderBy: [{ updatedAt: "desc" as const }],
   },
 } satisfies Prisma.LensProductInclude;
 
 const variantInclude = {
   powerRange: true,
-  axisRef: true,
   product: {
     include: {
       family: true,
@@ -79,8 +76,6 @@ const variantInclude = {
       material: true,
       index: true,
       color: true,
-      addition: true,
-      diameter: true,
     },
   },
 } satisfies Prisma.LensProductVariantInclude;
@@ -125,46 +120,6 @@ function serializePowerRange(pr: {
   };
 }
 
-function familyRef(family: {
-  id: string;
-  code: string;
-  name: string;
-  supportsAxis: boolean;
-  supportsAdd: boolean;
-  supportsEye: boolean;
-}) {
-  return {
-    ...attrRef(family),
-    supportsAxis: family.supportsAxis,
-    supportsAdd: family.supportsAdd,
-    supportsEye: family.supportsEye,
-  };
-}
-
-function parentAttributeSummary(p: {
-  family: { code: string };
-  base: { code: string };
-  material?: { code: string } | null;
-  index?: { code: string } | null;
-  color?: { code: string } | null;
-  addition?: { code: string } | null;
-  diameter?: { code: string } | null;
-  eye?: string | null;
-}) {
-  return [
-    p.family.code,
-    p.base.code,
-    p.material?.code,
-    p.index?.code,
-    p.color?.code,
-    p.addition?.code,
-    p.diameter?.code,
-    p.eye,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 export function serializeLensProductVariant(row: VariantRow) {
   const p = row.product;
   const sphMin = Number(row.sphMin);
@@ -175,7 +130,6 @@ export function serializeLensProductVariant(row: VariantRow) {
     id: row.id,
     productId: row.productId,
     powerRangeId: row.powerRangeId,
-    axisId: row.axisId,
     skuCode: row.skuCode,
     name: row.name,
     rangeType: row.rangeType,
@@ -192,7 +146,6 @@ export function serializeLensProductVariant(row: VariantRow) {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     powerRange: serializePowerRange(row.powerRange),
-    axisRef: row.axisRef ? attrRef(row.axisRef) : null,
     rangeLabel: formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax),
     rangeSummary: formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax),
     product: {
@@ -203,10 +156,7 @@ export function serializeLensProductVariant(row: VariantRow) {
       materialId: p.materialId,
       indexId: p.indexId,
       colorId: p.colorId,
-      additionId: p.additionId,
-      diameterId: p.diameterId,
-      eye: p.eye,
-      family: familyRef(p.family),
+      family: attrRef(p.family),
       base: attrRef(p.base),
       material: p.material ? attrRef(p.material) : null,
       index: p.index
@@ -216,13 +166,15 @@ export function serializeLensProductVariant(row: VariantRow) {
           }
         : null,
       color: p.color ? attrRef(p.color) : null,
-      addition: p.addition
-        ? { ...attrRef(p.addition), value: num(p.addition.value) }
-        : null,
-      diameter: p.diameter
-        ? { ...attrRef(p.diameter), value: p.diameter.value }
-        : null,
-      attributeSummary: parentAttributeSummary(p),
+      attributeSummary: [
+        p.family.code,
+        p.base.code,
+        p.material?.code,
+        p.index?.code,
+        p.color?.code,
+      ]
+        .filter(Boolean)
+        .join(" · "),
     },
   };
 }
@@ -236,26 +188,25 @@ export function serializeLensProduct(row: ParentRow) {
     materialId: row.materialId,
     indexId: row.indexId,
     colorId: row.colorId,
-    additionId: row.additionId,
-    diameterId: row.diameterId,
-    eye: row.eye,
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    family: familyRef(row.family),
+    family: attrRef(row.family),
     base: attrRef(row.base),
     material: row.material ? attrRef(row.material) : null,
     index: row.index
       ? { ...attrRef(row.index), value: num(row.index.value) }
       : null,
     color: row.color ? attrRef(row.color) : null,
-    addition: row.addition
-      ? { ...attrRef(row.addition), value: num(row.addition.value) }
-      : null,
-    diameter: row.diameter
-      ? { ...attrRef(row.diameter), value: row.diameter.value }
-      : null,
-    attributeSummary: parentAttributeSummary(row),
+    attributeSummary: [
+      row.family.code,
+      row.base.code,
+      row.material?.code,
+      row.index?.code,
+      row.color?.code,
+    ]
+      .filter(Boolean)
+      .join(" · "),
     variantCount: row.variants.length,
     variants: row.variants.map((v) =>
       serializeLensProductVariant({
@@ -268,9 +219,6 @@ export function serializeLensProduct(row: ParentRow) {
           materialId: row.materialId,
           indexId: row.indexId,
           colorId: row.colorId,
-          additionId: row.additionId,
-          diameterId: row.diameterId,
-          eye: row.eye,
           isActive: row.isActive,
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
@@ -279,8 +227,6 @@ export function serializeLensProduct(row: ParentRow) {
           material: row.material,
           index: row.index,
           color: row.color,
-          addition: row.addition,
-          diameter: row.diameter,
         },
       } as VariantRow)
     ),
@@ -319,81 +265,34 @@ function requireId(label: string, value: string | null | undefined): string {
   return v;
 }
 
-type ParentEye = "LEFT" | "RIGHT";
-
 type ParentAttrs = {
   familyId: string;
   baseId: string;
   materialId: string | null;
   indexId: string | null;
   colorId: string | null;
-  additionId: string | null;
-  diameterId: string | null;
-  eye: ParentEye | null;
 };
-
-type CodeParts = {
-  familyCode: string;
-  baseCode: string;
-  materialCode?: string | null;
-  indexCode?: string | null;
-  colorCode?: string | null;
-  colorLabel?: string | null;
-  additionCode?: string | null;
-  diameterCode?: string | null;
-  eye?: ParentEye | null;
-};
-
-function normalizeEye(value: string | null | undefined): ParentEye | null {
-  const v = value?.trim().toUpperCase();
-  if (v === "LEFT" || v === "RIGHT") return v;
-  if (!v) return null;
-  throw new LensProductServiceError(
-    "Eye must be LEFT or RIGHT.",
-    400,
-    "INVALID_EYE"
-  );
-}
-
-function normalizeIdList(ids: string[] | null | undefined): string[] {
-  return [
-    ...new Set(
-      (ids ?? [])
-        .map((id) => id?.trim())
-        .filter((id): id is string => Boolean(id))
-    ),
-  ];
-}
 
 async function loadParentAttrs(ids: ParentAttrs) {
-  const [family, base, material, indexRow, color, addition, diameter] =
-    await Promise.all([
-      prisma.lensFamily.findUnique({ where: { id: ids.familyId } }),
-      prisma.lensBase.findUnique({ where: { id: ids.baseId } }),
-      ids.materialId
-        ? prisma.lensMaterial.findUnique({ where: { id: ids.materialId } })
-        : Promise.resolve(null),
-      ids.indexId
-        ? prisma.lensIndex.findUnique({ where: { id: ids.indexId } })
-        : Promise.resolve(null),
-      ids.colorId
-        ? prisma.lensColor.findUnique({ where: { id: ids.colorId } })
-        : Promise.resolve(null),
-      ids.additionId
-        ? prisma.lensAddition.findUnique({ where: { id: ids.additionId } })
-        : Promise.resolve(null),
-      ids.diameterId
-        ? prisma.lensDiameter.findUnique({ where: { id: ids.diameterId } })
-        : Promise.resolve(null),
-    ]);
+  const [family, base, material, indexRow, color] = await Promise.all([
+    prisma.lensFamily.findUnique({ where: { id: ids.familyId } }),
+    prisma.lensBase.findUnique({ where: { id: ids.baseId } }),
+    ids.materialId
+      ? prisma.lensMaterial.findUnique({ where: { id: ids.materialId } })
+      : Promise.resolve(null),
+    ids.indexId
+      ? prisma.lensIndex.findUnique({ where: { id: ids.indexId } })
+      : Promise.resolve(null),
+    ids.colorId
+      ? prisma.lensColor.findUnique({ where: { id: ids.colorId } })
+      : Promise.resolve(null),
+  ]);
 
   await assertActiveFk("Family", ids.familyId, async () => family);
   await assertActiveFk("Base", ids.baseId, async () => base);
   await assertActiveFk("Material", ids.materialId, async () => material);
   await assertActiveFk("Index", ids.indexId, async () => indexRow);
   await assertActiveFk("Color", ids.colorId, async () => color);
-  await assertActiveFk("Addition", ids.additionId, async () => addition);
-  await assertActiveFk("Diameter", ids.diameterId, async () => diameter);
 
   if (!family || !base) {
     throw new LensProductServiceError("Attribute not found.", 400, "INVALID_FK");
@@ -407,53 +306,21 @@ async function loadParentAttrs(ids: ParentAttrs) {
   if (ids.colorId && !color) {
     throw new LensProductServiceError("Color not found.", 400, "INVALID_FK");
   }
-  if (ids.additionId && !addition) {
-    throw new LensProductServiceError("Addition not found.", 400, "INVALID_FK");
-  }
-  if (ids.diameterId && !diameter) {
-    throw new LensProductServiceError("Diameter not found.", 400, "INVALID_FK");
-  }
   if (ids.materialId) {
     await ensureBaseMaterialCompat(ids.baseId, ids.materialId);
   }
 
-  if (ids.additionId && !family.supportsAdd) {
-    throw new LensProductServiceError(
-      "Addition is not allowed for this family.",
-      400,
-      "FAMILY_CAPABILITY"
-    );
-  }
-  if (ids.eye && !family.supportsEye) {
-    throw new LensProductServiceError(
-      "Eye is not allowed for this family.",
-      400,
-      "FAMILY_CAPABILITY"
-    );
-  }
-
-  const codeParts: CodeParts = {
+  const codeParts = {
     familyCode: family.code,
     baseCode: base.code,
     materialCode: material?.code ?? null,
     indexCode: indexRow?.code ?? null,
     colorCode: color?.code ?? null,
+    /** CLIENT-PLAN name uses display color (e.g. Green), not SKU token GREEN. */
     colorLabel: color ? color.name?.trim() || color.code : null,
-    additionCode: addition?.code ?? null,
-    diameterCode: diameter?.code ?? null,
-    eye: ids.eye,
   };
 
-  return {
-    family,
-    base,
-    material,
-    indexRow,
-    color,
-    addition,
-    diameter,
-    codeParts,
-  };
+  return { family, base, material, indexRow, color, codeParts };
 }
 
 async function findParentByAttrs(ids: ParentAttrs) {
@@ -464,9 +331,6 @@ async function findParentByAttrs(ids: ParentAttrs) {
       materialId: ids.materialId,
       indexId: ids.indexId,
       colorId: ids.colorId,
-      additionId: ids.additionId,
-      diameterId: ids.diameterId,
-      eye: ids.eye,
     },
     include: parentInclude,
   });
@@ -478,13 +342,8 @@ export type CreateLensProductInput = {
   materialId?: string | null;
   indexId?: string | null;
   colorId?: string | null;
-  additionId?: string | null;
-  diameterId?: string | null;
-  eye?: string | null;
   /** One or more active power-range masters → variants */
   powerRangeIds: string[];
-  /** Optional axes (multi); cartesian with power ranges */
-  axisIds?: string[];
   defaultPrice?: number | null;
   isActive?: boolean;
   actorUserId: string;
@@ -492,70 +351,19 @@ export type CreateLensProductInput = {
 
 export type PreviewVariant = {
   powerRangeId: string;
-  axisId: string | null;
-  axisLabel: string | null;
   skuCode: string;
   name: string;
   rangeLabel: string;
 };
 
-async function loadAxesForFamily(
-  family: { supportsAxis: boolean },
-  axisIds: string[]
-) {
-  if (axisIds.length === 0) {
-    return [] as Array<{ id: string; code: string; name: string; value: number }>;
-  }
-  if (!family.supportsAxis) {
-    throw new LensProductServiceError(
-      "Axis is not allowed for this family.",
-      400,
-      "FAMILY_CAPABILITY"
-    );
-  }
-  const axes = await prisma.lensAxis.findMany({
-    where: { id: { in: axisIds } },
-  });
-  if (axes.length !== axisIds.length) {
-    throw new LensProductServiceError(
-      "One or more axes were not found.",
-      400,
-      "INVALID_FK"
-    );
-  }
-  for (const axis of axes) {
-    await assertActiveFk("Axis", axis.id, async () => axis);
-  }
-  return axes;
-}
-
-type AxisSlot = { id: string | null; value: number | null; label: string | null };
-
-function axisSlotsFromRows(
-  axes: Array<{ id: string; value: number; name: string }>
-): AxisSlot[] {
-  if (axes.length === 0) {
-    return [{ id: null, value: null, label: null }];
-  }
-  return axes.map((a) => ({
-    id: a.id,
-    value: a.value,
-    label: a.name || String(a.value),
-  }));
-}
-
-/** Preview SKU/name for attrs + selected ranges × axes (no DB write). */
+/** Preview SKU/name for attrs + selected ranges (no DB write). */
 export async function previewLensProductVariants(input: {
   familyId: string;
   baseId: string;
   materialId?: string | null;
   indexId?: string | null;
   colorId?: string | null;
-  additionId?: string | null;
-  diameterId?: string | null;
-  eye?: string | null;
   powerRangeIds: string[];
-  axisIds?: string[];
 }): Promise<{
   baseCode: string;
   existingParentId: string | null;
@@ -567,15 +375,18 @@ export async function previewLensProductVariants(input: {
     materialId: normalizeOptionalId(input.materialId),
     indexId: normalizeOptionalId(input.indexId),
     colorId: normalizeOptionalId(input.colorId),
-    additionId: normalizeOptionalId(input.additionId),
-    diameterId: normalizeOptionalId(input.diameterId),
-    eye: normalizeEye(input.eye),
   };
-  const { family, codeParts } = await loadParentAttrs(ids);
+  const { codeParts } = await loadParentAttrs(ids);
   const baseCode = buildLensProductBaseCode(codeParts);
   const existing = await findParentByAttrs(ids);
 
-  const rangeIds = normalizeIdList(input.powerRangeIds);
+  const rangeIds = [
+    ...new Set(
+      (input.powerRangeIds ?? [])
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
   if (rangeIds.length === 0) {
     throw new LensProductServiceError(
       "Select at least one power range.",
@@ -595,9 +406,6 @@ export async function previewLensProductVariants(input: {
     );
   }
 
-  const axes = await loadAxesForFamily(family, normalizeIdList(input.axisIds));
-  const axisSlots = axisSlotsFromRows(axes);
-
   const variants: PreviewVariant[] = [];
   for (const rangeId of rangeIds) {
     const pr = ranges.find((r) => r.id === rangeId)!;
@@ -608,33 +416,24 @@ export async function previewLensProductVariants(input: {
       cylMin: Number(pr.cylMin),
       cylMax: Number(pr.cylMax),
     };
-    for (const axis of axisSlots) {
-      variants.push({
-        powerRangeId: pr.id,
-        axisId: axis.id,
-        axisLabel: axis.label,
-        skuCode: buildLensProductSkuCode({
-          ...codeParts,
-          ...bounds,
-          axisValue: axis.value,
-        }),
-        name: buildLensProductName({
-          familyCode: codeParts.familyCode,
-          baseCode: codeParts.baseCode,
-          materialCode: codeParts.materialCode,
-          indexCode: codeParts.indexCode,
-          colorLabel: codeParts.colorLabel,
-          ...bounds,
-          axisValue: axis.value,
-        }),
-        rangeLabel: formatPowerRangeCompact(
-          bounds.sphMin,
-          bounds.sphMax,
-          bounds.cylMin,
-          bounds.cylMax
-        ),
-      });
-    }
+    variants.push({
+      powerRangeId: pr.id,
+      skuCode: buildLensProductSkuCode({ ...codeParts, ...bounds }),
+      name: buildLensProductName({
+        familyCode: codeParts.familyCode,
+        baseCode: codeParts.baseCode,
+        materialCode: codeParts.materialCode,
+        indexCode: codeParts.indexCode,
+        colorLabel: codeParts.colorLabel,
+        ...bounds,
+      }),
+      rangeLabel: formatPowerRangeCompact(
+        bounds.sphMin,
+        bounds.sphMax,
+        bounds.cylMin,
+        bounds.cylMax
+      ),
+    });
   }
 
   return {
@@ -646,22 +445,41 @@ export async function previewLensProductVariants(input: {
 
 async function createVariantsForParent(opts: {
   productId: string;
-  family: { supportsAxis: boolean };
-  codeParts: CodeParts;
+  codeParts: {
+    familyCode: string;
+    baseCode: string;
+    materialCode?: string | null;
+    indexCode?: string | null;
+    colorCode?: string | null;
+    colorLabel?: string | null;
+  };
   powerRangeIds: string[];
-  axisIds: string[];
   defaultPrice: number | null;
   isActive: boolean;
 }) {
-  const axes = await loadAxesForFamily(opts.family, opts.axisIds);
-  const axisSlots = axisSlotsFromRows(axes);
   const created = [];
-
   for (const rangeId of opts.powerRangeIds) {
     const pr = await prisma.lensPowerRange.findUnique({ where: { id: rangeId } });
     await assertActiveFk("Power range", rangeId, async () => pr);
     if (!pr) {
       throw new LensProductServiceError("Power range not found.", 400, "INVALID_FK");
+    }
+
+    const existing = await prisma.lensProductVariant.findUnique({
+      where: {
+        productId_powerRangeId: {
+          productId: opts.productId,
+          powerRangeId: rangeId,
+        },
+      },
+    });
+    if (existing) {
+      throw new LensProductServiceError(
+        `Variant for power range ${formatPowerRangeCompact(Number(pr.sphMin), Number(pr.sphMax), Number(pr.cylMin), Number(pr.cylMax))} already exists on this parent.`,
+        409,
+        "DUPLICATE_VARIANT",
+        { variantId: existing.id, skuCode: existing.skuCode }
+      );
     }
 
     const bounds = {
@@ -670,81 +488,49 @@ async function createVariantsForParent(opts: {
       cylMin: Number(pr.cylMin),
       cylMax: Number(pr.cylMax),
     };
+    const skuCode = buildLensProductSkuCode({ ...opts.codeParts, ...bounds });
+    const name = buildLensProductName({
+      familyCode: opts.codeParts.familyCode,
+      baseCode: opts.codeParts.baseCode,
+      materialCode: opts.codeParts.materialCode,
+      indexCode: opts.codeParts.indexCode,
+      colorLabel:
+        opts.codeParts.colorLabel ?? opts.codeParts.colorCode ?? null,
+      ...bounds,
+    });
 
-    for (const axis of axisSlots) {
-      const existing = await prisma.lensProductVariant.findFirst({
-        where: {
+    try {
+      const row = await prisma.lensProductVariant.create({
+        data: {
           productId: opts.productId,
           powerRangeId: rangeId,
-          axisId: axis.id,
+          skuCode,
+          name,
+          sphMin: dec(bounds.sphMin),
+          sphMax: dec(bounds.sphMax),
+          cylMin: dec(bounds.cylMin),
+          cylMax: dec(bounds.cylMax),
+          defaultPrice:
+            opts.defaultPrice != null && Number.isFinite(opts.defaultPrice)
+              ? dec(opts.defaultPrice)
+              : null,
+          isActive: opts.isActive,
         },
+        include: variantInclude,
       });
-      if (existing) {
-        const rangeLabel = formatPowerRangeCompact(
-          Number(pr.sphMin),
-          Number(pr.sphMax),
-          Number(pr.cylMin),
-          Number(pr.cylMax)
-        );
+      created.push(serializeLensProductVariant(row));
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
         throw new LensProductServiceError(
-          `Variant for ${rangeLabel}${axis.label ? ` / axis ${axis.label}` : ""} already exists on this parent.`,
+          `SKU or name already exists (${skuCode}).`,
           409,
-          "DUPLICATE_VARIANT",
-          { variantId: existing.id, skuCode: existing.skuCode }
+          "DUPLICATE_SKU"
         );
       }
-
-      const skuCode = buildLensProductSkuCode({
-        ...opts.codeParts,
-        ...bounds,
-        axisValue: axis.value,
-      });
-      const name = buildLensProductName({
-        familyCode: opts.codeParts.familyCode,
-        baseCode: opts.codeParts.baseCode,
-        materialCode: opts.codeParts.materialCode,
-        indexCode: opts.codeParts.indexCode,
-        colorLabel:
-          opts.codeParts.colorLabel ?? opts.codeParts.colorCode ?? null,
-        ...bounds,
-        axisValue: axis.value,
-      });
-
-      try {
-        const row = await prisma.lensProductVariant.create({
-          data: {
-            productId: opts.productId,
-            powerRangeId: rangeId,
-            axisId: axis.id,
-            axis: axis.value,
-            skuCode,
-            name,
-            sphMin: dec(bounds.sphMin),
-            sphMax: dec(bounds.sphMax),
-            cylMin: dec(bounds.cylMin),
-            cylMax: dec(bounds.cylMax),
-            defaultPrice:
-              opts.defaultPrice != null && Number.isFinite(opts.defaultPrice)
-                ? dec(opts.defaultPrice)
-                : null,
-            isActive: opts.isActive,
-          },
-          include: variantInclude,
-        });
-        created.push(serializeLensProductVariant(row));
-      } catch (err) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === "P2002"
-        ) {
-          throw new LensProductServiceError(
-            `SKU or name already exists (${skuCode}).`,
-            409,
-            "DUPLICATE_SKU"
-          );
-        }
-        throw err;
-      }
+      throw err;
     }
   }
   return created;
@@ -760,13 +546,15 @@ export async function createLensProduct(input: CreateLensProductInput) {
     materialId: normalizeOptionalId(input.materialId),
     indexId: normalizeOptionalId(input.indexId),
     colorId: normalizeOptionalId(input.colorId),
-    additionId: normalizeOptionalId(input.additionId),
-    diameterId: normalizeOptionalId(input.diameterId),
-    eye: normalizeEye(input.eye),
   };
 
-  const rangeIds = normalizeIdList(input.powerRangeIds);
-  const axisIds = normalizeIdList(input.axisIds);
+  const rangeIds = [
+    ...new Set(
+      (input.powerRangeIds ?? [])
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
   if (rangeIds.length === 0) {
     throw new LensProductServiceError(
       "Select at least one power range.",
@@ -775,7 +563,7 @@ export async function createLensProduct(input: CreateLensProductInput) {
     );
   }
 
-  const { family, codeParts } = await loadParentAttrs(ids);
+  const { codeParts } = await loadParentAttrs(ids);
   const baseCode = buildLensProductBaseCode(codeParts);
   const defaultPrice =
     input.defaultPrice != null && Number.isFinite(input.defaultPrice)
@@ -796,9 +584,6 @@ export async function createLensProduct(input: CreateLensProductInput) {
           materialId: ids.materialId,
           indexId: ids.indexId,
           colorId: ids.colorId,
-          additionId: ids.additionId,
-          diameterId: ids.diameterId,
-          eye: ids.eye,
           isActive,
         },
         include: parentInclude,
@@ -825,10 +610,8 @@ export async function createLensProduct(input: CreateLensProductInput) {
 
   const variants = await createVariantsForParent({
     productId: parent!.id,
-    family,
     codeParts,
     powerRangeIds: rangeIds,
-    axisIds,
     defaultPrice,
     isActive,
   });
@@ -847,7 +630,6 @@ export async function createLensProduct(input: CreateLensProductInput) {
       event: createdParent ? "LENS_PRODUCT_CREATED" : "LENS_PRODUCT_VARIANTS_ADDED",
       baseCode,
       powerRangeIds: rangeIds,
-      axisIds,
       variantSkus: variants.map((v) => v.skuCode),
     },
     activityMessage: createdParent
@@ -865,7 +647,6 @@ export async function createLensProduct(input: CreateLensProductInput) {
 export async function addLensProductVariants(input: {
   productId: string;
   powerRangeIds: string[];
-  axisIds?: string[];
   defaultPrice?: number | null;
   actorUserId: string;
 }) {
@@ -883,14 +664,16 @@ export async function addLensProductVariants(input: {
     materialId: parent.materialId,
     indexId: parent.indexId,
     colorId: parent.colorId,
-    additionId: parent.additionId,
-    diameterId: parent.diameterId,
-    eye: parent.eye,
   };
-  const { family, codeParts } = await loadParentAttrs(ids);
+  const { codeParts } = await loadParentAttrs(ids);
 
-  const rangeIds = normalizeIdList(input.powerRangeIds);
-  const axisIds = normalizeIdList(input.axisIds);
+  const rangeIds = [
+    ...new Set(
+      (input.powerRangeIds ?? [])
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
   if (rangeIds.length === 0) {
     throw new LensProductServiceError(
       "Select at least one power range.",
@@ -906,10 +689,8 @@ export async function addLensProductVariants(input: {
 
   await createVariantsForParent({
     productId: parent.id,
-    family,
     codeParts,
     powerRangeIds: rangeIds,
-    axisIds,
     defaultPrice,
     isActive: true,
   });
@@ -927,7 +708,6 @@ export async function addLensProductVariants(input: {
     context: {
       event: "LENS_PRODUCT_VARIANTS_ADDED",
       powerRangeIds: rangeIds,
-      axisIds,
     },
     activityMessage: `Added power range(s) to ${parent.baseCode}`,
   });

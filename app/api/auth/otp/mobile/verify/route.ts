@@ -11,38 +11,22 @@ import {
 } from "../../../../../lib/auth-session";
 import { optionalTrim } from "../../../../../lib/customer-registration";
 import { prisma, withDbRetry } from "../../../../../lib/prisma";
-import {
-  normalizeIndianMobile,
-  parseOtpPurpose,
-  verifyOtpChallenge,
-} from "../../../../../lib/otp";
+import { verifyOtpChallenge } from "../../../../../lib/otp";
 import { createCustomerFromMobileOtp } from "../../../../../lib/otp/signup-from-mobile";
 import { toSafeUser } from "../../../../../lib/user-public";
 import { classifyWalkInCustomer } from "../../../../../lib/walk-in-classify";
+import { mobileOtpVerifyBodySchema } from "../../../../../lib/validation/otp";
+import { parseOrError } from "../../../../../lib/validation/parse";
 
 export async function POST(req: NextRequest) {
   const auditCtx = buildAuditRequestContext(req);
   try {
     const body = await req.json();
-    const purpose = parseOtpPurpose(body.purpose);
-    const mobileNumber = normalizeIndianMobile(String(body.mobileNumber ?? ""));
-    const code = String(body.code ?? "").trim();
-    const providerSessionId =
-      body.sessionId != null
-        ? String(body.sessionId)
-        : body.providerSessionId != null
-          ? String(body.providerSessionId)
-          : null;
-
-    if (!purpose) {
-      return jsonError("OTP_INVALID", "Invalid OTP purpose.", 400);
+    const parsed = parseOrError(mobileOtpVerifyBodySchema, body);
+    if (!parsed.ok) {
+      return jsonError("OTP_INVALID", parsed.error, 400);
     }
-    if (!mobileNumber) {
-      return jsonError("OTP_INVALID", "Enter a valid Indian mobile number.", 400);
-    }
-    if (!code) {
-      return jsonError("OTP_INVALID", "OTP code is required.", 400);
-    }
+    const { purpose, mobileNumber, code, providerSessionId } = parsed.data;
 
     const verified = await verifyOtpChallenge({
       channel: "MOBILE",

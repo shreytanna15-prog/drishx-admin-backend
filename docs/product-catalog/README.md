@@ -11,8 +11,6 @@ Track further catalog RCs in [`../requested-changes.md`](../requested-changes.md
 
 Hierarchy: [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/). Product identity = Material? · Base · Index · Family · Color (+ power range on the **variant**). **Coating is not identity.**
 
-**Industry + legacy/shop context:** [`../lens-industry-reference.md`](../lens-industry-reference.md) (SV / KT / Progressive, index/coating, power ranges, white-catalog, production audit).
-
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [CLIENT-PLAN.md](./CLIENT-PLAN.md) | Client + product | Screens, flows, what admin does, acceptance |
@@ -21,6 +19,6 @@ Hierarchy: [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/). Pro
 **Related:** [RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers); deltas in [requested-changes.md](../requested-changes.md).  
 **Next (stock + PO):** [`../stock-management/`](../stock-management/) — hang stock/PO on the **variant**.
 
-**SKU / name (locked target):** both auto-built on the variant — SKU encodes both power bounds; human name uses compact `{max_SPH}/{max_CYL}` (e.g. `+4.00/+2.00`). Admin does not type either.
+**SKU / name (locked target):** both auto-built on the variant — compact SKU codes; human name with `-6.00/+2.00`. Admin does not type either.
 
 **Out of slice:** live stock cells, PO/receive, shop/mobile rewrite, deleting legacy lens tables.
