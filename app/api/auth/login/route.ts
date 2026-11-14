@@ -7,16 +7,17 @@ import {
   buildAuditRequestContext,
   recordSecurityEvent,
 } from "../../../lib/audit";
+import { authLoginBodySchema } from "../../../lib/validation/auth-login";
+import { parseOrError } from "../../../lib/validation/parse";
 
 export async function POST(req: NextRequest) {
   const auditCtx = buildAuditRequestContext(req);
   const body = await req.json();
-  const email = String(body.email ?? "").trim().toLowerCase();
-  const password = String(body.password ?? "").trim();
-
-  if (!email || !password) {
-    return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
+  const parsed = parseOrError(authLoginBodySchema, body);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
+  const { email, password } = parsed.data;
 
   try {
     const user = await withDbRetry(() =>

@@ -6,26 +6,20 @@ import {
 } from "../../../../../lib/audit";
 import { jsonError } from "../../../../../lib/auth-errors";
 import { prisma } from "../../../../../lib/prisma";
-import {
-  normalizeIndianMobile,
-  parseOtpPurpose,
-  sendOtpChallenge,
-} from "../../../../../lib/otp";
+import { sendOtpChallenge } from "../../../../../lib/otp";
 import { getSession } from "../../../../../lib/session-auth";
+import { mobileOtpSendBodySchema } from "../../../../../lib/validation/otp";
+import { parseOrError } from "../../../../../lib/validation/parse";
 
 export async function POST(req: NextRequest) {
   const auditCtx = buildAuditRequestContext(req);
   try {
     const body = await req.json();
-    const purpose = parseOtpPurpose(body.purpose);
-    const mobileNumber = normalizeIndianMobile(String(body.mobileNumber ?? ""));
-
-    if (!purpose) {
-      return jsonError("OTP_INVALID", "Invalid OTP purpose.", 400);
+    const parsed = parseOrError(mobileOtpSendBodySchema, body);
+    if (!parsed.ok) {
+      return jsonError("OTP_INVALID", parsed.error, 400);
     }
-    if (!mobileNumber) {
-      return jsonError("OTP_INVALID", "Enter a valid Indian mobile number.", 400);
-    }
+    const { purpose, mobileNumber } = parsed.data;
 
     let createdByStaffId: string | null = null;
     if (purpose === "WALK_IN" || purpose === "ADMIN_INVITE") {

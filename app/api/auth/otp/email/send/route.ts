@@ -6,32 +6,20 @@ import {
 } from "../../../../../lib/audit";
 import { jsonError } from "../../../../../lib/auth-errors";
 import { prisma } from "../../../../../lib/prisma";
-import {
-  normalizeEmail,
-  parseOtpPurpose,
-  sendOtpChallenge,
-} from "../../../../../lib/otp";
+import { sendOtpChallenge } from "../../../../../lib/otp";
 import { getSession } from "../../../../../lib/session-auth";
+import { emailOtpSendBodySchema } from "../../../../../lib/validation/otp";
+import { parseOrError } from "../../../../../lib/validation/parse";
 
 export async function POST(req: NextRequest) {
   const auditCtx = buildAuditRequestContext(req);
   try {
     const body = await req.json();
-    const purpose = parseOtpPurpose(body.purpose) ?? "VERIFY_EMAIL";
-    const email = normalizeEmail(String(body.email ?? ""));
-
-    if (!email) {
-      return jsonError("OTP_INVALID", "Enter a valid email address.", 400);
+    const parsed = parseOrError(emailOtpSendBodySchema, body);
+    if (!parsed.ok) {
+      return jsonError("OTP_INVALID", parsed.error, 400);
     }
-    if (
-      purpose !== "SIGNUP" &&
-      purpose !== "LOGIN" &&
-      purpose !== "VERIFY_EMAIL" &&
-      purpose !== "WALK_IN" &&
-      purpose !== "ADMIN_INVITE"
-    ) {
-      return jsonError("OTP_INVALID", "Invalid OTP purpose.", 400);
-    }
+    const { purpose, email } = parsed.data;
 
     const session = getSession(req);
     if (purpose === "WALK_IN" || purpose === "ADMIN_INVITE") {
