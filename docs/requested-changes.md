@@ -25,6 +25,7 @@
 | RC-04 | Product catalog: parent + variants, new SKU/name builders | backend (admin panel); APIs as needed |
 | RC-05 | Finish photo unwire (clients) + null-material parent uniqueness | backend, website, mobile |
 | RC-06 | Walk-in: skip OTP when staff-created+verified; history; staff-only | backend, website, mobile |
+| RC-07 | Catalog: multi ADD on variant; auto L/R eye (V2); CYL-gated axes | backend (admin panel) |
 
 ---
 
@@ -549,4 +550,33 @@ Backend lookup + harden WALK_IN verify / walk-in create responses + tests. Then 
 - Builds on Path C in [`customer-account-configuration/CLIENT-PLAN.md`](./customer-account-configuration/CLIENT-PLAN.md)  
 - On-behalf gate: `app/lib/customer-order-eligibility.ts`  
 - Surfaces: web `EmployeeWalkInCreatePanel` / mobile `employee-walk-in-create-panel`; `POST /api/users/customers/walk-in`
+
+---
+
+## RC-07 — Catalog ADD / Eye / Axis (locked feedback)
+
+### Type
+
+Backend admin catalog (schema + services + Attributes/Create UI).
+
+### Goal
+
+- **ADD:** multi-select → variant `additionId` (cartesian), not parent
+- **Eye:** auto `LEFT`/`RIGHT` on Progressive (V2) variants only; no create picker; never on parent
+- **Axis:** never for SV; for KT/V2 only when range CYL ≠ 0 (`cylMin`/`cylMax` both 0 → `axisId` null); mixed ranges gate per range
+- **Diameter:** optional single on parent (unchanged)
+
+### Done when
+
+- [x] Schema + migration: variant `additionId`/`eye`/`axisId`; parent `diameterId` only
+- [x] Family flags + Axis/ADD/Diameter masters seeded; Attributes tabs
+- [x] Product service cartesian + preview; SKU includes ADD/diameter/eye/axis when set
+- [x] Create / parent detail UI: Diameter + Axis/ADD multi; no Eye control; Eye column on variants
+- [x] Docs: CLIENT-PLAN / DEVELOPER-GUIDE / lens-industry-reference
+
+### Related
+
+- [`product-catalog/CLIENT-PLAN.md`](./product-catalog/CLIENT-PLAN.md)  
+- [`product-catalog/DEVELOPER-GUIDE.md`](./product-catalog/DEVELOPER-GUIDE.md)  
+- `app/lib/catalog/lens-product-service.ts`, `lens-product-sku.ts`
 

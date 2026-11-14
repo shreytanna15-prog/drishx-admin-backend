@@ -1,9 +1,10 @@
 /**
  * RC-04 LensProductVariant SKU + name builders.
  *
- * SKU:  [MATERIAL-]BASE[-INDEX]-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}
- * Name: [Material] [Index] [Family] [Base] [Color] {max_SPH}/{max_CYL}
- * Coating is never included.
+ * SKU:  [MATERIAL-]BASE[-INDEX]-FAMILY[-PROGTYPE][-COLOR][-ADD…][-D…][-LEFT|RIGHT]-S…-C…[-A{axis}]
+ * Name: [Material] [Index] [Family] [Base] [Color] {max_SPH}/{max_CYL} [axis]
+ * Progressive type is in SKU/baseCode only — not in the human name.
+ * Coating is never included. Among new fields, name appends axis only.
  */
 
 import {
@@ -13,12 +14,20 @@ import {
   normalizePowerValue,
 } from "./catalog-power-select-options";
 
+/** Default Progressive type when V2 create leaves the field blank. */
+export const DEFAULT_PROGRESSIVE_TYPE_CODE = "NORMAL";
+
 export type LensProductSkuParts = {
   familyCode: string;
   baseCode: string;
   materialCode?: string | null;
   indexCode?: string | null;
   colorCode?: string | null;
+  progressiveTypeCode?: string | null;
+  additionCode?: string | null;
+  diameterCode?: string | null;
+  eye?: "LEFT" | "RIGHT" | null;
+  axisValue?: number | null;
   sphMin: number;
   sphMax: number;
   cylMin: number;
@@ -37,6 +46,7 @@ export type LensProductNameParts = {
   colorLabel?: string | null;
   /** @deprecated Prefer `colorLabel` for names; kept for older call sites. */
   colorCode?: string | null;
+  axisValue?: number | null;
   sphMin: number;
   sphMax: number;
   cylMin: number;
@@ -66,13 +76,20 @@ export function encodeSkuPower(value: number): string {
   return `${sign}${body}`;
 }
 
-/** Parent internal base code (no power segment). Not shown in Admin UI. */
+/**
+ * Parent internal base code (no power / ADD / eye / axis).
+ * Diameter may be included when set on the parent.
+ */
 export function buildLensProductBaseCode(parts: {
   familyCode: string;
   baseCode: string;
   materialCode?: string | null;
   indexCode?: string | null;
   colorCode?: string | null;
+  progressiveTypeCode?: string | null;
+  additionCode?: string | null;
+  diameterCode?: string | null;
+  eye?: "LEFT" | "RIGHT" | null;
 }): string {
   const family = sanitizeSkuCodePart(parts.familyCode);
   const base = sanitizeSkuCodePart(parts.baseCode);
@@ -91,9 +108,27 @@ export function buildLensProductBaseCode(parts: {
     if (index) tokens.push(index);
   }
   tokens.push(family);
+  if (
+    parts.progressiveTypeCode != null &&
+    String(parts.progressiveTypeCode).trim() !== ""
+  ) {
+    const pt = sanitizeSkuCodePart(String(parts.progressiveTypeCode));
+    if (pt) tokens.push(pt);
+  }
   if (parts.colorCode != null && String(parts.colorCode).trim() !== "") {
     const c = sanitizeSkuCodePart(String(parts.colorCode));
     if (c) tokens.push(c);
+  }
+  if (parts.additionCode != null && String(parts.additionCode).trim() !== "") {
+    const a = sanitizeSkuCodePart(String(parts.additionCode));
+    if (a) tokens.push(a);
+  }
+  if (parts.diameterCode != null && String(parts.diameterCode).trim() !== "") {
+    const d = sanitizeSkuCodePart(String(parts.diameterCode));
+    if (d) tokens.push(d);
+  }
+  if (parts.eye === "LEFT" || parts.eye === "RIGHT") {
+    tokens.push(parts.eye);
   }
   return tokens.join("-");
 }
@@ -106,11 +141,19 @@ export function buildLensProductSkuCode(parts: LensProductSkuParts): string {
   const cylMin = Math.min(parts.cylMin, parts.cylMax);
   const cylMax = Math.max(parts.cylMin, parts.cylMax);
 
-  return [
+  const tokens = [
     base,
     `S${encodeSkuPower(sphMin)}T${encodeSkuPower(sphMax)}`,
     `C${encodeSkuPower(cylMin)}T${encodeSkuPower(cylMax)}`,
-  ].join("-");
+  ];
+  if (
+    parts.axisValue != null &&
+    Number.isFinite(parts.axisValue) &&
+    Math.trunc(parts.axisValue) === parts.axisValue
+  ) {
+    tokens.push(`A${Math.trunc(parts.axisValue)}`);
+  }
+  return tokens.join("-");
 }
 
 /**
@@ -157,5 +200,12 @@ export function buildLensProductName(parts: LensProductNameParts): string {
   words.push(
     buildPowerNameToken(parts.sphMin, parts.sphMax, parts.cylMin, parts.cylMax)
   );
+  if (
+    parts.axisValue != null &&
+    Number.isFinite(parts.axisValue) &&
+    Math.trunc(parts.axisValue) === parts.axisValue
+  ) {
+    words.push(String(Math.trunc(parts.axisValue)));
+  }
   return words.filter(Boolean).join(" ");
 }

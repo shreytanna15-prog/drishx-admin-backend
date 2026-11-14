@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import {
+  AdditionMultiSelect,
+  AxisMultiSelect,
   CatalogSelectField,
   PowerRangeMultiSelect,
 } from "@/components/catalog/catalog-field";
@@ -49,6 +51,20 @@ function toOptions(
   return emptyLabel ? [{ value: "", label: emptyLabel }, ...opts] : opts;
 }
 
+function powerRangeAllowsAxis(cylMin: number, cylMax: number): boolean {
+  return Math.max(Math.abs(cylMin), Math.abs(cylMax)) !== 0;
+}
+
+function attrNumericOptions(items: LensAttribute[]) {
+  return items
+    .filter((a) => a.value != null && Number.isFinite(a.value))
+    .map((a) => ({
+      id: a.id,
+      label: a.name?.trim() || a.code,
+      value: Number(a.value),
+    }));
+}
+
 export default function NewLensProductPage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -58,6 +74,12 @@ export default function NewLensProductPage() {
   const [materials, setMaterials] = useState<LensAttribute[]>([]);
   const [indexes, setIndexes] = useState<LensAttribute[]>([]);
   const [colors, setColors] = useState<LensAttribute[]>([]);
+  const [axes, setAxes] = useState<LensAttribute[]>([]);
+  const [additions, setAdditions] = useState<LensAttribute[]>([]);
+  const [diameters, setDiameters] = useState<LensAttribute[]>([]);
+  const [progressiveTypes, setProgressiveTypes] = useState<LensAttribute[]>(
+    []
+  );
   const [allowedMaterialIds, setAllowedMaterialIds] = useState<Set<string>>(
     new Set()
   );
@@ -68,8 +90,13 @@ export default function NewLensProductPage() {
   const [materialId, setMaterialId] = useState("");
   const [indexId, setIndexId] = useState("");
   const [colorId, setColorId] = useState("");
+  const [diameterId, setDiameterId] = useState("");
+  const [progressiveTypeId, setProgressiveTypeId] = useState("");
+  const [axisIds, setAxisIds] = useState<string[]>([]);
+  const [additionIds, setAdditionIds] = useState<string[]>([]);
   const [powerRangeIds, setPowerRangeIds] = useState<string[]>([]);
-  const [defaultPrice, setDefaultPrice] = useState("");
+  const [purchasePrice, setPurchasePrice] = useState("");
+  const [sellingPrice, setSellingPrice] = useState("");
   const [preview, setPreview] = useState<{
     baseCode: string;
     existingParentId: string | null;
@@ -91,18 +118,26 @@ export default function NewLensProductPage() {
     void (async () => {
       setAttrsLoading(true);
       try {
-        const [f, b, m, i, col] = await Promise.all([
+        const [f, b, m, i, col, ax, add, dia, pt] = await Promise.all([
           fetchLensAttributes("family", { activeOnly: true }),
           fetchLensAttributes("base", { activeOnly: true }),
           fetchLensAttributes("material", { activeOnly: true }),
           fetchLensAttributes("index", { activeOnly: true }),
           fetchLensAttributes("color", { activeOnly: true }),
+          fetchLensAttributes("axis", { activeOnly: true }),
+          fetchLensAttributes("addition", { activeOnly: true }),
+          fetchLensAttributes("diameter", { activeOnly: true }),
+          fetchLensAttributes("progressive-type", { activeOnly: true }),
         ]);
         setFamilies(f.items);
         setBases(b.items);
         setMaterials(m.items);
         setIndexes(i.items);
         setColors(col.items);
+        setAxes(ax.items);
+        setAdditions(add.items);
+        setDiameters(dia.items);
+        setProgressiveTypes(pt.items);
       } catch (err) {
         setError(errorMessage(err, "Failed to load attributes."));
       } finally {
@@ -143,6 +178,67 @@ export default function NewLensProductPage() {
     return toOptions(filtered, "None (optional)");
   }, [materials, allowedMaterialIds]);
 
+  const selectedFamily = useMemo(
+    () => families.find((f) => f.id === familyId) ?? null,
+    [families, familyId]
+  );
+
+  const supportsAxis = Boolean(selectedFamily?.supportsAxis);
+  const supportsAdd = Boolean(selectedFamily?.supportsAdd);
+  const supportsEye = Boolean(selectedFamily?.supportsEye);
+  const supportsProgressiveType = Boolean(
+    selectedFamily?.supportsProgressiveType
+  );
+
+  useEffect(() => {
+    if (!supportsAxis) setAxisIds([]);
+    if (!supportsAdd) setAdditionIds([]);
+    if (!supportsProgressiveType) setProgressiveTypeId("");
+  }, [familyId, supportsAxis, supportsAdd, supportsProgressiveType]);
+
+  const selectedRangesAllowAxis = useMemo(() => {
+    if (powerRangeIds.length === 0) return false;
+    const byId = new Map(powerRanges.map((r) => [r.id, r]));
+    return powerRangeIds.some((id) => {
+      const r = byId.get(id);
+      return r ? powerRangeAllowsAxis(r.cylMin, r.cylMax) : false;
+    });
+  }, [powerRangeIds, powerRanges]);
+
+  const showAxisMulti = supportsAxis && selectedRangesAllowAxis;
+
+  const catalogPayload = useMemo(
+    () => ({
+      familyId,
+      baseId,
+      materialId: materialId || null,
+      indexId: indexId || null,
+      colorId: colorId || null,
+      diameterId: diameterId || null,
+      progressiveTypeId: supportsProgressiveType
+        ? progressiveTypeId || null
+        : null,
+      powerRangeIds,
+      axisIds: showAxisMulti ? axisIds : [],
+      additionIds: supportsAdd ? additionIds : [],
+    }),
+    [
+      familyId,
+      baseId,
+      materialId,
+      indexId,
+      colorId,
+      diameterId,
+      supportsProgressiveType,
+      progressiveTypeId,
+      powerRangeIds,
+      showAxisMulti,
+      axisIds,
+      supportsAdd,
+      additionIds,
+    ]
+  );
+
   const canPreview =
     Boolean(familyId && baseId) && powerRangeIds.length > 0;
 
@@ -156,14 +252,7 @@ export default function NewLensProductPage() {
       void (async () => {
         setPreviewBusy(true);
         try {
-          const res = await previewLensProductRequest({
-            familyId,
-            baseId,
-            materialId: materialId || null,
-            indexId: indexId || null,
-            colorId: colorId || null,
-            powerRangeIds,
-          });
+          const res = await previewLensProductRequest(catalogPayload);
           if (!cancelled) setPreview(res.preview);
         } catch {
           if (!cancelled) setPreview(null);
@@ -176,7 +265,7 @@ export default function NewLensProductPage() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [canPreview, familyId, baseId, materialId, indexId, colorId, powerRangeIds]);
+  }, [canPreview, catalogPayload]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -192,13 +281,9 @@ export default function NewLensProductPage() {
     setBusy(true);
     try {
       const res = await createLensProductRequest({
-        familyId,
-        baseId,
-        materialId: materialId || null,
-        indexId: indexId || null,
-        colorId: colorId || null,
-        powerRangeIds,
-        defaultPrice: defaultPrice.trim() ? Number(defaultPrice) : null,
+        ...catalogPayload,
+        purchasePrice: purchasePrice.trim() ? Number(purchasePrice) : null,
+        sellingPrice: sellingPrice.trim() ? Number(sellingPrice) : null,
       });
       router.push(`${CATALOG_HREF}/${res.product.id}`);
     } catch (err) {
@@ -278,14 +363,43 @@ export default function NewLensProductPage() {
             disabled={attrsLoading}
             placeholder="Optional"
           />
+          <CatalogSelectField
+            label="Diameter"
+            value={diameterId}
+            onValueChange={setDiameterId}
+            options={toOptions(diameters, "None (optional)")}
+            disabled={attrsLoading}
+            placeholder="Optional"
+          />
+          {supportsProgressiveType ? (
+            <CatalogSelectField
+              label="Progressive type"
+              value={progressiveTypeId}
+              onValueChange={setProgressiveTypeId}
+              options={toOptions(progressiveTypes, "Normal (default)")}
+              disabled={attrsLoading}
+              placeholder="Recommended"
+              hint="Optional — defaults to Normal if left blank. Used in SKU for pricing identity."
+            />
+          ) : null}
           <label className="grid gap-1.5">
-            <span className={catalogLabelClass}>Default price (₹)</span>
+            <span className={catalogLabelClass}>Purchase price (₹)</span>
             <Input
-              value={defaultPrice}
-              onChange={(e) => setDefaultPrice(e.target.value)}
+              value={purchasePrice}
+              onChange={(e) => setPurchasePrice(e.target.value)}
               className={inputClass}
               inputMode="decimal"
-              placeholder="Optional — applied to new variants"
+              placeholder="Optional — 0 if blank"
+            />
+          </label>
+          <label className="grid gap-1.5">
+            <span className={catalogLabelClass}>Selling price (₹)</span>
+            <Input
+              value={sellingPrice}
+              onChange={(e) => setSellingPrice(e.target.value)}
+              className={inputClass}
+              inputMode="decimal"
+              placeholder="Optional — 0 if blank"
             />
           </label>
         </div>
@@ -305,6 +419,31 @@ export default function NewLensProductPage() {
           onChange={setPowerRangeIds}
           disabled={powerRangesLoading}
         />
+
+        {showAxisMulti ? (
+          <AxisMultiSelect
+            options={attrNumericOptions(axes)}
+            selectedIds={axisIds}
+            onChange={setAxisIds}
+            disabled={attrsLoading}
+          />
+        ) : null}
+
+        {supportsAdd ? (
+          <AdditionMultiSelect
+            options={attrNumericOptions(additions)}
+            selectedIds={additionIds}
+            onChange={setAdditionIds}
+            disabled={attrsLoading}
+          />
+        ) : null}
+
+        {supportsEye ? (
+          <p className="text-xs text-(--brand-text-muted)">
+            This family creates separate LEFT and RIGHT variants automatically
+            for each combination — you do not pick eye here.
+          </p>
+        ) : null}
 
         <div className="grid gap-2">
           <span className={catalogLabelClass}>

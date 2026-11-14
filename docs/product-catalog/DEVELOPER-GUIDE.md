@@ -51,27 +51,28 @@
 
 ```
 Attribute masters
-  LensFamily | LensBase | LensMaterial? | LensIndex | LensColor
+  LensFamily (supportsAxis / supportsAdd / supportsEye / supportsProgressiveType)
+  | LensBase | LensMaterial? | LensIndex | LensColor | LensDiameter?
+  | LensProgressiveType (V2) | LensAxis | LensAddition
   + LensCoating (not identity)
   + LensBaseMaterialLink
-  + LensPowerRange (sph/cyl bounds, label -6.00/+2.00)
+  + LensPowerRange (sph/cyl bounds)
         │
         ▼
 LensProduct (parent)
-  material? · base · index · family · color
-  unique on that combo; internal baseCode (not shown in UI)
-  coating NOT identity
+  material? · base · index · family · color · diameter? · progressiveType? (V2→Normal)
+  unique on that combo; internal baseCode includes progressive type when set
         │ 1 → many
         ▼
 LensProductVariant
-  powerRangeId
-  skuCode = [MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S…-C…
-  name    = [Material] [Index] [Family] [Base] [Color] -6.00/+2.00
-  price, isActive
-  ← stock / PO / orders attach HERE later
+  powerRangeId × optional axisId × optional additionId × optional eye
+  (CYL=0 ranges skip axes; V2 auto LEFT+RIGHT)
+  skuCode = [MATERIAL-]BASE-INDEX-FAMILY[-COLOR][-ADD…][-D…][-LEFT|RIGHT]-S…-C…[-A90]
+  name    = [Material] [Index] [Family] [Base] [Color] +4.00/+2.00 [90]
+  purchasePrice · sellingPrice (default 0), isActive
         │
         ▼
-Admin UI — flat + grouped list; parent detail + add ranges; variant matrix
+Admin UI — flat + grouped list; parent detail + add ranges/axes/ADDs; variant matrix
 ```
 
 **Not in this slice:** ExactPower / stock leaf rows (see stock-management).
@@ -101,7 +102,8 @@ Internal `baseCode` (unique). No power bounds, no `skuCode`/`name` on parent.
 
 ### 3.4 `LensProductVariant`
 
-`productId`, `powerRangeId`, denormalized sph/cyl, unique `skuCode` / `name`, `defaultPrice`, `isActive`.  
+`productId`, `powerRangeId`, optional `axisId` / `additionId` / `eye`, denormalized sph/cyl/axis, unique `skuCode` / `name`, `purchasePrice` / `sellingPrice` (Decimal, default `0`, never null), `isActive`.  
+Unique `(productId, powerRangeId, axisId, additionId, eye)` with `NULLS NOT DISTINCT`.  
 Unique `(productId, powerRangeId)`.
 
 ### 3.5 Seed
@@ -134,7 +136,7 @@ Unique `(productId, powerRangeId)`.
 | Coating | Not in SKU or name |
 | Material | Optional; omit segment when absent |
 | Create | Server builds both; no typed `skuCode` or `name` |
-| Uniqueness | Parent attrs unique; variant `(productId, powerRangeId)` + unique sku/name |
+| Uniqueness | Parent attrs unique; variant `(productId, powerRangeId, axisId, additionId, eye)` + unique sku/name |
 
 Example: `PLAIN-HC-1P56-SV-CLEAR-S0T2-C0T1`
 
@@ -183,7 +185,8 @@ All ADMIN session.
   "indexId": "...",
   "colorId": "...",
   "powerRangeIds": ["...", "..."],
-  "defaultPrice": 450
+  "purchasePrice": 300,
+  "sellingPrice": 450
 }
 ```
 

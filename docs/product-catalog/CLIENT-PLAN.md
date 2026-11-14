@@ -107,11 +107,16 @@ Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and 
 
 | Tab | Examples | On create product? |
 |-----|----------|--------------------|
-| Family | SV, KT, V2 | Yes (all families in SKU) |
+| Family | SV, KT, V2 (flags: Axis / ADD / Eye / Prog. type) | Yes (all families in SKU) |
 | Base | HC, BRC, ARC, BR, … | Yes |
 | Material | Plain, UC, Tintable, Poly, PG, PG Poly | Optional |
 | Index | 1.49, 1.56, 1.61, 1.67, 1.74 | Yes |
 | Color | Green, Blue, Grey, Brown, Violet, … | Yes (identity; not “tint only”) |
+| Progressive type | Normal, Digital, Freeform, 9+4 design | V2 parent only; blank → Normal; in SKU not name |
+| Axis | 10…180 step 10 + 45 + 135 | Multi → variants (KT/V2); only if range CYL ≠ 0 |
+| Addition | 0, 0.25…6.00 | Multi → variants (KT/V2); optional |
+| Diameter | 55…120 step 5 mm | Optional single on parent |
+| Eye | LEFT / RIGHT | Auto on V2 variants only (no create picker) |
 | **Power range** | `-6.00/+2.00`, … | On **variant** (multi) |
 | Coating | (optional master) | **Not** identity / SKU / name |
 
@@ -157,11 +162,14 @@ Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and 
 
 **Path:** `/inventory/products-catalog/new`
 
-1. **Family** → **Base** → **Material** (optional) → **Index** → **Color**  
-2. **Power ranges** — multi-select active power-range attributes (≥1)  
-3. Optional default price (copied to new variants as starting price)  
-4. **Preview** each variant’s auto SKU + auto name (read-only)  
-5. **Save** → one parent + N variants  
+1. **Family** → **Base** → **Material** (optional) → **Index** → **Color** → **Diameter** (optional) → **Progressive type** (V2 only; optional → Normal)  
+2. **Power ranges** — multi-select (≥1)  
+3. If family supports Axis and a selected range has CYL ≠ 0 → optional **Axes** multi-select  
+4. If family supports ADD → optional **Additions** multi-select  
+5. Progressive (V2): system auto-creates **LEFT + RIGHT** for each combo (no eye picker)  
+6. Optional **Purchase price** + **Selling price** (blank → `0` on each new variant; always numeric)  
+7. **Preview** each variant’s auto SKU + auto name (read-only)  
+8. **Save** → one parent + N variants (`ranges × axes × ADDs × eyes`; SPH-only ranges skip axes)  
 
 If the attribute combo already exists → do not duplicate parent; go to that parent and add the new ranges.
 
@@ -170,12 +178,15 @@ If the attribute combo already exists → do not duplicate parent; go to that pa
 │  Create product                          │
 ├──────────────────────────────────────────┤
 │  Family [▼]  Base [▼]  Material [▼ opt]  │
-│  Index [▼]   Color [▼]                   │
+│  Index [▼]   Color [▼]  Diameter [▼ opt] │
 │  Power ranges [ multi ▼ ]                │
-│    ☑ -6.00/+2.00   ☑ -6.00/+4.00         │
+│    ☑ -6.00/+2.00   ☑ +4.00/0.00          │
+│  Axes [ multi ▼ ] (if CYL ≠ 0)           │
+│  Additions [ multi ▼ ] (KT/V2)           │
+│  (V2: LEFT+RIGHT auto — no eye picker)   │
 │  Preview:                                │
-│    PG-BR-1P56-KT-GREEN-SM6TP2-…          │
-│    PG 1.56 KT BR Green -6.00/+2.00       │
+│    …-ADD2P00-D70-LEFT-S…-C…-A90          │
+│    PG 1.56 V2 BR Green +4.00/+2.00 90    │
 │    …                                     │
 │  [ Cancel ]                    [ Save ]  │
 └──────────────────────────────────────────┘
@@ -185,7 +196,7 @@ If the attribute combo already exists → do not duplicate parent; go to that pa
 
 Compact codes; omit Material when absent; **all families** (SV, KT, V2, …); **no coating**:
 
-`[MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}`
+`[MATERIAL-]BASE-INDEX-FAMILY[-PROGTYPE][-COLOR][-ADD…][-D{mm}][-LEFT|RIGHT]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}[-A{axis}]`
 
 | Rule | Detail |
 |------|--------|
@@ -214,7 +225,7 @@ Omit Material token when Material is absent.
 **Parent path:** `/inventory/products-catalog/[id]` (parent id)
 
 - Attribute summary (Material? · Base · Index · Family · Color)  
-- Variants table: range label, SKU, name, price, active  
+- Variants table: range label, SKU, name, purchase/selling price, active  
 - **Add power range(s)**  
 - Lock attribute edit after any variant has stock/orders  
 

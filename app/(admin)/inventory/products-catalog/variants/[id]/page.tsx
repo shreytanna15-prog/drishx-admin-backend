@@ -149,6 +149,21 @@ export default function LensProductVariantDetailPage() {
         (_ / _ / _)
       </p>
 
+      <dl className="mb-4 grid gap-2 text-sm sm:grid-cols-2">
+        <div>
+          <dt className="text-(--brand-label)">Purchase price (₹)</dt>
+          <dd className="font-semibold tabular-nums">
+            {variant.purchasePrice.toFixed(2)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-(--brand-label)">Selling price (₹)</dt>
+          <dd className="font-semibold tabular-nums">
+            {variant.sellingPrice.toFixed(2)}
+          </dd>
+        </div>
+      </dl>
+
       <div className="overflow-x-auto rounded-2xl border border-(--brand-card-border) bg-(--brand-card)">
         <table className="min-w-full border-collapse text-xs">
           <thead>

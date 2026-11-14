@@ -1,6 +1,6 @@
 /**
  * RC-04 LensProduct parent + LensProductVariant.
- * Parent = attribute combo; variants = power-range sellable SKUs.
+ * Parent = attribute combo (+ optional diameter); variants = range × axis × ADD × eye SKUs.
  */
 
 import { Prisma } from "@prisma/client";
@@ -16,6 +16,7 @@ import {
   buildLensProductBaseCode,
   buildLensProductName,
   buildLensProductSkuCode,
+  DEFAULT_PROGRESSIVE_TYPE_CODE,
 } from "./lens-product-sku";
 
 export { steppedRange };
@@ -23,6 +24,7 @@ export {
   buildLensProductBaseCode,
   buildLensProductName,
   buildLensProductSkuCode,
+  DEFAULT_PROGRESSIVE_TYPE_CODE,
 } from "./lens-product-sku";
 
 export class LensProductServiceError extends Error {
@@ -61,14 +63,22 @@ const parentInclude = {
   material: true,
   index: true,
   color: true,
+  diameter: true,
+  progressiveType: true,
   variants: {
-    include: { powerRange: true },
+    include: {
+      powerRange: true,
+      axisRef: true,
+      addition: true,
+    },
     orderBy: [{ updatedAt: "desc" as const }],
   },
 } satisfies Prisma.LensProductInclude;
 
 const variantInclude = {
   powerRange: true,
+  axisRef: true,
+  addition: true,
   product: {
     include: {
       family: true,
@@ -76,6 +86,8 @@ const variantInclude = {
       material: true,
       index: true,
       color: true,
+      diameter: true,
+      progressiveType: true,
     },
   },
 } satisfies Prisma.LensProductVariantInclude;
@@ -94,8 +106,44 @@ function num(d: Prisma.Decimal | null | undefined): number | null {
   return Number(d);
 }
 
+/** Optional form/API money → always a finite non-negative number (blank → 0). */
+function normalizeMoney(
+  value: number | null | undefined,
+  field: "purchasePrice" | "sellingPrice"
+): number {
+  if (value == null) return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) {
+    throw new LensProductServiceError(
+      `${field} must be zero or positive.`,
+      400,
+      "INVALID_PRICE"
+    );
+  }
+  return n;
+}
+
 function attrRef(row: { id: string; code: string; name: string }) {
   return { id: row.id, code: row.code, name: row.name };
+}
+
+function serializeFamily(row: {
+  id: string;
+  code: string;
+  name: string;
+  supportsAxis: boolean;
+  supportsAdd: boolean;
+  supportsEye: boolean;
+  supportsProgressiveType: boolean;
+}) {
+  return {
+    ...attrRef(row),
+    supportsAxis: row.supportsAxis,
+    supportsAdd: row.supportsAdd,
+    supportsEye: row.supportsEye,
+    supportsProgressiveType: row.supportsProgressiveType,
+  };
 }
 
 function serializePowerRange(pr: {
@@ -120,6 +168,30 @@ function serializePowerRange(pr: {
   };
 }
 
+function nestedProductAttrs(row: ParentRow) {
+  return {
+    id: row.id,
+    baseCode: row.baseCode,
+    familyId: row.familyId,
+    baseId: row.baseId,
+    materialId: row.materialId,
+    indexId: row.indexId,
+    colorId: row.colorId,
+    diameterId: row.diameterId,
+    progressiveTypeId: row.progressiveTypeId,
+    isActive: row.isActive,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    family: row.family,
+    base: row.base,
+    material: row.material,
+    index: row.index,
+    color: row.color,
+    diameter: row.diameter,
+    progressiveType: row.progressiveType,
+  };
+}
+
 export function serializeLensProductVariant(row: VariantRow) {
   const p = row.product;
   const sphMin = Number(row.sphMin);
@@ -130,6 +202,8 @@ export function serializeLensProductVariant(row: VariantRow) {
     id: row.id,
     productId: row.productId,
     powerRangeId: row.powerRangeId,
+    axisId: row.axisId,
+    additionId: row.additionId,
     skuCode: row.skuCode,
     name: row.name,
     rangeType: row.rangeType,
@@ -141,13 +215,20 @@ export function serializeLensProductVariant(row: VariantRow) {
     addMax: num(row.addMax),
     axis: row.axis,
     eye: row.eye,
-    defaultPrice: num(row.defaultPrice),
+    purchasePrice: Number(row.purchasePrice),
+    sellingPrice: Number(row.sellingPrice),
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     powerRange: serializePowerRange(row.powerRange),
     rangeLabel: formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax),
     rangeSummary: formatPowerRangeCompact(sphMin, sphMax, cylMin, cylMax),
+    axisRef: row.axisRef
+      ? { ...attrRef(row.axisRef), value: row.axisRef.value }
+      : null,
+    addition: row.addition
+      ? { ...attrRef(row.addition), value: num(row.addition.value) }
+      : null,
     product: {
       id: p.id,
       baseCode: p.baseCode,
@@ -156,7 +237,9 @@ export function serializeLensProductVariant(row: VariantRow) {
       materialId: p.materialId,
       indexId: p.indexId,
       colorId: p.colorId,
-      family: attrRef(p.family),
+      diameterId: p.diameterId,
+      progressiveTypeId: p.progressiveTypeId,
+      family: serializeFamily(p.family),
       base: attrRef(p.base),
       material: p.material ? attrRef(p.material) : null,
       index: p.index
@@ -166,12 +249,16 @@ export function serializeLensProductVariant(row: VariantRow) {
           }
         : null,
       color: p.color ? attrRef(p.color) : null,
+      diameter: p.diameter ? attrRef(p.diameter) : null,
+      progressiveType: p.progressiveType ? attrRef(p.progressiveType) : null,
       attributeSummary: [
         p.family.code,
+        p.progressiveType?.code,
         p.base.code,
         p.material?.code,
         p.index?.code,
         p.color?.code,
+        p.diameter?.code,
       ]
         .filter(Boolean)
         .join(" · "),
@@ -188,22 +275,30 @@ export function serializeLensProduct(row: ParentRow) {
     materialId: row.materialId,
     indexId: row.indexId,
     colorId: row.colorId,
+    diameterId: row.diameterId,
+    progressiveTypeId: row.progressiveTypeId,
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    family: attrRef(row.family),
+    family: serializeFamily(row.family),
     base: attrRef(row.base),
     material: row.material ? attrRef(row.material) : null,
     index: row.index
       ? { ...attrRef(row.index), value: num(row.index.value) }
       : null,
     color: row.color ? attrRef(row.color) : null,
+    diameter: row.diameter ? attrRef(row.diameter) : null,
+    progressiveType: row.progressiveType
+      ? attrRef(row.progressiveType)
+      : null,
     attributeSummary: [
       row.family.code,
+      row.progressiveType?.code,
       row.base.code,
       row.material?.code,
       row.index?.code,
       row.color?.code,
+      row.diameter?.code,
     ]
       .filter(Boolean)
       .join(" · "),
@@ -211,23 +306,7 @@ export function serializeLensProduct(row: ParentRow) {
     variants: row.variants.map((v) =>
       serializeLensProductVariant({
         ...v,
-        product: {
-          id: row.id,
-          baseCode: row.baseCode,
-          familyId: row.familyId,
-          baseId: row.baseId,
-          materialId: row.materialId,
-          indexId: row.indexId,
-          colorId: row.colorId,
-          isActive: row.isActive,
-          createdAt: row.createdAt,
-          updatedAt: row.updatedAt,
-          family: row.family,
-          base: row.base,
-          material: row.material,
-          index: row.index,
-          color: row.color,
-        },
+        product: nestedProductAttrs(row),
       } as VariantRow)
     ),
   };
@@ -265,34 +344,72 @@ function requireId(label: string, value: string | null | undefined): string {
   return v;
 }
 
+function uniqueIds(raw: string[] | undefined): string[] {
+  return [
+    ...new Set(
+      (raw ?? [])
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+}
+
 type ParentAttrs = {
   familyId: string;
   baseId: string;
   materialId: string | null;
   indexId: string | null;
   colorId: string | null;
+  diameterId: string | null;
+  progressiveTypeId: string | null;
+};
+
+type CodeParts = {
+  familyCode: string;
+  baseCode: string;
+  materialCode?: string | null;
+  indexCode?: string | null;
+  colorCode?: string | null;
+  colorLabel?: string | null;
+  diameterCode?: string | null;
+  progressiveTypeCode?: string | null;
 };
 
 async function loadParentAttrs(ids: ParentAttrs) {
-  const [family, base, material, indexRow, color] = await Promise.all([
-    prisma.lensFamily.findUnique({ where: { id: ids.familyId } }),
-    prisma.lensBase.findUnique({ where: { id: ids.baseId } }),
-    ids.materialId
-      ? prisma.lensMaterial.findUnique({ where: { id: ids.materialId } })
-      : Promise.resolve(null),
-    ids.indexId
-      ? prisma.lensIndex.findUnique({ where: { id: ids.indexId } })
-      : Promise.resolve(null),
-    ids.colorId
-      ? prisma.lensColor.findUnique({ where: { id: ids.colorId } })
-      : Promise.resolve(null),
-  ]);
+  const [family, base, material, indexRow, color, diameter, progressiveType] =
+    await Promise.all([
+      prisma.lensFamily.findUnique({ where: { id: ids.familyId } }),
+      prisma.lensBase.findUnique({ where: { id: ids.baseId } }),
+      ids.materialId
+        ? prisma.lensMaterial.findUnique({ where: { id: ids.materialId } })
+        : Promise.resolve(null),
+      ids.indexId
+        ? prisma.lensIndex.findUnique({ where: { id: ids.indexId } })
+        : Promise.resolve(null),
+      ids.colorId
+        ? prisma.lensColor.findUnique({ where: { id: ids.colorId } })
+        : Promise.resolve(null),
+      ids.diameterId
+        ? prisma.lensDiameter.findUnique({ where: { id: ids.diameterId } })
+        : Promise.resolve(null),
+      ids.progressiveTypeId
+        ? prisma.lensProgressiveType.findUnique({
+            where: { id: ids.progressiveTypeId },
+          })
+        : Promise.resolve(null),
+    ]);
 
   await assertActiveFk("Family", ids.familyId, async () => family);
   await assertActiveFk("Base", ids.baseId, async () => base);
   await assertActiveFk("Material", ids.materialId, async () => material);
   await assertActiveFk("Index", ids.indexId, async () => indexRow);
   await assertActiveFk("Color", ids.colorId, async () => color);
+  await assertActiveFk("Diameter", ids.diameterId, async () => diameter);
+  await assertActiveFk(
+    "Progressive type",
+    ids.progressiveTypeId,
+    async () => progressiveType
+  );
 
   if (!family || !base) {
     throw new LensProductServiceError("Attribute not found.", 400, "INVALID_FK");
@@ -306,21 +423,76 @@ async function loadParentAttrs(ids: ParentAttrs) {
   if (ids.colorId && !color) {
     throw new LensProductServiceError("Color not found.", 400, "INVALID_FK");
   }
+  if (ids.diameterId && !diameter) {
+    throw new LensProductServiceError("Diameter not found.", 400, "INVALID_FK");
+  }
+  if (ids.progressiveTypeId && !progressiveType) {
+    throw new LensProductServiceError(
+      "Progressive type not found.",
+      400,
+      "INVALID_FK"
+    );
+  }
   if (ids.materialId) {
     await ensureBaseMaterialCompat(ids.baseId, ids.materialId);
   }
 
-  const codeParts = {
+  const codeParts: CodeParts = {
     familyCode: family.code,
     baseCode: base.code,
     materialCode: material?.code ?? null,
     indexCode: indexRow?.code ?? null,
     colorCode: color?.code ?? null,
-    /** CLIENT-PLAN name uses display color (e.g. Green), not SKU token GREEN. */
     colorLabel: color ? color.name?.trim() || color.code : null,
+    diameterCode: diameter?.code ?? null,
+    progressiveTypeCode: progressiveType?.code ?? null,
   };
 
-  return { family, base, material, indexRow, color, codeParts };
+  return {
+    family,
+    base,
+    material,
+    indexRow,
+    color,
+    diameter,
+    progressiveType,
+    codeParts,
+  };
+}
+
+async function resolveProgressiveTypeIdForFamily(
+  family: { code: string; supportsProgressiveType: boolean },
+  progressiveTypeId: string | null
+): Promise<string | null> {
+  if (!family.supportsProgressiveType) {
+    if (progressiveTypeId) {
+      throw new LensProductServiceError(
+        `Family ${family.code} does not support progressive type.`,
+        400,
+        "PROGRESSIVE_TYPE_NOT_SUPPORTED"
+      );
+    }
+    return null;
+  }
+  if (progressiveTypeId) return progressiveTypeId;
+  const normal = await prisma.lensProgressiveType.findUnique({
+    where: { code: DEFAULT_PROGRESSIVE_TYPE_CODE },
+  });
+  if (!normal) {
+    throw new LensProductServiceError(
+      `Default progressive type ${DEFAULT_PROGRESSIVE_TYPE_CODE} is missing. Run attribute seed.`,
+      500,
+      "MISSING_DEFAULT_PROGRESSIVE_TYPE"
+    );
+  }
+  if (!normal.isActive) {
+    throw new LensProductServiceError(
+      `Default progressive type ${DEFAULT_PROGRESSIVE_TYPE_CODE} is inactive.`,
+      400,
+      "INACTIVE_FK"
+    );
+  }
+  return normal.id;
 }
 
 async function findParentByAttrs(ids: ParentAttrs) {
@@ -331,9 +503,240 @@ async function findParentByAttrs(ids: ParentAttrs) {
       materialId: ids.materialId,
       indexId: ids.indexId,
       colorId: ids.colorId,
+      diameterId: ids.diameterId,
+      progressiveTypeId: ids.progressiveTypeId,
     },
     include: parentInclude,
   });
+}
+
+function assertFamilyVariantInputs(
+  family: { code: string; supportsAxis: boolean; supportsAdd: boolean },
+  axisIds: string[],
+  additionIds: string[]
+) {
+  if (axisIds.length > 0 && !family.supportsAxis) {
+    throw new LensProductServiceError(
+      `Family ${family.code} does not support axis variants.`,
+      400,
+      "AXIS_NOT_SUPPORTED"
+    );
+  }
+  if (additionIds.length > 0 && !family.supportsAdd) {
+    throw new LensProductServiceError(
+      `Family ${family.code} does not support addition variants.`,
+      400,
+      "ADDITION_NOT_SUPPORTED"
+    );
+  }
+}
+
+function powerRangeAllowsAxis(cylMin: number, cylMax: number): boolean {
+  return Math.max(Math.abs(cylMin), Math.abs(cylMax)) !== 0;
+}
+
+type AxisRow = { id: string; code: string; name: string; value: number };
+type AdditionRow = {
+  id: string;
+  code: string;
+  name: string;
+  value: number;
+};
+
+async function loadAxisMasters(axisIds: string[]): Promise<AxisRow[]> {
+  if (axisIds.length === 0) return [];
+  const rows = await prisma.lensAxis.findMany({
+    where: { id: { in: axisIds } },
+  });
+  if (rows.length !== axisIds.length) {
+    throw new LensProductServiceError(
+      "One or more axis values were not found.",
+      400,
+      "INVALID_FK"
+    );
+  }
+  for (const id of axisIds) {
+    const row = rows.find((r) => r.id === id);
+    await assertActiveFk("Axis", id, async () => row ?? null);
+  }
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return axisIds.map((id) => {
+    const r = byId.get(id)!;
+    return { id: r.id, code: r.code, name: r.name, value: r.value };
+  });
+}
+
+async function loadAdditionMasters(additionIds: string[]): Promise<AdditionRow[]> {
+  if (additionIds.length === 0) return [];
+  const rows = await prisma.lensAddition.findMany({
+    where: { id: { in: additionIds } },
+  });
+  if (rows.length !== additionIds.length) {
+    throw new LensProductServiceError(
+      "One or more addition values were not found.",
+      400,
+      "INVALID_FK"
+    );
+  }
+  for (const id of additionIds) {
+    const row = rows.find((r) => r.id === id);
+    await assertActiveFk("Addition", id, async () => row ?? null);
+  }
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return additionIds.map((id) => {
+    const r = byId.get(id)!;
+    return {
+      id: r.id,
+      code: r.code,
+      name: r.name,
+      value: Number(r.value),
+    };
+  });
+}
+
+type PlannedVariant = {
+  powerRangeId: string;
+  axisId: string | null;
+  axisLabel: string | null;
+  axisValue: number | null;
+  additionId: string | null;
+  additionLabel: string | null;
+  additionCode: string | null;
+  addMin: number | null;
+  addMax: number | null;
+  eye: string | null;
+  skuCode: string;
+  name: string;
+  rangeLabel: string;
+  bounds: {
+    sphMin: number;
+    sphMax: number;
+    cylMin: number;
+    cylMax: number;
+  };
+};
+
+function buildEyeSlots(supportsEye: boolean): (string | null)[] {
+  return supportsEye ? ["LEFT", "RIGHT"] : [null];
+}
+
+function buildAdditionSlots(
+  additions: AdditionRow[]
+): Array<{
+  id: string | null;
+  code: string | null;
+  name: string | null;
+  value: number | null;
+}> {
+  if (additions.length === 0) {
+    return [{ id: null, code: null, name: null, value: null }];
+  }
+  return additions.map((a) => ({
+    id: a.id,
+    code: a.code,
+    name: a.name,
+    value: a.value,
+  }));
+}
+
+function buildAxisSlotsForRange(
+  allowsAxis: boolean,
+  axes: AxisRow[]
+): Array<{ id: string | null; value: number | null; label: string | null }> {
+  if (!allowsAxis || axes.length === 0) {
+    return [{ id: null, value: null, label: null }];
+  }
+  return axes.map((a) => ({
+    id: a.id,
+    value: a.value,
+    label: a.name?.trim() || String(a.value),
+  }));
+}
+
+function planVariants(opts: {
+  codeParts: CodeParts;
+  supportsEye: boolean;
+  ranges: Array<{
+    id: string;
+    sphMin: Prisma.Decimal;
+    sphMax: Prisma.Decimal;
+    cylMin: Prisma.Decimal;
+    cylMax: Prisma.Decimal;
+  }>;
+  rangeIds: string[];
+  axes: AxisRow[];
+  additions: AdditionRow[];
+}): PlannedVariant[] {
+  const eyeSlots = buildEyeSlots(opts.supportsEye);
+  const additionSlots = buildAdditionSlots(opts.additions);
+  const rangeById = new Map(opts.ranges.map((r) => [r.id, r]));
+  const planned: PlannedVariant[] = [];
+
+  for (const rangeId of opts.rangeIds) {
+    const pr = rangeById.get(rangeId);
+    if (!pr) continue;
+    const bounds = {
+      sphMin: Number(pr.sphMin),
+      sphMax: Number(pr.sphMax),
+      cylMin: Number(pr.cylMin),
+      cylMax: Number(pr.cylMax),
+    };
+    const rangeLabel = formatPowerRangeCompact(
+      bounds.sphMin,
+      bounds.sphMax,
+      bounds.cylMin,
+      bounds.cylMax
+    );
+    const allowsAxis = powerRangeAllowsAxis(bounds.cylMin, bounds.cylMax);
+    const axisSlots = buildAxisSlotsForRange(allowsAxis, opts.axes);
+
+    for (const axisSlot of axisSlots) {
+      for (const addSlot of additionSlots) {
+        for (const eye of eyeSlots) {
+          const eyeToken =
+            eye === "LEFT" || eye === "RIGHT"
+              ? (eye as "LEFT" | "RIGHT")
+              : null;
+          const skuCode = buildLensProductSkuCode({
+            ...opts.codeParts,
+            additionCode: addSlot.code,
+            eye: eyeToken,
+            axisValue: axisSlot.value,
+            ...bounds,
+          });
+          const name = buildLensProductName({
+            familyCode: opts.codeParts.familyCode,
+            baseCode: opts.codeParts.baseCode,
+            materialCode: opts.codeParts.materialCode,
+            indexCode: opts.codeParts.indexCode,
+            colorLabel:
+              opts.codeParts.colorLabel ?? opts.codeParts.colorCode ?? null,
+            axisValue: axisSlot.value,
+            ...bounds,
+          });
+          const addVal = addSlot.value;
+          planned.push({
+            powerRangeId: rangeId,
+            axisId: axisSlot.id,
+            axisLabel: axisSlot.label,
+            axisValue: axisSlot.value,
+            additionId: addSlot.id,
+            additionLabel: addSlot.name,
+            additionCode: addSlot.code,
+            addMin: addVal,
+            addMax: addVal,
+            eye,
+            skuCode,
+            name,
+            rangeLabel,
+            bounds,
+          });
+        }
+      }
+    }
+  }
+
+  return planned;
 }
 
 export type CreateLensProductInput = {
@@ -342,51 +745,72 @@ export type CreateLensProductInput = {
   materialId?: string | null;
   indexId?: string | null;
   colorId?: string | null;
-  /** One or more active power-range masters → variants */
+  diameterId?: string | null;
+  /** V2 only — blank → Normal */
+  progressiveTypeId?: string | null;
+  /** One or more active power-range masters → variant cartesian */
   powerRangeIds: string[];
-  defaultPrice?: number | null;
+  axisIds?: string[];
+  additionIds?: string[];
+  /** Optional — blank/null → 0 on each new variant */
+  purchasePrice?: number | null;
+  /** Optional — blank/null → 0 on each new variant */
+  sellingPrice?: number | null;
   isActive?: boolean;
   actorUserId: string;
 };
 
 export type PreviewVariant = {
   powerRangeId: string;
+  axisId: string | null;
+  axisLabel: string | null;
+  additionId: string | null;
+  additionLabel: string | null;
+  eye: string | null;
   skuCode: string;
   name: string;
   rangeLabel: string;
 };
 
-/** Preview SKU/name for attrs + selected ranges (no DB write). */
-export async function previewLensProductVariants(input: {
+type VariantExpansionInput = {
   familyId: string;
   baseId: string;
   materialId?: string | null;
   indexId?: string | null;
   colorId?: string | null;
+  diameterId?: string | null;
+  progressiveTypeId?: string | null;
   powerRangeIds: string[];
-}): Promise<{
-  baseCode: string;
-  existingParentId: string | null;
-  variants: PreviewVariant[];
-}> {
+  axisIds?: string[];
+  additionIds?: string[];
+};
+
+async function resolveVariantExpansion(input: VariantExpansionInput) {
+  const familyId = requireId("familyId", input.familyId);
+  const familyRow = await prisma.lensFamily.findUnique({
+    where: { id: familyId },
+  });
+  if (!familyRow) {
+    throw new LensProductServiceError("Family not found.", 400, "INVALID_FK");
+  }
+  await assertActiveFk("Family", familyId, async () => familyRow);
+
+  const progressiveTypeId = await resolveProgressiveTypeIdForFamily(
+    familyRow,
+    normalizeOptionalId(input.progressiveTypeId)
+  );
+
   const ids: ParentAttrs = {
-    familyId: requireId("familyId", input.familyId),
+    familyId,
     baseId: requireId("baseId", input.baseId),
     materialId: normalizeOptionalId(input.materialId),
     indexId: normalizeOptionalId(input.indexId),
     colorId: normalizeOptionalId(input.colorId),
+    diameterId: normalizeOptionalId(input.diameterId),
+    progressiveTypeId,
   };
-  const { codeParts } = await loadParentAttrs(ids);
-  const baseCode = buildLensProductBaseCode(codeParts);
-  const existing = await findParentByAttrs(ids);
 
-  const rangeIds = [
-    ...new Set(
-      (input.powerRangeIds ?? [])
-        .map((id) => id?.trim())
-        .filter((id): id is string => Boolean(id))
-    ),
-  ];
+  const rangeIds = uniqueIds(input.powerRangeIds);
   if (rangeIds.length === 0) {
     throw new LensProductServiceError(
       "Select at least one power range.",
@@ -395,9 +819,18 @@ export async function previewLensProductVariants(input: {
     );
   }
 
-  const ranges = await prisma.lensPowerRange.findMany({
-    where: { id: { in: rangeIds } },
-  });
+  const axisIds = uniqueIds(input.axisIds);
+  const additionIds = uniqueIds(input.additionIds);
+
+  const { family, codeParts } = await loadParentAttrs(ids);
+  assertFamilyVariantInputs(family, axisIds, additionIds);
+
+  const [ranges, axes, additions] = await Promise.all([
+    prisma.lensPowerRange.findMany({ where: { id: { in: rangeIds } } }),
+    loadAxisMasters(axisIds),
+    loadAdditionMasters(additionIds),
+  ]);
+
   if (ranges.length !== rangeIds.length) {
     throw new LensProductServiceError(
       "One or more power ranges were not found.",
@@ -405,115 +838,112 @@ export async function previewLensProductVariants(input: {
       "INVALID_FK"
     );
   }
-
-  const variants: PreviewVariant[] = [];
-  for (const rangeId of rangeIds) {
-    const pr = ranges.find((r) => r.id === rangeId)!;
+  for (const pr of ranges) {
     await assertActiveFk("Power range", pr.id, async () => pr);
-    const bounds = {
-      sphMin: Number(pr.sphMin),
-      sphMax: Number(pr.sphMax),
-      cylMin: Number(pr.cylMin),
-      cylMax: Number(pr.cylMax),
-    };
-    variants.push({
-      powerRangeId: pr.id,
-      skuCode: buildLensProductSkuCode({ ...codeParts, ...bounds }),
-      name: buildLensProductName({
-        familyCode: codeParts.familyCode,
-        baseCode: codeParts.baseCode,
-        materialCode: codeParts.materialCode,
-        indexCode: codeParts.indexCode,
-        colorLabel: codeParts.colorLabel,
-        ...bounds,
-      }),
-      rangeLabel: formatPowerRangeCompact(
-        bounds.sphMin,
-        bounds.sphMax,
-        bounds.cylMin,
-        bounds.cylMax
-      ),
-    });
   }
+
+  const baseCode = buildLensProductBaseCode({
+    familyCode: codeParts.familyCode,
+    baseCode: codeParts.baseCode,
+    materialCode: codeParts.materialCode,
+    indexCode: codeParts.indexCode,
+    colorCode: codeParts.colorCode,
+    progressiveTypeCode: codeParts.progressiveTypeCode,
+    diameterCode: codeParts.diameterCode,
+  });
+
+  const variants = planVariants({
+    codeParts,
+    supportsEye: family.supportsEye,
+    ranges,
+    rangeIds,
+    axes,
+    additions,
+  });
+
+  return { ids, codeParts, baseCode, variants, rangeIds, family };
+}
+
+/** Preview SKU/name for attrs + selected ranges (no DB write). */
+export async function previewLensProductVariants(
+  input: VariantExpansionInput
+): Promise<{
+  baseCode: string;
+  existingParentId: string | null;
+  variants: PreviewVariant[];
+}> {
+  const { ids, baseCode, variants } = await resolveVariantExpansion(input);
+  const existing = await findParentByAttrs(ids);
 
   return {
     baseCode,
     existingParentId: existing?.id ?? null,
-    variants,
+    variants: variants.map((v) => ({
+      powerRangeId: v.powerRangeId,
+      axisId: v.axisId,
+      axisLabel: v.axisLabel,
+      additionId: v.additionId,
+      additionLabel: v.additionLabel,
+      eye: v.eye,
+      skuCode: v.skuCode,
+      name: v.name,
+      rangeLabel: v.rangeLabel,
+    })),
   };
 }
 
 async function createVariantsForParent(opts: {
   productId: string;
-  codeParts: {
-    familyCode: string;
-    baseCode: string;
-    materialCode?: string | null;
-    indexCode?: string | null;
-    colorCode?: string | null;
-    colorLabel?: string | null;
-  };
-  powerRangeIds: string[];
-  defaultPrice: number | null;
+  planned: PlannedVariant[];
+  purchasePrice: number;
+  sellingPrice: number;
   isActive: boolean;
 }) {
   const created = [];
-  for (const rangeId of opts.powerRangeIds) {
-    const pr = await prisma.lensPowerRange.findUnique({ where: { id: rangeId } });
-    await assertActiveFk("Power range", rangeId, async () => pr);
-    if (!pr) {
-      throw new LensProductServiceError("Power range not found.", 400, "INVALID_FK");
-    }
-
-    const existing = await prisma.lensProductVariant.findUnique({
+  for (const plan of opts.planned) {
+    const existing = await prisma.lensProductVariant.findFirst({
       where: {
-        productId_powerRangeId: {
-          productId: opts.productId,
-          powerRangeId: rangeId,
-        },
+        productId: opts.productId,
+        powerRangeId: plan.powerRangeId,
+        axisId: plan.axisId,
+        additionId: plan.additionId,
+        eye: plan.eye,
       },
     });
     if (existing) {
       throw new LensProductServiceError(
-        `Variant for power range ${formatPowerRangeCompact(Number(pr.sphMin), Number(pr.sphMax), Number(pr.cylMin), Number(pr.cylMax))} already exists on this parent.`,
+        `Variant already exists for this power range, axis, addition, and eye (${existing.skuCode}).`,
         409,
         "DUPLICATE_VARIANT",
         { variantId: existing.id, skuCode: existing.skuCode }
       );
     }
 
-    const bounds = {
-      sphMin: Number(pr.sphMin),
-      sphMax: Number(pr.sphMax),
-      cylMin: Number(pr.cylMin),
-      cylMax: Number(pr.cylMax),
-    };
-    const skuCode = buildLensProductSkuCode({ ...opts.codeParts, ...bounds });
-    const name = buildLensProductName({
-      familyCode: opts.codeParts.familyCode,
-      baseCode: opts.codeParts.baseCode,
-      materialCode: opts.codeParts.materialCode,
-      indexCode: opts.codeParts.indexCode,
-      colorLabel:
-        opts.codeParts.colorLabel ?? opts.codeParts.colorCode ?? null,
-      ...bounds,
-    });
-
     try {
       const row = await prisma.lensProductVariant.create({
         data: {
           productId: opts.productId,
-          powerRangeId: rangeId,
-          skuCode,
-          name,
-          sphMin: dec(bounds.sphMin),
-          sphMax: dec(bounds.sphMax),
-          cylMin: dec(bounds.cylMin),
-          cylMax: dec(bounds.cylMax),
-          defaultPrice:
-            opts.defaultPrice != null && Number.isFinite(opts.defaultPrice)
-              ? dec(opts.defaultPrice)
+          powerRangeId: plan.powerRangeId,
+          axisId: plan.axisId,
+          additionId: plan.additionId,
+          skuCode: plan.skuCode,
+          name: plan.name,
+          sphMin: dec(plan.bounds.sphMin),
+          sphMax: dec(plan.bounds.sphMax),
+          cylMin: dec(plan.bounds.cylMin),
+          cylMax: dec(plan.bounds.cylMax),
+          addMin:
+            plan.addMin != null && Number.isFinite(plan.addMin)
+              ? dec(plan.addMin)
               : null,
+          addMax:
+            plan.addMax != null && Number.isFinite(plan.addMax)
+              ? dec(plan.addMax)
+              : null,
+          axis: plan.axisValue,
+          eye: plan.eye,
+          purchasePrice: dec(opts.purchasePrice),
+          sellingPrice: dec(opts.sellingPrice),
           isActive: opts.isActive,
         },
         include: variantInclude,
@@ -525,7 +955,7 @@ async function createVariantsForParent(opts: {
         err.code === "P2002"
       ) {
         throw new LensProductServiceError(
-          `SKU or name already exists (${skuCode}).`,
+          `SKU or name already exists (${plan.skuCode}).`,
           409,
           "DUPLICATE_SKU"
         );
@@ -540,35 +970,11 @@ async function createVariantsForParent(opts: {
  * Create parent + variants, or reuse existing parent and add ranges.
  */
 export async function createLensProduct(input: CreateLensProductInput) {
-  const ids: ParentAttrs = {
-    familyId: requireId("familyId", input.familyId),
-    baseId: requireId("baseId", input.baseId),
-    materialId: normalizeOptionalId(input.materialId),
-    indexId: normalizeOptionalId(input.indexId),
-    colorId: normalizeOptionalId(input.colorId),
-  };
-
-  const rangeIds = [
-    ...new Set(
-      (input.powerRangeIds ?? [])
-        .map((id) => id?.trim())
-        .filter((id): id is string => Boolean(id))
-    ),
-  ];
-  if (rangeIds.length === 0) {
-    throw new LensProductServiceError(
-      "Select at least one power range.",
-      400,
-      "POWER_RANGE_REQUIRED"
-    );
-  }
-
-  const { codeParts } = await loadParentAttrs(ids);
-  const baseCode = buildLensProductBaseCode(codeParts);
-  const defaultPrice =
-    input.defaultPrice != null && Number.isFinite(input.defaultPrice)
-      ? input.defaultPrice
-      : null;
+  const { ids, baseCode, variants, rangeIds } = await resolveVariantExpansion(
+    input
+  );
+  const purchasePrice = normalizeMoney(input.purchasePrice, "purchasePrice");
+  const sellingPrice = normalizeMoney(input.sellingPrice, "sellingPrice");
   const isActive = input.isActive !== false;
 
   let parent = await findParentByAttrs(ids);
@@ -584,6 +990,8 @@ export async function createLensProduct(input: CreateLensProductInput) {
           materialId: ids.materialId,
           indexId: ids.indexId,
           colorId: ids.colorId,
+          diameterId: ids.diameterId,
+          progressiveTypeId: ids.progressiveTypeId,
           isActive,
         },
         include: parentInclude,
@@ -608,11 +1016,11 @@ export async function createLensProduct(input: CreateLensProductInput) {
     }
   }
 
-  const variants = await createVariantsForParent({
+  const createdVariants = await createVariantsForParent({
     productId: parent!.id,
-    codeParts,
-    powerRangeIds: rangeIds,
-    defaultPrice,
+    planned: variants,
+    purchasePrice,
+    sellingPrice,
     isActive,
   });
 
@@ -630,11 +1038,11 @@ export async function createLensProduct(input: CreateLensProductInput) {
       event: createdParent ? "LENS_PRODUCT_CREATED" : "LENS_PRODUCT_VARIANTS_ADDED",
       baseCode,
       powerRangeIds: rangeIds,
-      variantSkus: variants.map((v) => v.skuCode),
+      variantSkus: createdVariants.map((v) => v.skuCode),
     },
     activityMessage: createdParent
-      ? `Lens product parent created: ${baseCode} (${variants.length} variant(s))`
-      : `Added ${variants.length} variant(s) to ${baseCode}`,
+      ? `Lens product parent created: ${baseCode} (${createdVariants.length} variant(s))`
+      : `Added ${createdVariants.length} variant(s) to ${baseCode}`,
   });
 
   const fresh = await prisma.lensProduct.findUniqueOrThrow({
@@ -647,7 +1055,10 @@ export async function createLensProduct(input: CreateLensProductInput) {
 export async function addLensProductVariants(input: {
   productId: string;
   powerRangeIds: string[];
-  defaultPrice?: number | null;
+  axisIds?: string[];
+  additionIds?: string[];
+  purchasePrice?: number | null;
+  sellingPrice?: number | null;
   actorUserId: string;
 }) {
   const parent = await prisma.lensProduct.findUnique({
@@ -658,40 +1069,27 @@ export async function addLensProductVariants(input: {
     throw new LensProductServiceError("Product not found.", 404, "NOT_FOUND");
   }
 
-  const ids: ParentAttrs = {
+  const { variants, rangeIds } = await resolveVariantExpansion({
     familyId: parent.familyId,
     baseId: parent.baseId,
     materialId: parent.materialId,
     indexId: parent.indexId,
     colorId: parent.colorId,
-  };
-  const { codeParts } = await loadParentAttrs(ids);
+    diameterId: parent.diameterId,
+    progressiveTypeId: parent.progressiveTypeId,
+    powerRangeIds: input.powerRangeIds,
+    axisIds: input.axisIds,
+    additionIds: input.additionIds,
+  });
 
-  const rangeIds = [
-    ...new Set(
-      (input.powerRangeIds ?? [])
-        .map((id) => id?.trim())
-        .filter((id): id is string => Boolean(id))
-    ),
-  ];
-  if (rangeIds.length === 0) {
-    throw new LensProductServiceError(
-      "Select at least one power range.",
-      400,
-      "POWER_RANGE_REQUIRED"
-    );
-  }
-
-  const defaultPrice =
-    input.defaultPrice != null && Number.isFinite(input.defaultPrice)
-      ? input.defaultPrice
-      : null;
+  const purchasePrice = normalizeMoney(input.purchasePrice, "purchasePrice");
+  const sellingPrice = normalizeMoney(input.sellingPrice, "sellingPrice");
 
   await createVariantsForParent({
     productId: parent.id,
-    codeParts,
-    powerRangeIds: rangeIds,
-    defaultPrice,
+    planned: variants,
+    purchasePrice,
+    sellingPrice,
     isActive: true,
   });
 
@@ -854,7 +1252,8 @@ export async function listLensProducts(params: {
 
 export type UpdateLensProductVariantInput = {
   id: string;
-  defaultPrice?: number | null;
+  purchasePrice?: number | null;
+  sellingPrice?: number | null;
   isActive?: boolean;
   actorUserId: string;
 };
@@ -870,11 +1269,13 @@ export async function updateLensProductVariant(
   }
 
   const data: Prisma.LensProductVariantUpdateInput = {};
-  if (input.defaultPrice !== undefined) {
-    data.defaultPrice =
-      input.defaultPrice != null && Number.isFinite(input.defaultPrice)
-        ? dec(input.defaultPrice)
-        : null;
+  if (input.purchasePrice !== undefined) {
+    data.purchasePrice = dec(
+      normalizeMoney(input.purchasePrice, "purchasePrice")
+    );
+  }
+  if (input.sellingPrice !== undefined) {
+    data.sellingPrice = dec(normalizeMoney(input.sellingPrice, "sellingPrice"));
   }
   if (input.isActive !== undefined) data.isActive = input.isActive;
 
