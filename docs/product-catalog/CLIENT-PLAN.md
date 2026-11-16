@@ -14,11 +14,11 @@ Give Admin a clear way to:
 1. Maintain **attribute lists** (Family, Base, Material, Index, Color, **Power range**; Coating master may remain but is **not** product identity) — add, rename, active / inactive.  
 2. **Create a product parent** once by selecting attributes (Material **optional**), then attach **one or more power-range attributes** as **variants** — without re-picking the same attrs for each range.  
 3. Browse catalog in **flat** (per variant) and **grouped** (by parent / group-by) views, plus grid where useful.  
-4. Open each **variant** and see an **Excel-style power matrix** (SPH × CYL) from that variant’s range.
+4. Open the **parent product** and see a **family-aware power matrix** composed from its variants (SV: SPH × CYL; KT/V2: Sphere / CYL+Axis / Compound / Cross with ADD or Eye×ADD columns).
 
 **SKU** and **name** are both **auto-built** (Admin does not type them). SKU is a compact machine code; name is human-readable for procurement / stock (no supplier brand fluff).
 
-Each variant is a fully separate sellable line (own SKU, name, price, matrix; future stock/PO/orders hang on the variant).
+Each variant is a fully separate sellable line (own SKU, name, price). The matrix is a **view** over sibling variants on the parent; future stock/PO leaves key off the same optical cell identity.
 
 ---
 
@@ -33,18 +33,19 @@ Each variant is a fully separate sellable line (own SKU, name, price, matrix; fu
 - **Reuse parent** when attrs already exist → Add power range(s)
 - **Catalog list** — flat + grouped views (server pagination / expand)
 - Auto **SKU** + auto **name** builders (locked formats below)
-- Product / variant detail + matrix (view-only cells `_ / _ / _` this phase)
+- Product parent detail + family-aware matrix (view-only cells `_ / _ / _` this phase)
+- Variant detail (variant cards + product attributes + full family matrix + all variants on one page)
 - Dev cutover: **delete ~2 test products and recreate** (no migration)
 
 ### Out of scope (this phase)
 
 - Saving stock numbers into every matrix cell / bulk leaf rows  
-  *(See [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md) — attach to **variant**.)*
+  *(See [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md) — same matrix view, live qty later.)*
 - Brand / supplier fancy names (DECENTRX, Night Ryder, 75mm, …)
 - Overlapping-range order allocation (which variant fills a shared power) — later orders/stock RC
 - Customer website / mobile catalog rewrite
 - Removing legacy `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` tables
-- Full KT / V2 multi-dimension matrices beyond SPH×CYL first
+- Editing Current / Threshold / Target on matrix cells
 
 ---
 
@@ -67,10 +68,10 @@ Each variant is a fully separate sellable line (own SKU, name, price, matrix; fu
 | **Attribute** | Master value (HC, 1.56, Green, power range `-6.00/+2.00`, …). |
 | **Power range (attribute)** | Reusable SPH/CYL bounds master. Label e.g. **`-6.00/+2.00`**. |
 | **Product (parent)** | One attribute combination: Material? · Base · Index · Family · Color. Created once. Internal base code only (not shown). |
-| **Variant** | Parent + one power range. **Sellable** catalog SKU: unique auto SKU + auto name + price + matrix. |
+| **Variant** | Parent + one power range (+ axis/ADD/eye when family requires). **Sellable** catalog SKU: unique auto SKU, display name, price. |
 | **SKU code** | Compact machine id on the **variant** (not typed). |
 | **Name** | Human label on the **variant** (not typed; no brand). |
-| **Matrix** | SPH × CYL grid for that variant’s range; cells `_ / _ / _` for now. |
+| **Matrix** | Parent-level family sheets over all variants; cells `_ / _ / _` (Current / Threshold / Target) until stock is live. |
 
 ```
 Attributes (masters)
@@ -91,7 +92,7 @@ Attributes (masters)
 │  skuCode  PG-BR-1P56-KT-GREEN-… │
 │  name     PG 1.56 KT BR Green   │
 │           -6.00/+2.00           │
-│  price · active · matrix        │
+│  price · active                 │
 └─────────────────────────────────┘
 ```
 
@@ -112,7 +113,7 @@ Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and 
 | Material | Plain, UC, Tintable, Poly, PG, PG Poly | Optional |
 | Index | 1.49, 1.56, 1.61, 1.67, 1.74 | Yes |
 | Color | Green, Blue, Grey, Brown, Violet, … | Yes (identity; not “tint only”) |
-| Progressive type | Normal, Digital, Freeform, 9+4 design | V2 parent only; blank → Normal; in SKU not name |
+| Progressive type | Normal, Digital, Freeform, 9+4 design | V2 parent only; optional (no default); in SKU and parent identity, not name |
 | Axis | 10…180 step 10 + 45 + 135 | Multi → variants (KT/V2); only if range CYL ≠ 0 |
 | Addition | 0, 0.25…6.00 | Multi → variants (KT/V2); optional |
 | Diameter | 55…120 step 5 mm | Optional single on parent |
@@ -162,14 +163,14 @@ Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and 
 
 **Path:** `/inventory/products-catalog/new`
 
-1. **Family** → **Base** → **Material** (optional) → **Index** → **Color** → **Diameter** (optional) → **Progressive type** (V2 only; optional → Normal)  
+1. **Family** → **Base** → **Material** (optional) → **Index** → **Color** → **Diameter** (optional) → **Progressive type** (V2 only; optional, no default)  
 2. **Power ranges** — multi-select (≥1)  
 3. If family supports Axis and a selected range has CYL ≠ 0 → optional **Axes** multi-select  
 4. If family supports ADD → optional **Additions** multi-select  
 5. Progressive (V2): system auto-creates **LEFT + RIGHT** for each combo (no eye picker)  
 6. Optional **Purchase price** + **Selling price** (blank → `0` on each new variant; always numeric)  
 7. **Preview** each variant’s auto SKU + auto name (read-only)  
-8. **Save** → one parent + N variants (`ranges × axes × ADDs × eyes`; SPH-only ranges skip axes)  
+8. **Save** → one parent + N variants (`ranges × axes × ADDs × eyes`; SPH-only ranges skip axes). Existing children are skipped; only missing rows are created.  
 
 If the attribute combo already exists → do not duplicate parent; go to that parent and add the new ranges.
 
@@ -203,8 +204,8 @@ Compact codes; omit Material when absent; **all families** (SV, KT, V2, …); **
 | Codes | Uppercase; `.` → `P` (`1.56` → `1P56`); strip non-alphanumeric |
 | Powers | Negatives → `M` (`-6` → `M6`); decimals use `P` |
 | Source | Bounds from selected **power-range attribute** |
-| Uniqueness | Variant `skuCode` unique; reject duplicate parent+range |
-| Parent uniqueness | `(family, base, index, color, material?)` — **absent material = none** (omit from SKU/name; no “None” label required). Same combo without material must be **one** parent (fix Postgres `NULL` unique quirk — see **[RC-05](../requested-changes.md#rc-05--finish-photo-unwire-clients--null-material-parent-uniqueness)**). |
+| Uniqueness | Variant `skuCode` unique; `name` is display-only and may repeat. Existing `(range, axis, ADD, eye)` children are skipped; only missing children are inserted. |
+| Parent uniqueness | `(family, base, material?, index?, color?, diameter?, progressiveType?)` — **absent optional attr = none** (omit from SKU/name; no “None” label required). Same combo without an optional attr must be **one** parent (Postgres `NULLS NOT DISTINCT`). |
 
 Example: `PG-BR-1P56-KT-GREEN-SM6TP2-C0TM2`
 
@@ -220,22 +221,36 @@ Example: `PG 1.56 KT BR Green -6.00/+2.00`
 
 Omit Material token when Material is absent.
 
-### 6.5 Parent detail + variant matrix
+### 6.5 Parent detail + family matrix
 
 **Parent path:** `/inventory/products-catalog/[id]` (parent id)
 
-- Attribute summary (Material? · Base · Index · Family · Color)  
-- Variants table: range label, SKU, name, purchase/selling price, active  
-- **Add power range(s)**  
+- Attribute summary (Material? · Base · Index · Family · Color · Diameter? · Progressive type?)  
+- **Power matrix** (family-aware sheets from sibling variants)  
+- Variants table: range, axis, ADD, eye, SKU, name, purchase/selling price, active  
+- **Add power range(s)** (+ axes / ADDs when family supports)  
 - Lock attribute edit after any variant has stock/orders  
 
-**Variant matrix:** open from a variant row → SPH × CYL from that range; `_ / _ / _` cells; view-only this phase.
+**Matrix (parent):** view-only `_ / _ / _` per covered optical cell. No DB change — composed from existing variants.
+
+Sheets are **stacked Excel-like tables** (no tabs/buttons). Each table has explicit left stub columns and its own data columns.
+
+| Family | Sheets (stacked, empty omitted) | Stub columns | Data columns |
+|--------|---------------------------------|--------------|--------------|
+| **SV** | SPH × CYL | `SPH` | one `CYL` column per step |
+| **KT** | Sphere → CYL+Axis → Compound → Cross | `SPH`; `CYL`, `Axis`; `SPH`, `CYL`, `Axis` | one `ADD +x.xx` column per ADD |
+| **V2** | Same sheet kinds as KT | same as KT | `RE` block then `LE` block, one column per ADD in each (`RE +1.00 … LE +3.00`) |
 
 | Rule | Detail |
 |------|--------|
-| Axes | SPH side, CYL top |
-| Steps | From saved range (typically 0.25 inside mid band) |
-| Behaviour | View only until stock phase |
+| Steps | 0.25 from variant ranges |
+| Stub columns | Only render a dimension that exists on the sheet (`Axis` omitted when no axis) |
+| Axis blocks | One table per axis, largest first (`180` → `90`); rows `0.00` → max per axis |
+| Compound vs cross | Compound sheet excludes cross-pattern combos; cross gets its own sheet |
+| Presence | Cell shows triad only when a variant covers that power (+ ADD/axis/eye) |
+| Behaviour | View only until stock phase; same layout later binds live qty |
+
+**Variant path:** `/inventory/products-catalog/variants/[id]` — variant cards + product attributes + full family matrix + all variants, all on the same page. No separate matrix page or `#matrix` hop.
 
 ---
 
@@ -262,8 +277,8 @@ Omit Material token when Material is absent.
             ▼
 ┌─────────────────────────┐
 │  4. Parent detail       │
+│  Family power matrix    │
 │  Add more ranges        │
-│  Open variant matrix    │
 └─────────────────────────┘
 ```
 
@@ -323,7 +338,6 @@ Two separate sellable products; Admin did not re-enter PG/BR/1.56/KT/Green for t
 ## 11. Open points (non-blocking)
 
 1. Overlapping power ranges across variants — order/stock allocation later.  
-2. KT / V2 multi-axis matrix after SPH×CYL.  
-3. Live stock on matrix cells → stock-management (on **variant**).  
+2. Live stock on parent matrix cells → stock-management (`LensProductPower` / leaf keyed by sph·cyl·add·axis·eye).  
 4. Whether Brand becomes a real attribute later (ignored for now).  
 5. Further catalog RCs → [`requested-changes.md`](../requested-changes.md).

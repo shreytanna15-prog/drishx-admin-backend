@@ -16,7 +16,6 @@ import {
   buildLensProductBaseCode,
   buildLensProductName,
   buildLensProductSkuCode,
-  DEFAULT_PROGRESSIVE_TYPE_CODE,
 } from "./lens-product-sku";
 
 export { steppedRange };
@@ -24,7 +23,6 @@ export {
   buildLensProductBaseCode,
   buildLensProductName,
   buildLensProductSkuCode,
-  DEFAULT_PROGRESSIVE_TYPE_CODE,
 } from "./lens-product-sku";
 
 export class LensProductServiceError extends Error {
@@ -364,6 +362,8 @@ type ParentAttrs = {
   progressiveTypeId: string | null;
 };
 
+type DbClient = Prisma.TransactionClient | typeof prisma;
+
 type CodeParts = {
   familyCode: string;
   baseCode: string;
@@ -460,10 +460,10 @@ async function loadParentAttrs(ids: ParentAttrs) {
   };
 }
 
-async function resolveProgressiveTypeIdForFamily(
+function resolveProgressiveTypeIdForFamily(
   family: { code: string; supportsProgressiveType: boolean },
   progressiveTypeId: string | null
-): Promise<string | null> {
+): string | null {
   if (!family.supportsProgressiveType) {
     if (progressiveTypeId) {
       throw new LensProductServiceError(
@@ -474,29 +474,11 @@ async function resolveProgressiveTypeIdForFamily(
     }
     return null;
   }
-  if (progressiveTypeId) return progressiveTypeId;
-  const normal = await prisma.lensProgressiveType.findUnique({
-    where: { code: DEFAULT_PROGRESSIVE_TYPE_CODE },
-  });
-  if (!normal) {
-    throw new LensProductServiceError(
-      `Default progressive type ${DEFAULT_PROGRESSIVE_TYPE_CODE} is missing. Run attribute seed.`,
-      500,
-      "MISSING_DEFAULT_PROGRESSIVE_TYPE"
-    );
-  }
-  if (!normal.isActive) {
-    throw new LensProductServiceError(
-      `Default progressive type ${DEFAULT_PROGRESSIVE_TYPE_CODE} is inactive.`,
-      400,
-      "INACTIVE_FK"
-    );
-  }
-  return normal.id;
+  return progressiveTypeId;
 }
 
-async function findParentByAttrs(ids: ParentAttrs) {
-  return prisma.lensProduct.findFirst({
+async function findParentByAttrs(ids: ParentAttrs, client: DbClient = prisma) {
+  return client.lensProduct.findFirst({
     where: {
       familyId: ids.familyId,
       baseId: ids.baseId,
@@ -746,7 +728,7 @@ export type CreateLensProductInput = {
   indexId?: string | null;
   colorId?: string | null;
   diameterId?: string | null;
-  /** V2 only — blank → Normal */
+  /** V2 only — optional; blank stays null. */
   progressiveTypeId?: string | null;
   /** One or more active power-range masters → variant cartesian */
   powerRangeIds: string[];
@@ -795,7 +777,7 @@ async function resolveVariantExpansion(input: VariantExpansionInput) {
   }
   await assertActiveFk("Family", familyId, async () => familyRow);
 
-  const progressiveTypeId = await resolveProgressiveTypeIdForFamily(
+  const progressiveTypeId = resolveProgressiveTypeIdForFamily(
     familyRow,
     normalizeOptionalId(input.progressiveTypeId)
   );
@@ -892,78 +874,157 @@ export async function previewLensProductVariants(
   };
 }
 
+function variantIdentityKey(row: {
+  powerRangeId: string;
+  axisId: string | null;
+  additionId: string | null;
+  eye: string | null;
+}): string {
+  return [
+    row.powerRangeId,
+    row.axisId ?? "",
+    row.additionId ?? "",
+    row.eye ?? "",
+  ].join("|");
+}
+
+function buildVariantCreateData(
+  opts: {
+    productId: string;
+    purchasePrice: number;
+    sellingPrice: number;
+    isActive: boolean;
+  },
+  plan: PlannedVariant
+): Prisma.LensProductVariantCreateManyInput {
+  return {
+    productId: opts.productId,
+    powerRangeId: plan.powerRangeId,
+    axisId: plan.axisId,
+    additionId: plan.additionId,
+    skuCode: plan.skuCode,
+    name: plan.name,
+    sphMin: dec(plan.bounds.sphMin),
+    sphMax: dec(plan.bounds.sphMax),
+    cylMin: dec(plan.bounds.cylMin),
+    cylMax: dec(plan.bounds.cylMax),
+    addMin:
+      plan.addMin != null && Number.isFinite(plan.addMin)
+        ? dec(plan.addMin)
+        : null,
+    addMax:
+      plan.addMax != null && Number.isFinite(plan.addMax)
+        ? dec(plan.addMax)
+        : null,
+    axis: plan.axisValue,
+    eye: plan.eye,
+    purchasePrice: dec(opts.purchasePrice),
+    sellingPrice: dec(opts.sellingPrice),
+    isActive: opts.isActive,
+  };
+}
+
 async function createVariantsForParent(opts: {
+  tx: Prisma.TransactionClient;
   productId: string;
   planned: PlannedVariant[];
   purchasePrice: number;
   sellingPrice: number;
   isActive: boolean;
-}) {
-  const created = [];
-  for (const plan of opts.planned) {
-    const existing = await prisma.lensProductVariant.findFirst({
-      where: {
-        productId: opts.productId,
-        powerRangeId: plan.powerRangeId,
-        axisId: plan.axisId,
-        additionId: plan.additionId,
-        eye: plan.eye,
-      },
-    });
-    if (existing) {
-      throw new LensProductServiceError(
-        `Variant already exists for this power range, axis, addition, and eye (${existing.skuCode}).`,
-        409,
-        "DUPLICATE_VARIANT",
-        { variantId: existing.id, skuCode: existing.skuCode }
-      );
-    }
+}): Promise<{
+  createdSkus: string[];
+  skipped: Array<{ id: string; skuCode: string }>;
+}> {
+  const variantSelect = {
+    id: true,
+    skuCode: true,
+    productId: true,
+    powerRangeId: true,
+    axisId: true,
+    additionId: true,
+    eye: true,
+  } satisfies Prisma.LensProductVariantSelect;
 
-    try {
-      const row = await prisma.lensProductVariant.create({
-        data: {
-          productId: opts.productId,
-          powerRangeId: plan.powerRangeId,
-          axisId: plan.axisId,
-          additionId: plan.additionId,
-          skuCode: plan.skuCode,
-          name: plan.name,
-          sphMin: dec(plan.bounds.sphMin),
-          sphMax: dec(plan.bounds.sphMax),
-          cylMin: dec(plan.bounds.cylMin),
-          cylMax: dec(plan.bounds.cylMax),
-          addMin:
-            plan.addMin != null && Number.isFinite(plan.addMin)
-              ? dec(plan.addMin)
-              : null,
-          addMax:
-            plan.addMax != null && Number.isFinite(plan.addMax)
-              ? dec(plan.addMax)
-              : null,
-          axis: plan.axisValue,
-          eye: plan.eye,
-          purchasePrice: dec(opts.purchasePrice),
-          sellingPrice: dec(opts.sellingPrice),
-          isActive: opts.isActive,
-        },
-        include: variantInclude,
-      });
-      created.push(serializeLensProductVariant(row));
-    } catch (err) {
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === "P2002"
-      ) {
-        throw new LensProductServiceError(
-          `SKU or name already exists (${plan.skuCode}).`,
-          409,
-          "DUPLICATE_SKU"
-        );
-      }
-      throw err;
+  const existing = await opts.tx.lensProductVariant.findMany({
+    where: { productId: opts.productId },
+    select: variantSelect,
+  });
+  const existingByIdentity = new Map(
+    existing.map((row) => [variantIdentityKey(row), row])
+  );
+
+  const skipped: Array<{ id: string; skuCode: string }> = [];
+  const missing: PlannedVariant[] = [];
+  const plannedSeen = new Set<string>();
+
+  for (const plan of opts.planned) {
+    const key = variantIdentityKey(plan);
+    if (plannedSeen.has(key)) continue;
+    plannedSeen.add(key);
+    const hit = existingByIdentity.get(key);
+    if (hit) {
+      skipped.push({ id: hit.id, skuCode: hit.skuCode });
+    } else {
+      missing.push(plan);
     }
   }
-  return created;
+
+  if (missing.length === 0) {
+    return { createdSkus: [], skipped };
+  }
+
+  const createdRows = await opts.tx.lensProductVariant.createManyAndReturn({
+    data: missing.map((plan) => buildVariantCreateData(opts, plan)),
+    skipDuplicates: true,
+    select: { id: true, skuCode: true },
+  });
+  const createdSkus = createdRows.map((row) => row.skuCode);
+  const createdSet = new Set(createdSkus);
+  const notCreated = missing.filter((plan) => !createdSet.has(plan.skuCode));
+
+  if (notCreated.length > 0) {
+    const conflicts = await opts.tx.lensProductVariant.findMany({
+      where: { skuCode: { in: notCreated.map((plan) => plan.skuCode) } },
+      select: variantSelect,
+    });
+    const conflictsBySku = new Map(conflicts.map((row) => [row.skuCode, row]));
+
+    const refreshed = await opts.tx.lensProductVariant.findMany({
+      where: { productId: opts.productId },
+      select: variantSelect,
+    });
+    const refreshedByIdentity = new Map(
+      refreshed.map((row) => [variantIdentityKey(row), row])
+    );
+
+    for (const plan of notCreated) {
+      const same = refreshedByIdentity.get(variantIdentityKey(plan));
+      if (same) {
+        skipped.push({ id: same.id, skuCode: same.skuCode });
+        continue;
+      }
+      const conflict = conflictsBySku.get(plan.skuCode);
+      if (conflict) {
+        throw new LensProductServiceError(
+          `SKU ${plan.skuCode} is already used by another variant.`,
+          409,
+          "DUPLICATE_SKU",
+          {
+            skuCode: plan.skuCode,
+            variantId: conflict.id,
+            productId: conflict.productId,
+          }
+        );
+      }
+      throw new LensProductServiceError(
+        `Could not create variant ${plan.skuCode}.`,
+        500,
+        "VARIANT_CREATE_FAILED"
+      );
+    }
+  }
+
+  return { createdSkus, skipped };
 }
 
 /**
@@ -1016,37 +1077,85 @@ export async function createLensProduct(input: CreateLensProductInput) {
     }
   }
 
-  const createdVariants = await createVariantsForParent({
-    productId: parent!.id,
-    planned: variants,
-    purchasePrice,
-    sellingPrice,
-    isActive,
-  });
+  if (!parent) {
+    throw new LensProductServiceError(
+      "Could not resolve product parent.",
+      500,
+      "PARENT_RESOLVE_FAILED"
+    );
+  }
 
-  await recordAuditEvent(prisma, {
-    action: AuditAction.SETTINGS_UPDATED,
-    module: AuditModule.INVENTORY,
-    entityType: "LensProduct",
-    entityId: parent!.id,
-    actor: {
-      actorType: "HUMAN",
-      actorUserId: input.actorUserId,
-      actorName: null,
-    },
-    context: {
-      event: createdParent ? "LENS_PRODUCT_CREATED" : "LENS_PRODUCT_VARIANTS_ADDED",
-      baseCode,
-      powerRangeIds: rangeIds,
-      variantSkus: createdVariants.map((v) => v.skuCode),
-    },
-    activityMessage: createdParent
-      ? `Lens product parent created: ${baseCode} (${createdVariants.length} variant(s))`
-      : `Added ${createdVariants.length} variant(s) to ${baseCode}`,
-  });
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        const stillThere = await tx.lensProduct.findUnique({
+          where: { id: parent.id },
+          select: { id: true },
+        });
+        if (!stillThere) {
+          throw new LensProductServiceError(
+            "Product not found.",
+            404,
+            "NOT_FOUND"
+          );
+        }
+
+        const variantResult = await createVariantsForParent({
+          tx,
+          productId: parent.id,
+          planned: variants,
+          purchasePrice,
+          sellingPrice,
+          isActive,
+        });
+
+        await recordAuditEvent(tx, {
+          action: AuditAction.SETTINGS_UPDATED,
+          module: AuditModule.INVENTORY,
+          entityType: "LensProduct",
+          entityId: parent.id,
+          actor: {
+            actorType: "HUMAN",
+            actorUserId: input.actorUserId,
+            actorName: null,
+          },
+          context: {
+            event: createdParent
+              ? "LENS_PRODUCT_CREATED"
+              : "LENS_PRODUCT_VARIANTS_ADDED",
+            baseCode,
+            powerRangeIds: rangeIds,
+            createdVariantSkus: variantResult.createdSkus,
+            skippedVariantSkus: variantResult.skipped.map((v) => v.skuCode),
+            createdCount: variantResult.createdSkus.length,
+            skippedCount: variantResult.skipped.length,
+          },
+          activityMessage: createdParent
+            ? `Lens product parent created: ${baseCode} (${variantResult.createdSkus.length} variant(s))`
+            : variantResult.createdSkus.length === 0
+              ? `No new variants added to ${baseCode}; ${variantResult.skipped.length} already existed`
+              : `Added ${variantResult.createdSkus.length} variant(s) to ${baseCode}${
+                  variantResult.skipped.length > 0
+                    ? `; ${variantResult.skipped.length} already existed`
+                    : ""
+                }`,
+        });
+      },
+      { maxWait: 10_000, timeout: 30_000 }
+    );
+  } catch (err) {
+    if (createdParent) {
+      await prisma.lensProduct
+        .deleteMany({
+          where: { id: parent.id, variants: { none: {} } },
+        })
+        .catch(() => undefined);
+    }
+    throw err;
+  }
 
   const fresh = await prisma.lensProduct.findUniqueOrThrow({
-    where: { id: parent!.id },
+    where: { id: parent.id },
     include: parentInclude,
   });
   return serializeLensProduct(fresh);
@@ -1085,30 +1194,47 @@ export async function addLensProductVariants(input: {
   const purchasePrice = normalizeMoney(input.purchasePrice, "purchasePrice");
   const sellingPrice = normalizeMoney(input.sellingPrice, "sellingPrice");
 
-  await createVariantsForParent({
-    productId: parent.id,
-    planned: variants,
-    purchasePrice,
-    sellingPrice,
-    isActive: true,
-  });
+  await prisma.$transaction(
+    async (tx) => {
+      const variantResult = await createVariantsForParent({
+        tx,
+        productId: parent.id,
+        planned: variants,
+        purchasePrice,
+        sellingPrice,
+        isActive: true,
+      });
 
-  await recordAuditEvent(prisma, {
-    action: AuditAction.SETTINGS_UPDATED,
-    module: AuditModule.INVENTORY,
-    entityType: "LensProduct",
-    entityId: parent.id,
-    actor: {
-      actorType: "HUMAN",
-      actorUserId: input.actorUserId,
-      actorName: null,
+      await recordAuditEvent(tx, {
+        action: AuditAction.SETTINGS_UPDATED,
+        module: AuditModule.INVENTORY,
+        entityType: "LensProduct",
+        entityId: parent.id,
+        actor: {
+          actorType: "HUMAN",
+          actorUserId: input.actorUserId,
+          actorName: null,
+        },
+        context: {
+          event: "LENS_PRODUCT_VARIANTS_ADDED",
+          powerRangeIds: rangeIds,
+          createdVariantSkus: variantResult.createdSkus,
+          skippedVariantSkus: variantResult.skipped.map((v) => v.skuCode),
+          createdCount: variantResult.createdSkus.length,
+          skippedCount: variantResult.skipped.length,
+        },
+        activityMessage:
+          variantResult.createdSkus.length === 0
+            ? `No new variants added to ${parent.baseCode}; ${variantResult.skipped.length} already existed`
+            : `Added ${variantResult.createdSkus.length} variant(s) to ${parent.baseCode}${
+                variantResult.skipped.length > 0
+                  ? `; ${variantResult.skipped.length} already existed`
+                  : ""
+              }`,
+      });
     },
-    context: {
-      event: "LENS_PRODUCT_VARIANTS_ADDED",
-      powerRangeIds: rangeIds,
-    },
-    activityMessage: `Added power range(s) to ${parent.baseCode}`,
-  });
+    { maxWait: 10_000, timeout: 30_000 }
+  );
 
   const fresh = await prisma.lensProduct.findUniqueOrThrow({
     where: { id: parent.id },

@@ -117,6 +117,41 @@ describe("lens product SKU + name", () => {
     assert.equal(buildPowerNameToken(0, -6, 0, 4), "-6.00/+4.00");
   });
 
+  it("keeps ADD/eye identity in SKU while name stays a display label", () => {
+    const power = {
+      sphMin: 0,
+      sphMax: -4,
+      cylMin: 0,
+      cylMax: -2,
+      axisValue: 90,
+    };
+    const nameParts = {
+      familyCode: "V2",
+      baseCode: "BR",
+      materialCode: "PG",
+      indexCode: "1.56",
+      colorLabel: "Green",
+      ...power,
+    };
+
+    assert.equal(
+      buildLensProductName(nameParts),
+      buildLensProductName(nameParts)
+    );
+    assert.notEqual(
+      buildLensProductSkuCode({
+        ...nameParts,
+        additionCode: "ADD1P00",
+        eye: "LEFT",
+      }),
+      buildLensProductSkuCode({
+        ...nameParts,
+        additionCode: "ADD1P00",
+        eye: "RIGHT",
+      })
+    );
+  });
+
   it("builds human name with compact power and optional axis only", () => {
     assert.equal(
       buildLensProductName({

@@ -25,9 +25,10 @@
 | Attributes UI | `app/(admin)/inventory/attributes/page.tsx` |
 | Products list (flat / grouped) | `app/(admin)/inventory/products-catalog/page.tsx` |
 | Create parent + variants | `app/(admin)/inventory/products-catalog/new/page.tsx` |
-| Parent detail + add ranges | `app/(admin)/inventory/products-catalog/[id]/page.tsx` |
-| Variant detail + matrix | `app/(admin)/inventory/products-catalog/variants/[id]/page.tsx` |
-| Reusable catalog UI | `components/catalog/` (`SkuChip`, `CatalogSelectField`, `PowerRangeMultiSelect`, `VariantPreviewTable`) |
+| Parent detail + matrix + add ranges | `app/(admin)/inventory/products-catalog/[id]/page.tsx` |
+| Variant detail | `app/(admin)/inventory/products-catalog/variants/[id]/page.tsx` |
+| Reusable catalog UI | `components/catalog/` (`SkuChip`, `CatalogSelectField`, `PowerRangeMultiSelect`, `VariantPreviewTable`, `CatalogMatrixPanel`) |
+| Family matrix composer | `app/lib/catalog/catalog-matrix.ts` (+ `catalog-matrix.test.ts`) |
 | Admin client wrappers | `app/lib/admin-lens-catalog.ts` |
 | SKU / name builders | `app/lib/catalog/lens-product-sku.ts` |
 | Product / attribute services | `app/lib/catalog/lens-product-service.ts`, `lens-attribute-service.ts`, `lens-power-range-service.ts` |
@@ -60,7 +61,7 @@ Attribute masters
         │
         ▼
 LensProduct (parent)
-  material? · base · index · family · color · diameter? · progressiveType? (V2→Normal)
+  material? · base · index · family · color · diameter? · progressiveType? (V2, optional)
   unique on that combo; internal baseCode includes progressive type when set
         │ 1 → many
         ▼
@@ -102,9 +103,8 @@ Internal `baseCode` (unique). No power bounds, no `skuCode`/`name` on parent.
 
 ### 3.4 `LensProductVariant`
 
-`productId`, `powerRangeId`, optional `axisId` / `additionId` / `eye`, denormalized sph/cyl/axis, unique `skuCode` / `name`, `purchasePrice` / `sellingPrice` (Decimal, default `0`, never null), `isActive`.  
-Unique `(productId, powerRangeId, axisId, additionId, eye)` with `NULLS NOT DISTINCT`.  
-Unique `(productId, powerRangeId)`.
+`productId`, `powerRangeId`, optional `axisId` / `additionId` / `eye`, denormalized sph/cyl/axis, unique `skuCode`, display-only `name` (may repeat), `purchasePrice` / `sellingPrice` (Decimal, default `0`, never null), `isActive`.  
+Unique `(productId, powerRangeId, axisId, additionId, eye)` with `NULLS NOT DISTINCT`.
 
 ### 3.5 Seed
 
@@ -136,7 +136,7 @@ Unique `(productId, powerRangeId)`.
 | Coating | Not in SKU or name |
 | Material | Optional; omit segment when absent |
 | Create | Server builds both; no typed `skuCode` or `name` |
-| Uniqueness | Parent attrs unique; variant `(productId, powerRangeId, axisId, additionId, eye)` + unique sku/name |
+| Uniqueness | Parent attrs unique; variant `(productId, powerRangeId, axisId, additionId, eye)` + unique `skuCode` (name display-only) |
 
 Example: `PLAIN-HC-1P56-SV-CLEAR-S0T2-C0T1`
 
@@ -190,7 +190,7 @@ All ADMIN session.
 }
 ```
 
-Validation: active FKs, base↔material when material set, ≥1 power range, unique resulting SKUs / no duplicate parent+range.
+Validation: active FKs, base↔material when material set, ≥1 power range, unique resulting SKUs. Existing `(range, axis, ADD, eye)` children are skipped; parent create + variant inserts + audit run in one transaction.
 
 **Note:** Older `/api/admin/catalog/products` serves the separate `CatalogProduct` leaf-generation path — do not mix with `LensProduct` UI.
 
@@ -207,12 +207,12 @@ Validation: active FKs, base↔material when material set, ≥1 power range, uni
 | Attributes | `/inventory/attributes` | Tabs; add/edit; active toggle |
 | Catalog | `/inventory/products-catalog` | Flat variants \| grouped parents with expand → variants; filters |
 | New | `/inventory/products-catalog/new` | Attrs + multi power ranges; live preview table |
-| Parent | `/inventory/products-catalog/[id]` | Variants table; add more ranges |
-| Variant | `/inventory/products-catalog/variants/[id]` | Header + SPH×CYL matrix |
+| Parent | `/inventory/products-catalog/[id]` | Family matrix; variants table; add more ranges |
+| Variant | `/inventory/products-catalog/variants/[id]` | Variant cards + product attributes + full family matrix + all variants on the same page (no `#matrix` hop) |
 
-Reusable pieces: `SkuChip`, `CatalogSelectField`, `PowerRangeMultiSelect`, `VariantPreviewTable`, plus shared `AdminTable` / `AdminSelect`.
+Reusable pieces: `SkuChip`, `CatalogSelectField`, `PowerRangeMultiSelect`, `VariantPreviewTable`, `CatalogMatrixPanel`, plus shared `AdminTable` / `AdminSelect`.
 
-Matrix uses `steppedPowerRange` (0.25) on the client — no per-cell API.
+Matrix: `buildCatalogMatrix` in `catalog-matrix.ts` (0.25 steps, family sheets) — no per-cell API; cells `_ / _ / _` until stock. Each sheet carries explicit `stubColumns` (`sph` / `cyl` / `axis`), `dataAxis` (`cyl` for SV, `add` for KT/V2), and `dataColumns` (`ADD` or `RE`/`LE` × `ADD`). The panel stacks every sheet as an Excel-like table (no tabs), freezes stub columns, and puts axis blocks largest-first. `CatalogMatrixPanel` takes `familyLabel` for sheet titles.
 
 ---
 
@@ -222,7 +222,7 @@ Matrix uses `steppedPowerRange` (0.25) on the client — no per-cell API.
 
 ### Phase B — Product create + list — **done** (superseded by RC-04 parent/variants)
 
-### Phase C — Variant detail matrix UI — **done**
+### Phase C — Matrix UI — **done** (superseded: parent family-aware sheets)
 
 ### RC-03 — Power-range masters + optional material — **done**
 
@@ -255,15 +255,15 @@ Matrix uses `steppedPowerRange` (0.25) on the client — no per-cell API.
 
 - [x] Attribute create / rename / deactivate  
 - [x] Create rejects inactive FK and illegal base↔material  
-- [x] Create builds unique auto `skuCode` / `name`; duplicate parent+range → `DUPLICATE_VARIANT`  
+- [x] Create builds unique auto `skuCode` + display `name`; duplicate child combos are skipped (no 409)  
 - [x] Second range on same attrs attaches to existing parent  
 - [x] Material optional; omitted from SKU when absent  
 - [x] List flat + grouped; pagination + filters  
-- [x] Variant matrix row/col counts from range @ 0.25  
+- [x] Parent family matrix (SV SPH×CYL; KT/V2 stacked sheets with explicit SPH/CYL/Axis stubs and ADD / RE×ADD / LE×ADD columns) @ 0.25  
 - [ ] Broader partial range-overlap engine (optional)  
 - [x] Legacy `/api/lenses*` and existing orders unaffected  
 
-Unit: `app/lib/catalog/lens-product-sku.test.ts`  
+Unit: `app/lib/catalog/lens-product-sku.test.ts`, `app/lib/catalog/catalog-matrix.test.ts`  
 Integration (opt-in): `app/lib/catalog/lens-catalog.integration.test.ts`  
 Smoke: `scripts/lens-catalog-e2e-smoke.mjs`, `scripts/lens-catalog-present-prep.mjs`
 
@@ -272,5 +272,5 @@ Smoke: `scripts/lens-catalog-e2e-smoke.mjs`, `scripts/lens-catalog-present-prep.
 ## 10. Open engineering decisions
 
 1. Broader **partial** range overlap policy — if/when client asks.  
-2. When to introduce exact-power stock table on **variant** (stock-management).  
+2. When to introduce exact-power stock leaf (`LensProductPower`) keyed by sph·cyl·add·axis·eye (stock-management).  
 3. Long-term: retire or bridge older `CatalogProduct` / range→leaf path vs `LensProduct` master.

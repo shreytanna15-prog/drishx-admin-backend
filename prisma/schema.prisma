@@ -1483,7 +1483,7 @@ model LensProduct {
   colorId           String?
   /// Optional blank diameter (any family).
   diameterId        String?
-  /// Progressive type — set for V2 (defaults to Normal); null for SV/KT.
+  /// Progressive type — optional for V2; null for SV/KT or when left blank.
   progressiveTypeId String?
   isActive          Boolean              @default(true)
   createdAt         DateTime             @default(now())
@@ -1519,7 +1519,8 @@ model LensProductVariant {
   /// Optional addition master — multi on create; cartesian with range × axis × eye.
   additionId    String?
   skuCode       String         @unique
-  name          String         @unique
+  /// Display label only — may repeat across ADD/eye children of the same parent.
+  name          String
   rangeType     String         @default("NORMAL")
   /// Copied from power-range master for matrix UI.
   sphMin        Decimal        @db.Decimal(6, 2)

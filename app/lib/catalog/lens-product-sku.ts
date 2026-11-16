@@ -14,9 +14,6 @@ import {
   normalizePowerValue,
 } from "./catalog-power-select-options";
 
-/** Default Progressive type when V2 create leaves the field blank. */
-export const DEFAULT_PROGRESSIVE_TYPE_CODE = "NORMAL";
-
 export type LensProductSkuParts = {
   familyCode: string;
   baseCode: string;

@@ -148,6 +148,7 @@ export default function NewLensProductPage() {
 
   useEffect(() => {
     if (!baseId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset compatibility on base change
       setAllowedMaterialIds(new Set());
       return;
     }
@@ -166,6 +167,7 @@ export default function NewLensProductPage() {
 
   useEffect(() => {
     if (materialId && allowedMaterialIds.size > 0 && !allowedMaterialIds.has(materialId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear material when base compatibility changes
       setMaterialId("");
     }
   }, [allowedMaterialIds, materialId]);
@@ -191,6 +193,7 @@ export default function NewLensProductPage() {
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset family-scoped selections
     if (!supportsAxis) setAxisIds([]);
     if (!supportsAdd) setAdditionIds([]);
     if (!supportsProgressiveType) setProgressiveTypeId("");
@@ -244,6 +247,7 @@ export default function NewLensProductPage() {
 
   useEffect(() => {
     if (!canPreview) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear stale preview
       setPreview(null);
       return;
     }
@@ -376,10 +380,10 @@ export default function NewLensProductPage() {
               label="Progressive type"
               value={progressiveTypeId}
               onValueChange={setProgressiveTypeId}
-              options={toOptions(progressiveTypes, "Normal (default)")}
+              options={toOptions(progressiveTypes, "None (optional)")}
               disabled={attrsLoading}
-              placeholder="Recommended"
-              hint="Optional — defaults to Normal if left blank. Used in SKU for pricing identity."
+              placeholder="Optional"
+              hint="Optional — no default. Included in SKU and parent identity."
             />
           ) : null}
           <label className="grid gap-1.5">

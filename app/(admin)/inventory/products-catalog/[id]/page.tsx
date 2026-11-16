@@ -13,6 +13,7 @@ import {
   PowerRangeMultiSelect,
   catalogLabelClass,
 } from "@/components/catalog/catalog-field";
+import { CatalogMatrixPanel } from "@/components/catalog/catalog-matrix-panel";
 import { SkuChip } from "@/components/catalog/sku-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -103,6 +104,7 @@ export default function LensProductParentDetailPage() {
   }, [id]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load on mount
     void load();
   }, [load]);
 
@@ -263,6 +265,17 @@ export default function LensProductParentDetailPage() {
         </dl>
       </section>
 
+      <CatalogMatrixPanel
+        className="mb-6"
+        variants={product.variants}
+        familyLabel={product.family.name}
+        family={{
+          supportsAdd: product.family.supportsAdd,
+          supportsAxis: product.family.supportsAxis,
+          supportsEye: product.family.supportsEye,
+        }}
+      />
+
       <section className="mb-6">
         <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
           Variants
@@ -318,7 +331,7 @@ export default function LensProductParentDetailPage() {
                     <TableCell className="text-right">
                       <Button asChild size="sm" variant="outline" className="h-8 rounded-lg">
                         <Link href={`${CATALOG_HREF}/variants/${v.id}`}>
-                          Matrix
+                          Open
                         </Link>
                       </Button>
                     </TableCell>

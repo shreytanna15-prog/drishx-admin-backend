@@ -292,8 +292,8 @@ Change — product catalog architecture (critical)
 | **LensProduct (parent)** | Material? · Base · Index · Family · Color | Attribute combination only. Internal base code (not shown in UI). No stock / no sellable SKU. |
 | **LensProductVariant** | Parent + **power-range attribute** | Sellable unit: unique `skuCode`, auto `name`, price, `isActive`, matrix, future stock/PO/orders |
 
-- Parent uniqueness: `(materialId?, baseId, indexId, familyId, colorId)` — **coating is not part of identity**.  
-- Variant uniqueness: `(productId, powerRangeId)` and unique `skuCode` / `name`.  
+- Parent uniqueness: `(materialId?, baseId, indexId, familyId, colorId, diameterId?, progressiveTypeId?)` — **coating is not part of identity**.  
+- Variant uniqueness: `(productId, powerRangeId, axisId, additionId, eye)` and unique `skuCode`; `name` is display-only and may repeat.  
 - **Coating** may remain as an Attributes master tab for later use, but is **not** on create-product identity, SKU, or name. **Green / Blue / …** live under **Color**.
 
 #### B. SKU (variant — machine code)
@@ -355,7 +355,7 @@ No migration. Delete ~2 test products; recreate under parent + variants.
 - [x] Parent = attributes once; multiple power ranges = multiple variants without re-picking attrs  
 - [x] Variant SKU matches locked format (no coating; all families; encoded power)  
 - [x] Variant name fully auto with `-6.00/+2.00`; no typed name on create  
-- [x] Same parent + two ranges ⇒ two unique SKUs/names; each own price/matrix path  
+- [x] Same parent + two ranges ⇒ two unique SKUs; each own price/matrix path (names may repeat across ADD/eye children)  
 - [x] Existing parent reuse when attrs match; Add power range works  
 - [x] Catalog flat + grouped views (server pagination / expand)  
 - [x] Coating not required for product identity  

@@ -329,7 +329,7 @@ Order.lensType + Order.lensId  →  exactly one leaf row
 | Axis | Master `LensAxis` → multi → variant `axisId` | KT/V2; only when range CYL ≠ 0 |
 | Addition | Master `LensAddition` → multi → variant `additionId` | KT/V2; optional |
 | Diameter | Master `LensDiameter` → optional FK on **parent** | Any family |
-| Progressive type | Master `LensProgressiveType` → parent FK | V2 only; blank → Normal; SKU yes, name no |
+| Progressive type | Master `LensProgressiveType` → parent FK | V2 only; optional, no default; SKU and parent identity, not name |
 | Eye | Auto `LEFT`/`RIGHT` on **variant** | V2 only; no create picker |
 
 ```
