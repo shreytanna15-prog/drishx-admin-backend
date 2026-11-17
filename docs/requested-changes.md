@@ -25,6 +25,7 @@
 | RC-04 | Product catalog: parent + variants, new SKU/name builders | backend (admin panel); APIs as needed |
 | RC-05 | Finish photo unwire (clients) + null-material parent uniqueness | backend, website, mobile |
 | RC-06 | Walk-in: skip OTP when staff-created+verified; history; staff-only | backend, website, mobile |
+| RC-07 | Catalog: multi ADD on variant; auto L/R eye (V2); CYL-gated axes | backend (admin panel) |
 
 ---
 
@@ -291,8 +292,8 @@ Change — product catalog architecture (critical)
 | **LensProduct (parent)** | Material? · Base · Index · Family · Color | Attribute combination only. Internal base code (not shown in UI). No stock / no sellable SKU. |
 | **LensProductVariant** | Parent + **power-range attribute** | Sellable unit: unique `skuCode`, auto `name`, price, `isActive`, matrix, future stock/PO/orders |
 
-- Parent uniqueness: `(materialId?, baseId, indexId, familyId, colorId)` — **coating is not part of identity**.  
-- Variant uniqueness: `(productId, powerRangeId)` and unique `skuCode` / `name`.  
+- Parent uniqueness: `(materialId?, baseId, indexId, familyId, colorId, diameterId?, progressiveTypeId?)` — **coating is not part of identity**.  
+- Variant uniqueness: `(productId, powerRangeId, axisId, additionId, eye)` and unique `skuCode`; `name` is display-only and may repeat.  
 - **Coating** may remain as an Attributes master tab for later use, but is **not** on create-product identity, SKU, or name. **Green / Blue / …** live under **Color**.
 
 #### B. SKU (variant — machine code)
@@ -354,7 +355,7 @@ No migration. Delete ~2 test products; recreate under parent + variants.
 - [x] Parent = attributes once; multiple power ranges = multiple variants without re-picking attrs  
 - [x] Variant SKU matches locked format (no coating; all families; encoded power)  
 - [x] Variant name fully auto with `-6.00/+2.00`; no typed name on create  
-- [x] Same parent + two ranges ⇒ two unique SKUs/names; each own price/matrix path  
+- [x] Same parent + two ranges ⇒ two unique SKUs; each own price/matrix path (names may repeat across ADD/eye children)  
 - [x] Existing parent reuse when attrs match; Add power range works  
 - [x] Catalog flat + grouped views (server pagination / expand)  
 - [x] Coating not required for product identity  
@@ -549,4 +550,33 @@ Backend lookup + harden WALK_IN verify / walk-in create responses + tests. Then 
 - Builds on Path C in [`customer-account-configuration/CLIENT-PLAN.md`](./customer-account-configuration/CLIENT-PLAN.md)  
 - On-behalf gate: `app/lib/customer-order-eligibility.ts`  
 - Surfaces: web `EmployeeWalkInCreatePanel` / mobile `employee-walk-in-create-panel`; `POST /api/users/customers/walk-in`
+
+---
+
+## RC-07 — Catalog ADD / Eye / Axis (locked feedback)
+
+### Type
+
+Backend admin catalog (schema + services + Attributes/Create UI).
+
+### Goal
+
+- **ADD:** multi-select → variant `additionId` (cartesian), not parent
+- **Eye:** auto `LEFT`/`RIGHT` on Progressive (V2) variants only; no create picker; never on parent
+- **Axis:** never for SV; for KT/V2 only when range CYL ≠ 0 (`cylMin`/`cylMax` both 0 → `axisId` null); mixed ranges gate per range
+- **Diameter:** optional single on parent (unchanged)
+
+### Done when
+
+- [x] Schema + migration: variant `additionId`/`eye`/`axisId`; parent `diameterId` only
+- [x] Family flags + Axis/ADD/Diameter masters seeded; Attributes tabs
+- [x] Product service cartesian + preview; SKU includes ADD/diameter/eye/axis when set
+- [x] Create / parent detail UI: Diameter + Axis/ADD multi; no Eye control; Eye column on variants
+- [x] Docs: CLIENT-PLAN / DEVELOPER-GUIDE / lens-industry-reference
+
+### Related
+
+- [`product-catalog/CLIENT-PLAN.md`](./product-catalog/CLIENT-PLAN.md)  
+- [`product-catalog/DEVELOPER-GUIDE.md`](./product-catalog/DEVELOPER-GUIDE.md)  
+- `app/lib/catalog/lens-product-service.ts`, `lens-product-sku.ts`
 

@@ -8,7 +8,7 @@ describe("assessCheckoutCreditSync", () => {
       {
         accountAction: "CLOSED",
         creditAllowed: true,
-        creditLimit: 1000,
+        creditLimit: 1000 as never,
       },
       100
     );
@@ -60,7 +60,7 @@ describe("assessCheckoutCreditSync", () => {
       {
         accountAction: "CREDIT_SUSPENDED",
         creditAllowed: false,
-        creditLimit: 0,
+        creditLimit: 0 as never,
       },
       0
     );

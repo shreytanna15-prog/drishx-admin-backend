@@ -17,6 +17,13 @@ function requireAdmin(req: NextRequest) {
   return { session: auth.session };
 }
 
+function parseIdList(body: unknown, key: string): string[] {
+  if (!body || typeof body !== "object") return [];
+  const raw = (body as Record<string, unknown>)[key];
+  if (!Array.isArray(raw)) return [];
+  return raw.map((id) => String(id ?? "").trim()).filter(Boolean);
+}
+
 function parsePowerRangeIds(body: unknown): string[] {
   if (!body || typeof body !== "object") return [];
   const raw = (body as { powerRangeIds?: unknown; powerRangeId?: unknown })
@@ -27,6 +34,27 @@ function parsePowerRangeIds(body: unknown): string[] {
   const single = (body as { powerRangeId?: unknown }).powerRangeId;
   if (single) return [String(single).trim()].filter(Boolean);
   return [];
+}
+
+function parseVariantExpansionBody(body: unknown) {
+  const b = body as Record<string, unknown>;
+  return {
+    familyId: String(b.familyId ?? ""),
+    baseId: String(b.baseId ?? ""),
+    materialId: b.materialId ? String(b.materialId) : null,
+    indexId: b.indexId ? String(b.indexId) : null,
+    colorId: b.colorId ? String(b.colorId) : null,
+    diameterId: b.diameterId ? String(b.diameterId) : null,
+    progressiveTypeId: b.progressiveTypeId
+      ? String(b.progressiveTypeId)
+      : null,
+    powerRangeIds: parsePowerRangeIds(body),
+    axisIds: parseIdList(body, "axisIds"),
+    additionIds: parseIdList(body, "additionIds"),
+    purchasePrice: b.purchasePrice != null ? Number(b.purchasePrice) : null,
+    sellingPrice: b.sellingPrice != null ? Number(b.sellingPrice) : null,
+    isActive: b.isActive as boolean | undefined,
+  };
 }
 
 // GET /api/admin/catalog/lens-products?view=flat|grouped
@@ -76,29 +104,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const powerRangeIds = parsePowerRangeIds(body);
+    const parsed = parseVariantExpansionBody(body);
 
     if (body?.preview === true) {
-      const preview = await previewLensProductVariants({
-        familyId: String(body.familyId ?? ""),
-        baseId: String(body.baseId ?? ""),
-        materialId: body.materialId ? String(body.materialId) : null,
-        indexId: body.indexId ? String(body.indexId) : null,
-        colorId: body.colorId ? String(body.colorId) : null,
-        powerRangeIds,
-      });
+      const preview = await previewLensProductVariants(parsed);
       return NextResponse.json({ preview });
     }
 
     const product = await createLensProduct({
-      familyId: String(body.familyId ?? ""),
-      baseId: String(body.baseId ?? ""),
-      materialId: body.materialId ? String(body.materialId) : null,
-      indexId: body.indexId ? String(body.indexId) : null,
-      colorId: body.colorId ? String(body.colorId) : null,
-      powerRangeIds,
-      defaultPrice: body.defaultPrice != null ? Number(body.defaultPrice) : null,
-      isActive: body.isActive,
+      ...parsed,
       actorUserId: auth.session.userId,
     });
     return NextResponse.json({ product }, { status: 201 });

@@ -48,11 +48,17 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const body = await req.json();
     const variant = await updateLensProductVariant({
       id,
-      defaultPrice:
-        body.defaultPrice !== undefined
-          ? body.defaultPrice == null
+      purchasePrice:
+        body.purchasePrice !== undefined
+          ? body.purchasePrice == null
             ? null
-            : Number(body.defaultPrice)
+            : Number(body.purchasePrice)
+          : undefined,
+      sellingPrice:
+        body.sellingPrice !== undefined
+          ? body.sellingPrice == null
+            ? null
+            : Number(body.sellingPrice)
           : undefined,
       isActive: body.isActive,
       actorUserId: auth.session.userId,

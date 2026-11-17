@@ -49,10 +49,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const powerRangeIds = Array.isArray(body?.powerRangeIds)
       ? body.powerRangeIds.map((x: unknown) => String(x ?? "").trim()).filter(Boolean)
       : [];
+    const axisIds = Array.isArray(body?.axisIds)
+      ? body.axisIds.map((x: unknown) => String(x ?? "").trim()).filter(Boolean)
+      : [];
+    const additionIds = Array.isArray(body?.additionIds)
+      ? body.additionIds.map((x: unknown) => String(x ?? "").trim()).filter(Boolean)
+      : [];
     const product = await addLensProductVariants({
       productId: id,
       powerRangeIds,
-      defaultPrice: body.defaultPrice != null ? Number(body.defaultPrice) : null,
+      axisIds,
+      additionIds,
+      purchasePrice:
+        body.purchasePrice != null ? Number(body.purchasePrice) : null,
+      sellingPrice: body.sellingPrice != null ? Number(body.sellingPrice) : null,
       actorUserId: auth.session.userId,
     });
     return NextResponse.json({ product });

@@ -10,13 +10,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { VariantPreview } from "@/app/lib/admin-lens-catalog";
 
-export type VariantPreviewRow = {
-  powerRangeId: string;
-  skuCode: string;
-  name: string;
-  rangeLabel: string;
-};
+export type VariantPreviewRow = VariantPreview;
 
 type VariantPreviewTableProps = {
   rows: VariantPreviewRow[];
@@ -35,6 +31,16 @@ export function VariantPreviewTable({
     );
   }
 
+  const showAxis = rows.some((r) => r.axisLabel != null && r.axisLabel !== "");
+  const showAdd = rows.some(
+    (r) => r.additionLabel != null && r.additionLabel !== ""
+  );
+  const showEye = rows.some((r) => r.eye != null && r.eye !== "");
+
+  function rowKey(row: VariantPreviewRow) {
+    return `${row.powerRangeId}:${row.axisId ?? ""}:${row.additionId ?? ""}:${row.eye ?? ""}`;
+  }
+
   return (
     <div className="grid gap-2">
       {existingParentHint ? (
@@ -45,14 +51,26 @@ export function VariantPreviewTable({
           <TableHeader>
             <TableRow>
               <TableHead>Power range</TableHead>
+              {showAxis ? <TableHead>Axis</TableHead> : null}
+              {showAdd ? <TableHead>ADD</TableHead> : null}
+              {showEye ? <TableHead>Eye</TableHead> : null}
               <TableHead>SKU</TableHead>
               <TableHead>Name</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.powerRangeId}>
+              <TableRow key={rowKey(row)}>
                 <TableCell className="font-semibold">{row.rangeLabel}</TableCell>
+                {showAxis ? (
+                  <TableCell>{row.axisLabel ?? "—"}</TableCell>
+                ) : null}
+                {showAdd ? (
+                  <TableCell>{row.additionLabel ?? "—"}</TableCell>
+                ) : null}
+                {showEye ? (
+                  <TableCell>{row.eye ?? "—"}</TableCell>
+                ) : null}
                 <TableCell>
                   <SkuChip sku={row.skuCode} />
                 </TableCell>

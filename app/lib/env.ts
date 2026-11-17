@@ -20,13 +20,13 @@ const serverEnvSchema = z.object({
     .default("development"),
 
   DATABASE_URL: z
-    .string({ required_error: "DATABASE_URL is required." })
+    .string()
     .trim()
     .min(1, "DATABASE_URL is required."),
   DATABASE_POOL_MAX: optionalTrimmed,
 
   JWT_SECRET: z
-    .string({ required_error: "JWT_SECRET is required." })
+    .string()
     .trim()
     .min(1, "JWT_SECRET is required."),
   REFRESH_TOKEN_SECRET: optionalTrimmed,

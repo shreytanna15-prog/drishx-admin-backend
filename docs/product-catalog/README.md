@@ -1,6 +1,6 @@
 # Product catalog (SKU master)
 
-Admin **Attributes** + **Product catalog** — parent attribute combinations with **power-range variants**, auto SKU + auto name, list/grid and per-variant matrix UI.
+Admin **Attributes** + **Product catalog** — parent attribute combinations with **power-range variants**, auto SKU + auto name, list/grid and **parent family-aware power matrix**.
 
 **Status (Nov 2026):** Phases A–C shipped (Oct flat `LensProduct` baseline). **Target contract:**
 
@@ -17,7 +17,7 @@ Hierarchy: [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/). Pro
 | [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | Schema, APIs, UI routes, phases, checklists |
 
 **Related:** [RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers); deltas in [requested-changes.md](../requested-changes.md).  
-**Next (stock + PO):** [`../stock-management/`](../stock-management/) — hang stock/PO on the **variant**.
+**Next (stock + PO):** [`../stock-management/`](../stock-management/) — same parent matrix view; live qty on optical cell leaves.
 
 **SKU / name (locked target):** both auto-built on the variant — compact SKU codes; human name with `-6.00/+2.00`. Admin does not type either.
 

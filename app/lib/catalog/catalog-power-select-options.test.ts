@@ -51,19 +51,19 @@ describe("catalog power select options", () => {
     assert.equal(isAllowedPowerValue(Number.NaN), false);
   });
 
-  it("formats labels like -6.00/+2.00", () => {
+  it("formats span labels like -6.00 to +2.00", () => {
     assert.equal(formatPowerLabel(-6), "-6.00");
     assert.equal(formatPowerLabel(2), "+2.00");
     assert.equal(formatPowerLabel(0), "0.00");
     assert.equal(formatPowerLabel(-0.25), "-0.25");
-    assert.equal(formatPowerRangeLabel(-6, 2), "-6.00/+2.00");
-    assert.equal(formatPowerRangeLabel(2, -6), "-6.00/+2.00");
+    assert.equal(formatPowerRangeLabel(-6, 2), "-6.00 to +2.00");
+    assert.equal(formatPowerRangeLabel(2, -6), "+2.00 to -6.00");
   });
 
-  it("formats CYL summary beside the SPH label", () => {
-    assert.equal(formatCylSummary(-2, 0), "Cyl 0.00/-2.00");
-    assert.equal(formatCylSummary(0, -2), "Cyl 0.00/-2.00");
-    assert.equal(formatCylSummary(0, 4), "Cyl 0.00/+4.00");
+  it("formats CYL summary as a power span", () => {
+    assert.equal(formatCylSummary(-2, 0), "-2.00 to 0.00");
+    assert.equal(formatCylSummary(0, -2), "0.00 to -2.00");
+    assert.equal(formatCylSummary(0, 4), "0.00 to +4.00");
   });
 
   it("builds select options with string values and labels", () => {
@@ -73,18 +73,19 @@ describe("catalog power select options", () => {
     assert.ok(opts.some((o) => o.value === "0" && o.label === "0.00"));
   });
 
-  it("validates range bounds", () => {
+  it("validates range bounds on the step grid only", () => {
     assert.equal(
       validatePowerRangeBounds({ sphMin: -6, sphMax: 2, cylMin: -2, cylMax: 0 }),
       null
     );
-    assert.match(
-      validatePowerRangeBounds({ sphMin: 2, sphMax: -6, cylMin: -2, cylMax: 0 })!,
-      /sphMin/
+    // Field order is not compared (admin may enter 0.00 then −6.00)
+    assert.equal(
+      validatePowerRangeBounds({ sphMin: 2, sphMax: -6, cylMin: -2, cylMax: 0 }),
+      null
     );
-    assert.match(
-      validatePowerRangeBounds({ sphMin: -6, sphMax: 2, cylMin: 0, cylMax: -2 })!,
-      /cylMin/
+    assert.equal(
+      validatePowerRangeBounds({ sphMin: -6, sphMax: 2, cylMin: 0, cylMax: -2 }),
+      null
     );
     assert.match(
       validatePowerRangeBounds({ sphMin: -6.1, sphMax: 2, cylMin: -2, cylMax: 0 })!,
