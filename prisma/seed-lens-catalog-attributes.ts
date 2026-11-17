@@ -9,6 +9,17 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import {
+  ADDITION_SELECT_VALUES,
+  AXIS_SELECT_VALUES,
+  DIAMETER_SELECT_VALUES,
+  additionCodeFromValue,
+  axisCodeFromValue,
+  diameterCodeFromValue,
+  formatAdditionLabel,
+  formatAxisLabel,
+  formatDiameterLabel,
+} from "../app/lib/catalog/catalog-axis-add-diameter-options";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -16,12 +27,52 @@ const pool = new Pool({
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-type AttrSeed = { code: string; name: string; sortOrder: number; value?: number };
+type AttrSeed = {
+  code: string;
+  name: string;
+  sortOrder: number;
+  value?: number;
+  supportsAxis?: boolean;
+  supportsAdd?: boolean;
+  supportsEye?: boolean;
+  supportsProgressiveType?: boolean;
+};
 
 const FAMILIES: AttrSeed[] = [
-  { code: "SV", name: "Single Vision", sortOrder: 10 },
-  { code: "KT", name: "Kryptok", sortOrder: 20 },
-  { code: "V2", name: "Progressive V2", sortOrder: 30 },
+  {
+    code: "SV",
+    name: "Single Vision",
+    sortOrder: 10,
+    supportsAxis: false,
+    supportsAdd: false,
+    supportsEye: false,
+    supportsProgressiveType: false,
+  },
+  {
+    code: "KT",
+    name: "Kryptok",
+    sortOrder: 20,
+    supportsAxis: true,
+    supportsAdd: true,
+    supportsEye: false,
+    supportsProgressiveType: false,
+  },
+  {
+    code: "V2",
+    name: "Progressive V2",
+    sortOrder: 30,
+    supportsAxis: true,
+    supportsAdd: true,
+    supportsEye: true,
+    supportsProgressiveType: true,
+  },
+];
+
+const PROGRESSIVE_TYPES: AttrSeed[] = [
+  { code: "NORMAL", name: "Normal", sortOrder: 10 },
+  { code: "DIGITAL", name: "Digital", sortOrder: 20 },
+  { code: "FREEFORM", name: "Freeform", sortOrder: 30 },
+  { code: "9P4", name: "9+4 design", sortOrder: 40 },
 ];
 
 const BASES: AttrSeed[] = [
@@ -91,8 +142,21 @@ async function upsertAttr(
     case "family":
       return prisma.lensFamily.upsert({
         where: { code: seed.code },
-        create: { code: seed.code, ...shared },
-        update: shared,
+        create: {
+          code: seed.code,
+          ...shared,
+          supportsAxis: seed.supportsAxis ?? false,
+          supportsAdd: seed.supportsAdd ?? false,
+          supportsEye: seed.supportsEye ?? false,
+          supportsProgressiveType: seed.supportsProgressiveType ?? false,
+        },
+        update: {
+          ...shared,
+          supportsAxis: seed.supportsAxis ?? false,
+          supportsAdd: seed.supportsAdd ?? false,
+          supportsEye: seed.supportsEye ?? false,
+          supportsProgressiveType: seed.supportsProgressiveType ?? false,
+        },
       });
     case "base":
       return prisma.lensBase.upsert({
@@ -129,11 +193,66 @@ async function upsertAttr(
 
 async function main() {
   for (const row of FAMILIES) await upsertAttr("family", row);
+  for (const row of PROGRESSIVE_TYPES) {
+    await prisma.lensProgressiveType.upsert({
+      where: { code: row.code },
+      create: {
+        code: row.code,
+        name: row.name,
+        sortOrder: row.sortOrder,
+        isActive: true,
+      },
+      update: {
+        name: row.name,
+        sortOrder: row.sortOrder,
+        isActive: true,
+      },
+    });
+  }
   for (const row of BASES) await upsertAttr("base", row);
   for (const row of MATERIALS) await upsertAttr("material", row);
   for (const row of INDEXES) await upsertAttr("index", row);
   for (const row of COATINGS) await upsertAttr("coating", row);
   for (const row of COLORS) await upsertAttr("color", row);
+
+  let axisCount = 0;
+  for (const value of AXIS_SELECT_VALUES) {
+    const code = axisCodeFromValue(value);
+    const name = formatAxisLabel(value);
+    const sortOrder = value;
+    await prisma.lensAxis.upsert({
+      where: { code },
+      create: { code, name, value, sortOrder, isActive: true },
+      update: { name, value, sortOrder, isActive: true },
+    });
+    axisCount += 1;
+  }
+
+  let additionCount = 0;
+  for (const value of ADDITION_SELECT_VALUES) {
+    const code = additionCodeFromValue(value);
+    const name = formatAdditionLabel(value);
+    const sortOrder = Math.round(value * 100);
+    await prisma.lensAddition.upsert({
+      where: { code },
+      create: { code, name, value, sortOrder, isActive: true },
+      update: { name, value, sortOrder, isActive: true },
+    });
+    additionCount += 1;
+  }
+
+  let diameterCount = 0;
+  for (const value of DIAMETER_SELECT_VALUES) {
+    const code = diameterCodeFromValue(value);
+    const name = formatDiameterLabel(value);
+    const sortOrder = value;
+    await prisma.lensDiameter.upsert({
+      where: { code },
+      create: { code, name, value, sortOrder, isActive: true },
+      update: { name, value, sortOrder, isActive: true },
+    });
+    diameterCount += 1;
+  }
 
   const bases = await prisma.lensBase.findMany();
   const materials = await prisma.lensMaterial.findMany();
@@ -159,7 +278,7 @@ async function main() {
   }
 
   console.log(
-    `Seeded attributes: ${FAMILIES.length} families, ${BASES.length} bases, ${MATERIALS.length} materials, ${INDEXES.length} indexes, ${COATINGS.length} coatings, ${COLORS.length} colors, ${links} base↔material links.`
+    `Seeded attributes: ${FAMILIES.length} families, ${PROGRESSIVE_TYPES.length} progressive types, ${BASES.length} bases, ${MATERIALS.length} materials, ${INDEXES.length} indexes, ${COATINGS.length} coatings, ${COLORS.length} colors, ${axisCount} axes, ${additionCount} additions, ${diameterCount} diameters, ${links} base↔material links.`
   );
 }
 

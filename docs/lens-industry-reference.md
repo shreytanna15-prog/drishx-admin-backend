@@ -326,22 +326,24 @@ Order.lensType + Order.lensId  →  exactly one leaf row
 | Field | Where | Notes |
 |-------|--------|--------|
 | Axis | Master `LensAxis` → multi-select → `LensProductVariant.axisId` | Cartesian with power ranges; family `supportsAxis` |
-| Addition | Master `LensAddition` → optional FK on **parent** | Family `supportsAdd` |
-| Diameter | Master `LensDiameter` → optional FK on **parent** | Always available when shown |
-| Eye | Prisma `Eye` (`LEFT`/`RIGHT`) on **parent** | Family `supportsEye`; not an Attributes tab |
+| Axis | Master `LensAxis` → multi → variant `axisId` | KT/V2; only when range CYL ≠ 0 |
+| Addition | Master `LensAddition` → multi → variant `additionId` | KT/V2; optional |
+| Diameter | Master `LensDiameter` → optional FK on **parent** | Any family |
+| Progressive type | Master `LensProgressiveType` → parent FK | V2 only; optional, no default; SKU and parent identity, not name |
+| Eye | Auto `LEFT`/`RIGHT` on **variant** | V2 only; no create picker |
 
 ```
-LensFamily (supportsAxis / supportsAdd / supportsEye)
-  · LensBase · LensMaterial? · LensIndex · LensColor
-  · LensAddition? · LensDiameter? · eye?
-  + LensPowerRange · LensAxis masters
+LensFamily (supportsAxis / supportsAdd / supportsEye / supportsProgressiveType)
+  · LensBase · LensMaterial? · LensIndex · LensColor · LensDiameter?
+  · LensProgressiveType? (V2)
+  + LensPowerRange · LensAxis · LensAddition masters
   + LensCoating (master only; not identity)
         │
         ▼
 LensProduct (parent — attrs once)
         │ 1 → many
         ▼
-LensProductVariant (power range × optional axis; auto skuCode + name + price)
+LensProductVariant (range × optional axis × optional ADD × auto eye on V2)
         └── matrix UI (cells placeholder until stock slice)
 ```
 

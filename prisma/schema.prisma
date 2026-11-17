@@ -1290,14 +1290,22 @@ model CoatingFilterLabel {
 // Display-only SKU master; does not replace CatalogProduct leaf generation or legacy lens tables.
 
 model LensFamily {
-  id        String        @id @default(cuid())
-  code      String        @unique
-  name      String
-  isActive  Boolean       @default(true)
-  sortOrder Int           @default(0)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  products  LensProduct[]
+  id                      String        @id @default(cuid())
+  code                    String        @unique
+  name                    String
+  isActive                Boolean       @default(true)
+  sortOrder               Int           @default(0)
+  /// Create-product: show axis multi-select (KT / V2); still CYL-gated per range.
+  supportsAxis            Boolean       @default(false)
+  /// Create-product: show addition multi-select (KT / V2).
+  supportsAdd             Boolean       @default(false)
+  /// Progressive: auto-expand variant eye LEFT+RIGHT (no create picker).
+  supportsEye             Boolean       @default(false)
+  /// Progressive: show Progressive type on create (defaults to Normal).
+  supportsProgressiveType Boolean       @default(false)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  products                LensProduct[]
 
   @@index([isActive, sortOrder])
 }
@@ -1371,18 +1379,77 @@ model LensColor {
   @@index([isActive, sortOrder])
 }
 
+/// Axis degrees master (10…180 step 10 + 45 + 135). Multi on create → variants.
+model LensAxis {
+  id        String               @id @default(cuid())
+  code      String               @unique
+  name      String
+  value     Int                  @unique
+  isActive  Boolean              @default(true)
+  sortOrder Int                  @default(0)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  variants  LensProductVariant[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// Near-addition master (0, 0.25…6.00). Multi on create → variant cartesian.
+model LensAddition {
+  id        String               @id @default(cuid())
+  code      String               @unique
+  name      String
+  value     Decimal              @unique @db.Decimal(6, 2)
+  isActive  Boolean              @default(true)
+  sortOrder Int                  @default(0)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  variants  LensProductVariant[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// Blank diameter master (55…120 step 5 mm). Optional single pick on parent.
+model LensDiameter {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  name      String
+  value     Int           @unique
+  isActive  Boolean       @default(true)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  products  LensProduct[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// Progressive subtype (Normal / Digital / Freeform / 9+4). Parent identity for V2 only.
+model LensProgressiveType {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  name      String
+  isActive  Boolean       @default(true)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  products  LensProduct[]
+
+  @@index([isActive, sortOrder])
+}
+
 /// RC-03: power-range attribute master (SPH/CYL bounds picked from stepped selects).
 /// Display label is derived (`-6.00/+2.00`); not stored.
 model LensPowerRange {
-  id       String               @id @default(cuid())
-  sphMin   Decimal              @db.Decimal(6, 2)
-  sphMax   Decimal              @db.Decimal(6, 2)
-  cylMin   Decimal              @db.Decimal(6, 2)
-  cylMax   Decimal              @db.Decimal(6, 2)
-  isActive Boolean              @default(true)
-  sortOrder Int                 @default(0)
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  id        String               @id @default(cuid())
+  sphMin    Decimal              @db.Decimal(6, 2)
+  sphMax    Decimal              @db.Decimal(6, 2)
+  cylMin    Decimal              @db.Decimal(6, 2)
+  cylMax    Decimal              @db.Decimal(6, 2)
+  isActive  Boolean              @default(true)
+  sortOrder Int                  @default(0)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
   variants  LensProductVariant[]
 
   @@unique([sphMin, sphMax, cylMin, cylMax])
@@ -1403,64 +1470,86 @@ model LensBaseMaterialLink {
 
 /// RC-04 parent: attribute combination only (no sellable SKU). Variants hold SKU/name/price.
 model LensProduct {
-  id         String               @id @default(cuid())
+  id                String               @id @default(cuid())
   /// Internal base code without power segment (not shown in Admin UI).
-  baseCode   String               @unique
-  familyId   String
-  baseId     String
+  baseCode          String               @unique
+  familyId          String
+  baseId            String
   /// Optional — omitted from SKU/name when absent.
-  materialId String?
+  materialId        String?
   /// Optional — omitted from SKU/name when absent.
-  indexId    String?
+  indexId           String?
   /// Optional — omitted from SKU/name when absent.
-  colorId    String?
-  isActive   Boolean              @default(true)
-  createdAt  DateTime             @default(now())
-  updatedAt  DateTime             @updatedAt
-  family     LensFamily           @relation(fields: [familyId], references: [id])
-  base       LensBase             @relation(fields: [baseId], references: [id])
-  material   LensMaterial?        @relation(fields: [materialId], references: [id])
-  index      LensIndex?           @relation(fields: [indexId], references: [id])
-  color      LensColor?           @relation(fields: [colorId], references: [id])
-  variants   LensProductVariant[]
+  colorId           String?
+  /// Optional blank diameter (any family).
+  diameterId        String?
+  /// Progressive type — optional for V2; null for SV/KT or when left blank.
+  progressiveTypeId String?
+  isActive          Boolean              @default(true)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  family            LensFamily           @relation(fields: [familyId], references: [id])
+  base              LensBase             @relation(fields: [baseId], references: [id])
+  material          LensMaterial?        @relation(fields: [materialId], references: [id])
+  index             LensIndex?           @relation(fields: [indexId], references: [id])
+  color             LensColor?           @relation(fields: [colorId], references: [id])
+  diameter          LensDiameter?        @relation(fields: [diameterId], references: [id])
+  progressiveType   LensProgressiveType? @relation(fields: [progressiveTypeId], references: [id])
+  variants          LensProductVariant[]
 
   /// Uniqueness across optional attrs is enforced by a NULLS NOT DISTINCT unique
-  /// index (see migration 20261105190000_lens_product_optional_index_color).
+  /// index (see migrations …progressive_type).
   @@index([familyId, isActive])
   @@index([baseId])
   @@index([materialId])
   @@index([indexId])
   @@index([colorId])
+  @@index([diameterId])
+  @@index([progressiveTypeId])
   @@index([isActive, updatedAt])
 }
 
-/// RC-04 sellable unit: parent + one power-range master. Own SKU, name, price, matrix.
+/// RC-04 sellable unit: power range × optional axis × optional ADD × optional eye.
 model LensProductVariant {
-  id           String         @id @default(cuid())
-  productId    String
-  powerRangeId String
-  skuCode      String         @unique
-  name         String         @unique
-  rangeType    String         @default("NORMAL")
+  id            String         @id @default(cuid())
+  productId     String
+  powerRangeId  String
+  /// Optional axis master — multi on create; CYL-gated per range.
+  axisId        String?
+  /// Optional addition master — multi on create; cartesian with range × axis × eye.
+  additionId    String?
+  skuCode       String         @unique
+  /// Display label only — may repeat across ADD/eye children of the same parent.
+  name          String
+  rangeType     String         @default("NORMAL")
   /// Copied from power-range master for matrix UI.
-  sphMin       Decimal        @db.Decimal(6, 2)
-  sphMax       Decimal        @db.Decimal(6, 2)
-  cylMin       Decimal        @db.Decimal(6, 2)
-  cylMax       Decimal        @db.Decimal(6, 2)
-  addMin       Decimal?
-  addMax       Decimal?
-  axis         Int?
-  eye          String?
-  defaultPrice Decimal?
-  isActive     Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  product      LensProduct    @relation(fields: [productId], references: [id], onDelete: Cascade)
-  powerRange   LensPowerRange @relation(fields: [powerRangeId], references: [id])
+  sphMin        Decimal        @db.Decimal(6, 2)
+  sphMax        Decimal        @db.Decimal(6, 2)
+  cylMin        Decimal        @db.Decimal(6, 2)
+  cylMax        Decimal        @db.Decimal(6, 2)
+  addMin        Decimal?
+  addMax        Decimal?
+  /// Denormalized from LensAxis.value when axisId set.
+  axis          Int?
+  /// Progressive auto LEFT/RIGHT; null for SV/KT.
+  eye           String?
+  /// Cost / purchase — always numeric; defaults to 0 when omitted on create.
+  purchasePrice Decimal        @default(0) @db.Decimal(12, 2)
+  /// Sell price — always numeric; defaults to 0 when omitted on create.
+  sellingPrice  Decimal        @default(0) @db.Decimal(12, 2)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  product       LensProduct    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  powerRange    LensPowerRange @relation(fields: [powerRangeId], references: [id])
+  axisRef       LensAxis?      @relation(fields: [axisId], references: [id])
+  addition      LensAddition?  @relation(fields: [additionId], references: [id])
 
-  @@unique([productId, powerRangeId])
+  /// Uniqueness with optional dims: migration uses NULLS NOT DISTINCT.
   @@index([productId, isActive])
   @@index([powerRangeId])
+  @@index([axisId])
+  @@index([additionId])
   @@index([isActive, updatedAt])
 }
 

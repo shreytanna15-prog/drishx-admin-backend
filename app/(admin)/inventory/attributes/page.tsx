@@ -22,10 +22,14 @@ import { AdminApiError } from "@/app/lib/admin-api";
 import {
   createLensAttributeRequest,
   fetchLensAttributes,
+  getAdditionSelectOptions,
+  getAxisSelectOptions,
+  getDiameterSelectOptions,
   updateLensAttributeRequest,
   type LensAttribute,
   type LensAttributeType,
 } from "@/app/lib/admin-lens-catalog";
+import { AdminSelect } from "@/components/admin-select";
 import { cn } from "@/lib/utils";
 import { PowerRangeTab } from "./power-range-tab";
 
@@ -38,8 +42,25 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "index", label: "Index" },
   { id: "coating", label: "Coating" },
   { id: "color", label: "Color" },
+  { id: "axis", label: "Axis" },
+  { id: "addition", label: "Addition" },
+  { id: "diameter", label: "Diameter" },
+  { id: "progressive-type", label: "Progressive type" },
   { id: "power-range", label: "Power range" },
 ];
+
+const selectClass =
+  "h-10 w-full rounded-xl border border-(--brand-input-border) bg-(--brand-input-bg) px-3 text-sm text-(--brand-text) outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const UNIVERSE_SELECT_CONTENT_CLASS = "max-h-[18rem]";
+
+const UNIVERSE_OPTIONS: Record<
+  "axis" | "addition" | "diameter",
+  { value: string; label: string }[]
+> = {
+  axis: getAxisSelectOptions(),
+  addition: getAdditionSelectOptions(),
+  diameter: getDiameterSelectOptions(),
+};
 
 function isTabId(value: string | null): value is TabId {
   return TABS.some((t) => t.id === value);
@@ -74,6 +95,8 @@ export default function InventoryAttributesPage() {
     isTabId(tabFromUrl) ? tabFromUrl : "family"
   );
   const isPowerRange = tab === "power-range";
+  const isUniverseTab =
+    tab === "axis" || tab === "addition" || tab === "diameter";
   // Name/code list state + handlers only run for the non-power-range tabs.
   const attrTab: LensAttributeType = tab === "power-range" ? "family" : tab;
   const [items, setItems] = useState<LensAttribute[]>([]);
@@ -150,20 +173,41 @@ export default function InventoryAttributesPage() {
     setFormBusy(true);
     setFormError("");
     try {
-      const payload = {
-        code: form.code.trim(),
-        name: form.name.trim(),
-        sortOrder: Number(form.sortOrder) || 0,
-        value:
-          tab === "index" && form.value.trim() !== ""
-            ? Number(form.value)
-            : tab === "index"
-              ? null
-              : undefined,
+      const sortOrder = Number(form.sortOrder) || 0;
+      let payload: {
+        code: string;
+        name: string;
+        sortOrder: number;
+        value?: number | null;
       };
-      if (!payload.code || !payload.name) {
-        setFormError("Code and name are required.");
-        return;
+
+      if (isUniverseTab) {
+        if (form.value.trim() === "") {
+          setFormError("Select a value from the list.");
+          return;
+        }
+        payload = {
+          code: "",
+          name: "",
+          sortOrder,
+          value: Number(form.value),
+        };
+      } else {
+        payload = {
+          code: form.code.trim(),
+          name: form.name.trim(),
+          sortOrder,
+          value:
+            tab === "index" && form.value.trim() !== ""
+              ? Number(form.value)
+              : tab === "index"
+                ? null
+                : undefined,
+        };
+        if (!payload.code || !payload.name) {
+          setFormError("Code and name are required.");
+          return;
+        }
       }
       if (editing) {
         await updateLensAttributeRequest(attrTab, editing.id, payload);
@@ -199,7 +243,7 @@ export default function InventoryAttributesPage() {
   return (
     <AdminPage
       title="Attributes"
-      subtitle="Master lists for Family, Base, Material, Index, Coating, Color, and Power range. Inactive values are hidden from Create product."
+      subtitle="Master lists for lens catalog attributes, power range, axis, addition, diameter, and progressive type. Family capability flags are seed-defined. Inactive values are hidden from Create product."
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -259,28 +303,47 @@ export default function InventoryAttributesPage() {
               </div>
             ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1.5">
-                <span className={labelClass}>Code</span>
-                <Input
-                  className={inputClass}
-                  value={form.code}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, code: e.target.value }))
-                  }
-                  placeholder="e.g. TINTABLE"
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className={labelClass}>Name</span>
-                <Input
-                  className={inputClass}
-                  value={form.name}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, name: e.target.value }))
-                  }
-                  placeholder="Display name"
-                />
-              </label>
+              {isUniverseTab ? (
+                <label className="space-y-1.5 sm:col-span-2">
+                  <span className={labelClass}>Value</span>
+                  <AdminSelect
+                    value={form.value}
+                    onValueChange={(value) =>
+                      setForm((f) => ({ ...f, value }))
+                    }
+                    options={UNIVERSE_OPTIONS[attrTab as "axis" | "addition" | "diameter"]}
+                    placeholder="Select…"
+                    size="sm"
+                    triggerClassName={selectClass}
+                    contentClassName={UNIVERSE_SELECT_CONTENT_CLASS}
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="space-y-1.5">
+                    <span className={labelClass}>Code</span>
+                    <Input
+                      className={inputClass}
+                      value={form.code}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, code: e.target.value }))
+                      }
+                      placeholder="e.g. TINTABLE"
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelClass}>Name</span>
+                    <Input
+                      className={inputClass}
+                      value={form.name}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, name: e.target.value }))
+                      }
+                      placeholder="Display name"
+                    />
+                  </label>
+                </>
+              )}
               <label className="space-y-1.5">
                 <span className={labelClass}>Sort order</span>
                 <Input
@@ -344,6 +407,7 @@ export default function InventoryAttributesPage() {
                 <TableRow>
                   <TableHead>Code</TableHead>
                   <TableHead>Name</TableHead>
+                  {tab === "family" ? <TableHead>Capabilities</TableHead> : null}
                   <TableHead>Sort</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -355,12 +419,58 @@ export default function InventoryAttributesPage() {
                     <TableCell className="font-mono text-sm">{row.code}</TableCell>
                     <TableCell>
                       {row.name}
-                      {row.value != null ? (
+                      {row.value != null && tab !== "family" ? (
                         <span className="ml-2 text-xs text-(--brand-text-muted)">
                           ({row.value})
                         </span>
                       ) : null}
                     </TableCell>
+                    {tab === "family" ? (
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {row.supportsAxis ? (
+                            <Badge
+                              variant="outline"
+                              className="border-sky-500/40 text-sky-700 dark:text-sky-300"
+                            >
+                              Axis
+                            </Badge>
+                          ) : null}
+                          {row.supportsAdd ? (
+                            <Badge
+                              variant="outline"
+                              className="border-violet-500/40 text-violet-700 dark:text-violet-300"
+                            >
+                              ADD
+                            </Badge>
+                          ) : null}
+                          {row.supportsEye ? (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-500/40 text-amber-800 dark:text-amber-300"
+                            >
+                              Eye
+                            </Badge>
+                          ) : null}
+                          {row.supportsProgressiveType ? (
+                            <Badge
+                              variant="outline"
+                              className="border-emerald-500/40 text-emerald-800 dark:text-emerald-300"
+                            >
+                              Prog. type
+                            </Badge>
+                          ) : null}
+                          {!row.supportsAxis &&
+                          !row.supportsAdd &&
+                          !row.supportsEye &&
+                          !row.supportsProgressiveType ? (
+                            <span className="text-xs text-(--brand-text-muted)">
+                              —
+                            </span>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    ) : null}
                     <TableCell>{row.sortOrder}</TableCell>
                     <TableCell>
                       <Badge
