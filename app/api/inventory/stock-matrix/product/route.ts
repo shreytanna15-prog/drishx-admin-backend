@@ -12,6 +12,8 @@ import {
  * One product's SPH × CYL matrix: current (read-only), threshold, target.
  */
 export async function GET(req: NextRequest) {
+  const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
   const auth = getSessionOrUnauthorized(req);
   if (!auth.session) return auth.error;
   const session = auth.session;
@@ -30,12 +32,25 @@ export async function GET(req: NextRequest) {
   }
   try {
     const product = await getProductMatrix({ lensType, key });
-    return NextResponse.json({ ...product, canEdit: session.role === "ADMIN" });
+    const durationMs = Date.now() - startedAt;
+    if (durationMs > 2000) {
+      console.warn("GET /api/inventory/stock-matrix/product slow", { requestId, durationMs });
+    }
+    return NextResponse.json(
+      { ...product, canEdit: session.role === "ADMIN" },
+      { headers: { "X-Request-Id": requestId } }
+    );
   } catch (error) {
     if (error instanceof StockMatrixError) {
-      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message, code: error.code, requestId },
+        { status: error.status, headers: { "X-Request-Id": requestId } }
+      );
     }
-    console.error("GET /api/inventory/stock-matrix/product error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    console.error("GET /api/inventory/stock-matrix/product error:", { requestId, durationMs: Date.now() - startedAt, error });
+    return NextResponse.json(
+      { error: "Internal Server Error", code: "STOCK_MATRIX_READ_FAILED", requestId },
+      { status: 500, headers: { "X-Request-Id": requestId } }
+    );
   }
 }

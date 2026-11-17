@@ -322,7 +322,9 @@ function groupVariants(
   for (const variant of variants) {
     const shape = classifyVariantPowerShape(variant);
     const axis = shape === "sphere" ? null : variant.axis;
-    const key = `${shape}|${rangeKeyOf(variant)}|axis:${axis ?? "none"}`;
+    // 45° and 135° share a visual sheet, not an optical cell or SKU.
+    const axisGroup = axis === 45 || axis === 135 ? "oblique" : axis ?? "none";
+    const key = `${shape}|${rangeKeyOf(variant)}|axis:${axisGroup}`;
     const existing = groups.get(key);
     if (existing) {
       existing.variants.push(variant);
@@ -355,14 +357,23 @@ function groupVariants(
       );
     }
     // Axis blocks: 180 → 90 (largest first); null axes last.
-    const aa = a.axis ?? -1;
-    const bb = b.axis ?? -1;
+    const aa = groupAxes(a)[0] ?? -1;
+    const bb = groupAxes(b)[0] ?? -1;
     if (aa !== bb) return bb - aa;
     return (
       Math.min(a.sphMin, a.sphMax) - Math.min(b.sphMin, b.sphMax) ||
       Math.min(a.cylMin, a.cylMax) - Math.min(b.cylMin, b.cylMax)
     );
   });
+}
+
+function groupAxes(group: VariantGroup): Array<number | null> {
+  const axes = [...new Set(group.variants.map((v) => v.axis))];
+  return axes.sort((a, b) => (b ?? -1) - (a ?? -1));
+}
+
+function groupAxisLabel(group: VariantGroup): string {
+  return groupAxes(group).map((axis) => `${axis}°`).join(" / ");
 }
 
 function emptyCell(cellKey: CatalogMatrixCellKey): CatalogMatrixCell {
@@ -487,27 +498,28 @@ function buildCylAxisSheet(
 ): CatalogMatrixSheet {
   const cylValues = steppedRange(group.cylMin, group.cylMax);
   const dataColumns = buildAddColumns(group.variants, withEye);
-  const showAxis = group.axis != null;
+  const axes = groupAxes(group);
+  const showAxis = axes.some((axis) => axis != null);
 
   const stubColumns: CatalogMatrixStubColumn[] = [
     { key: "cyl", label: "CYL" },
   ];
   if (showAxis) stubColumns.push({ key: "axis", label: "Axis" });
 
-  const rows: CatalogMatrixRow[] = cylValues.map((cyl) => {
-    const key = `cyl:${cyl.toFixed(2)}|axis:${group.axis ?? "none"}`;
+  const rows: CatalogMatrixRow[] = axes.flatMap((axis) => cylValues.map((cyl) => {
+    const key = `cyl:${cyl.toFixed(2)}|axis:${axis ?? "none"}`;
     const cells: Record<string, CatalogMatrixCell> = {};
     for (const column of dataColumns) {
       const cellKey: CatalogMatrixCellKey = {
         sph: 0,
         cyl,
         add: column.add,
-        axis: group.axis,
+        axis,
         eye: withEye ? eyeValueFromLabel(column.eye ?? "—") : null,
       };
       const variant = group.variants.find(
         (v) =>
-          variantCovers(v, 0, cyl) &&
+          v.axis === axis && variantCovers(v, 0, cyl) &&
           variantMatchesColumn(v, column, withEye)
       );
       cells[column.key] = variant
@@ -519,18 +531,18 @@ function buildCylAxisSheet(
       stub: {
         cyl: formatMatrixPower(cyl),
         ...(showAxis
-          ? { axis: group.axis == null ? "—" : String(group.axis) }
+          ? { axis: axis == null ? "—" : String(axis) }
           : {}),
       },
       cells,
     };
-  });
+  }));
 
   const cells: Record<string, Record<string, CatalogMatrixCell>> = {};
   for (const row of rows) cells[row.key] = row.cells;
 
   const title = showAxis
-    ? `${familyLabel ?? "CYL + Axis"} · Axis ${group.axis}°`
+    ? `${familyLabel ?? "CYL + Axis"} · Axis ${groupAxisLabel(group)}`
     : `${familyLabel ?? "CYL + Axis"}`;
 
   return {
@@ -577,16 +589,17 @@ function buildCompoundSheet(
   }
   if (points.length === 0) return null;
 
-  const showAxis = group.axis != null;
+  const axes = groupAxes(group);
+  const showAxis = axes.some((axis) => axis != null);
   const stubColumns: CatalogMatrixStubColumn[] = [
     { key: "sph", label: "SPH" },
     { key: "cyl", label: "CYL" },
   ];
   if (showAxis) stubColumns.push({ key: "axis", label: "Axis" });
 
-  const rows: CatalogMatrixRow[] = points.map(({ sph, cyl }) => {
+  const rows: CatalogMatrixRow[] = axes.flatMap((axis) => points.map(({ sph, cyl }) => {
     const key = `sph:${sph.toFixed(2)}|cyl:${cyl.toFixed(2)}|axis:${
-      group.axis ?? "none"
+      axis ?? "none"
     }`;
     const cells: Record<string, CatalogMatrixCell> = {};
     for (const column of dataColumns) {
@@ -594,12 +607,12 @@ function buildCompoundSheet(
         sph,
         cyl,
         add: column.add,
-        axis: group.axis,
+        axis,
         eye: withEye ? eyeValueFromLabel(column.eye ?? "—") : null,
       };
       const variant = group.variants.find(
         (v) =>
-          variantCovers(v, sph, cyl) &&
+          v.axis === axis && variantCovers(v, sph, cyl) &&
           variantMatchesColumn(v, column, withEye)
       );
       cells[column.key] = variant
@@ -612,12 +625,12 @@ function buildCompoundSheet(
         sph: formatMatrixPower(sph),
         cyl: formatMatrixPower(cyl),
         ...(showAxis
-          ? { axis: group.axis == null ? "—" : String(group.axis) }
+          ? { axis: axis == null ? "—" : String(axis) }
           : {}),
       },
       cells,
     };
-  });
+  }));
 
   const cells: Record<string, Record<string, CatalogMatrixCell>> = {};
   for (const row of rows) cells[row.key] = row.cells;
@@ -625,7 +638,7 @@ function buildCompoundSheet(
   const label = kind === "cross" ? "Cross" : "Compound";
   const sign = kind === "cross" ? "" : ` ${signLabel(points)}`;
   const title = showAxis
-    ? `${familyLabel ?? label} · ${label}${sign} · Axis ${group.axis}°`
+    ? `${familyLabel ?? label} · ${label}${sign} · Axis ${groupAxisLabel(group)}`
     : `${familyLabel ?? label} · ${label}${sign}`;
 
   return {

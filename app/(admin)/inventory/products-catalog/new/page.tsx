@@ -73,6 +73,7 @@ export default function NewLensProductPage() {
   const [bases, setBases] = useState<LensAttribute[]>([]);
   const [materials, setMaterials] = useState<LensAttribute[]>([]);
   const [indexes, setIndexes] = useState<LensAttribute[]>([]);
+  const [coatings, setCoatings] = useState<LensAttribute[]>([]);
   const [colors, setColors] = useState<LensAttribute[]>([]);
   const [axes, setAxes] = useState<LensAttribute[]>([]);
   const [additions, setAdditions] = useState<LensAttribute[]>([]);
@@ -89,6 +90,7 @@ export default function NewLensProductPage() {
   const [baseId, setBaseId] = useState("");
   const [materialId, setMaterialId] = useState("");
   const [indexId, setIndexId] = useState("");
+  const [coatingId, setCoatingId] = useState("");
   const [colorId, setColorId] = useState("");
   const [diameterId, setDiameterId] = useState("");
   const [progressiveTypeId, setProgressiveTypeId] = useState("");
@@ -118,11 +120,12 @@ export default function NewLensProductPage() {
     void (async () => {
       setAttrsLoading(true);
       try {
-        const [f, b, m, i, col, ax, add, dia, pt] = await Promise.all([
+        const [f, b, m, i, coat, col, ax, add, dia, pt] = await Promise.all([
           fetchLensAttributes("family", { activeOnly: true }),
           fetchLensAttributes("base", { activeOnly: true }),
           fetchLensAttributes("material", { activeOnly: true }),
           fetchLensAttributes("index", { activeOnly: true }),
+          fetchLensAttributes("coating", { activeOnly: true }),
           fetchLensAttributes("color", { activeOnly: true }),
           fetchLensAttributes("axis", { activeOnly: true }),
           fetchLensAttributes("addition", { activeOnly: true }),
@@ -133,6 +136,7 @@ export default function NewLensProductPage() {
         setBases(b.items);
         setMaterials(m.items);
         setIndexes(i.items);
+        setCoatings(coat.items);
         setColors(col.items);
         setAxes(ax.items);
         setAdditions(add.items);
@@ -216,6 +220,7 @@ export default function NewLensProductPage() {
       baseId,
       materialId: materialId || null,
       indexId: indexId || null,
+      coatingId,
       colorId: colorId || null,
       diameterId: diameterId || null,
       progressiveTypeId: supportsProgressiveType
@@ -230,6 +235,7 @@ export default function NewLensProductPage() {
       baseId,
       materialId,
       indexId,
+      coatingId,
       colorId,
       diameterId,
       supportsProgressiveType,
@@ -243,7 +249,7 @@ export default function NewLensProductPage() {
   );
 
   const canPreview =
-    Boolean(familyId && baseId) && powerRangeIds.length > 0;
+    Boolean(familyId && baseId && coatingId) && powerRangeIds.length > 0;
 
   useEffect(() => {
     if (!canPreview) {
@@ -274,8 +280,8 @@ export default function NewLensProductPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    if (!familyId || !baseId) {
-      setError("Family and base are required.");
+    if (!familyId || !baseId || !coatingId) {
+      setError("Family, base, and coating are required.");
       return;
     }
     if (powerRangeIds.length === 0) {
@@ -358,6 +364,16 @@ export default function NewLensProductPage() {
             options={toOptions(indexes, "None (optional)")}
             disabled={attrsLoading}
             placeholder="Optional"
+          />
+          <CatalogSelectField
+            label="Coating"
+            required
+            value={coatingId}
+            onValueChange={setCoatingId}
+            options={toOptions(coatings)}
+            disabled={attrsLoading}
+            placeholder="Select coating"
+            hint="Each coating has its own product and variants; power ranges can be shared."
           />
           <CatalogSelectField
             label="Color"

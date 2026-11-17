@@ -9,7 +9,7 @@ Admin **Attributes** + **Product catalog** — parent attribute combinations wit
 
 Track further catalog RCs in [`../requested-changes.md`](../requested-changes.md); keep CLIENT-PLAN in sync when locked.
 
-Hierarchy: [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/). Product identity = Material? · Base · Index · Family · Color (+ power range on the **variant**). **Coating is not identity.**
+Hierarchy: [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/). Product identity = Material? · Base · Index · Family · Coating · Color (+ power range on the **variant**). Coating-specific parents can reuse the same power range without sharing stock.
 
 | Document | Audience | Purpose |
 |----------|----------|---------|

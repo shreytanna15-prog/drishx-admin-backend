@@ -1361,7 +1361,9 @@ model LensCoating {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  /// RC-04: coating is not product identity; master kept for Attributes UI only.
+  /// Catalog coating master; each coated product has its own parent and variants.
+
+  products LensProduct[]
 
   @@index([isActive, sortOrder])
 }
@@ -1481,6 +1483,9 @@ model LensProduct {
   indexId           String?
   /// Optional — omitted from SKU/name when absent.
   colorId           String?
+  /// Coating distinguishes otherwise identical products sharing a power matrix.
+  /// Null is retained only for products created before coating became mandatory.
+  coatingId        String?
   /// Optional blank diameter (any family).
   diameterId        String?
   /// Progressive type — optional for V2; null for SV/KT or when left blank.
@@ -1493,6 +1498,7 @@ model LensProduct {
   material          LensMaterial?        @relation(fields: [materialId], references: [id])
   index             LensIndex?           @relation(fields: [indexId], references: [id])
   color             LensColor?           @relation(fields: [colorId], references: [id])
+  coating           LensCoating?          @relation(fields: [coatingId], references: [id], onDelete: Restrict)
   diameter          LensDiameter?        @relation(fields: [diameterId], references: [id])
   progressiveType   LensProgressiveType? @relation(fields: [progressiveTypeId], references: [id])
   variants          LensProductVariant[]
@@ -1504,6 +1510,7 @@ model LensProduct {
   @@index([materialId])
   @@index([indexId])
   @@index([colorId])
+  @@index([coatingId])
   @@index([diameterId])
   @@index([progressiveTypeId])
   @@index([isActive, updatedAt])

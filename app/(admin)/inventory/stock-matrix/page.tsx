@@ -79,6 +79,14 @@ function draftFromRule(rule: MatrixRule | null): Draft {
     : { min: "", target: "" };
 }
 
+function matrixReadError(error: unknown, fallback: string): string {
+  if (!(error instanceof AdminApiError)) return fallback;
+  const requestId = error.details.requestId;
+  return typeof requestId === "string"
+    ? `${error.message} (reference: ${requestId})`
+    : error.message;
+}
+
 function isDirty(cell: MatrixCell, draft: Draft | undefined) {
   if (!draft) return false;
   const original = draftFromRule(cell.rule);
@@ -153,13 +161,14 @@ export default function StockMatrixPage() {
       setList(res);
     } catch (err) {
       if (id !== listRequest.current) return;
-      setListError(err instanceof AdminApiError ? err.message : "Failed to load products.");
+      setListError(matrixReadError(err, "Failed to load products."));
     } finally {
       if (id === listRequest.current) setListLoading(false);
     }
   }, [lensType, page, category, brand, index, coating, search]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch matrix list on filter change
     void loadList();
   }, [loadList]);
 
@@ -179,7 +188,7 @@ export default function StockMatrixPage() {
       } catch (err) {
         if (id !== productRequest.current) return;
         setProduct(null);
-        setProductError(err instanceof AdminApiError ? err.message : "Failed to load matrix.");
+        setProductError(matrixReadError(err, "Failed to load matrix."));
       } finally {
         if (id === productRequest.current) setProductLoading(false);
       }
@@ -445,9 +454,12 @@ export default function StockMatrixPage() {
             {listLoading && list ? <Loader2 className="size-3.5 animate-spin" /> : null}
           </div>
           {listError ? (
-            <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-              {listError}
-            </p>
+            <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+              <p>{listError}</p>
+              <Button size="sm" variant="outline" className="mt-2" onClick={() => void loadList()}>
+                Retry products
+              </Button>
+            </div>
           ) : listLoading && !list ? (
             <ListSkeleton rows={8} />
           ) : list && list.products.length === 0 ? (
@@ -531,9 +543,12 @@ export default function StockMatrixPage() {
           ) : productLoading && !product ? (
             <TableSkeleton rows={6} columns={5} />
           ) : productError ? (
-            <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-              {productError}
-            </p>
+            <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+              <p>{productError}</p>
+              <Button size="sm" variant="outline" className="mt-2" onClick={() => void loadProduct(selectedKey)}>
+                Retry matrix
+              </Button>
+            </div>
           ) : product ? (
             <div className={cn("space-y-4", productLoading && "opacity-60")}>
               <div className="flex flex-wrap items-start justify-between gap-3">

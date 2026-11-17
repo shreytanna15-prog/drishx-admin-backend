@@ -12,6 +12,25 @@
 
 # testing
 /coverage
+**/coverage/
+**/__tests__/
+**/tests/
+**/test-results/
+**/playwright-report/
+**/.nyc_output/
+*.test.js
+*.test.jsx
+*.test.ts
+*.test.tsx
+*.test.mjs
+*.test.cjs
+*.spec.js
+*.spec.jsx
+*.spec.ts
+*.spec.tsx
+*.spec.mjs
+*.spec.cjs
+/scripts/e2e-*
 
 # Local QA screenshots / screen recordings (never commit)
 /screenshots/
@@ -37,11 +56,40 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
+*.tmp
+*.bak
+*.orig
+*.swp
 
 # env files (can opt-in for committing if needed)
 .env*
 !.env.deploy.example
 !.env.example
+
+# local credentials and private signing material
+.npmrc
+.netrc
+.pypirc
+.ssh/
+id_rsa
+id_ed25519
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*service-account*.json
+*credentials*.json
+secrets.json
+secrets.*.json
+*.secret.*
+/backups/
+*.dump
+*.backup
+*.sqlite
+*.sqlite3
 
 # vercel
 .vercel
@@ -56,6 +104,14 @@ temp_interactive_push.bat
 
 # Local developer notes (not for commits)
 developer_stuff/
+/dev-stuff/
+/dev-notes/
+/scratch/
+/tmp/
+/temp/
+.vscode/
+.idea/
+*.code-workspace
 config.bat
 
 # Never reintroduce malware droppers / scratch junk

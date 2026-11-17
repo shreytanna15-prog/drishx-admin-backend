@@ -44,6 +44,7 @@ function parseVariantExpansionBody(body: unknown) {
     materialId: b.materialId ? String(b.materialId) : null,
     indexId: b.indexId ? String(b.indexId) : null,
     colorId: b.colorId ? String(b.colorId) : null,
+    coatingId: b.coatingId ? String(b.coatingId) : null,
     diameterId: b.diameterId ? String(b.diameterId) : null,
     progressiveTypeId: b.progressiveTypeId
       ? String(b.progressiveTypeId)
@@ -75,6 +76,7 @@ export async function GET(req: NextRequest) {
       familyId: sp.get("familyId") ?? undefined,
       baseId: sp.get("baseId") ?? undefined,
       materialId: sp.get("materialId") ?? undefined,
+      coatingId: sp.get("coatingId") ?? undefined,
       isActive,
       page: Number(sp.get("page") ?? "1") || 1,
       limit: Number(sp.get("limit") ?? "20") || 20,

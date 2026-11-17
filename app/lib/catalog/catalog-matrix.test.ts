@@ -259,6 +259,29 @@ describe("buildCatalogMatrix KT", () => {
       .map((s) => s.rows[0]!.stub.axis);
     assert.deepEqual(axes, ["180", "90"]);
   });
+
+  it("groups 135° and 45° in one sheet without merging their cells", () => {
+    const variants = [135, 45].flatMap((axis) => [
+      v({ id: `cyl-${axis}`, sphMin: 0, sphMax: 0, cylMin: -1, cylMax: -1, axis, add: 1 }),
+      v({ id: `comp-${axis}`, sphMin: -1, sphMax: -1, cylMin: -1, cylMax: -1, axis, add: 1 }),
+    ]);
+    const model = buildCatalogMatrix(variants, KT);
+    const cylinders = model.sheets.filter((s) => s.kind === "cyl-axis");
+    const compounds = model.sheets.filter((s) => s.kind === "compound");
+
+    assert.equal(cylinders.length, 1);
+    assert.equal(compounds.length, 1);
+    assert.match(cylinders[0]!.title, /135° \/ 45°/);
+    assert.deepEqual(cylinders[0]!.rows.map((r) => r.stub.axis), ["135", "45"]);
+    for (const axis of [135, 45]) {
+      const cylCell = cylinders[0]!.cells[`cyl:-1.00|axis:${axis}`]!["add:1.00"]!;
+      const compCell = compounds[0]!.cells[`sph:-1.00|cyl:-1.00|axis:${axis}`]!["add:1.00"]!;
+      assert.equal(cylCell.variantId, `cyl-${axis}`);
+      assert.equal(cylCell.cellKey.axis, axis);
+      assert.equal(compCell.variantId, `comp-${axis}`);
+      assert.equal(compCell.cellKey.axis, axis);
+    }
+  });
 });
 
 describe("buildCatalogMatrix V2", () => {

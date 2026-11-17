@@ -25,6 +25,8 @@
 | RC-04 | Product catalog: parent + variants, new SKU/name builders | backend (admin panel); APIs as needed |
 | RC-05 | Finish photo unwire (clients) + null-material parent uniqueness | backend, website, mobile |
 | RC-06 | Walk-in: skip OTP when staff-created+verified; history; staff-only | backend, website, mobile |
+| RC-07 | Catalog ADD / Eye / Axis | backend (admin panel) |
+| RC-08 | Coating-specific product identity; shared power-range template | backend (admin panel) |
 | RC-07 | Catalog: multi ADD on variant; auto L/R eye (V2); CYL-gated axes | backend (admin panel) |
 
 ---
@@ -579,4 +581,16 @@ Backend admin catalog (schema + services + Attributes/Create UI).
 - [`product-catalog/CLIENT-PLAN.md`](./product-catalog/CLIENT-PLAN.md)  
 - [`product-catalog/DEVELOPER-GUIDE.md`](./product-catalog/DEVELOPER-GUIDE.md)  
 - `app/lib/catalog/lens-product-service.ts`, `lens-product-sku.ts`
+
+---
+
+## RC-08 — Coating-specific product identity (14 Nov client call)
+
+The client requires identical power-range/axis/ADD matrices under multiple distinct products (hard coat, blue cut, poly hard coat, etc.). Coating must separate parent products and variant SKUs so future per-cell stock and PO records cannot mix between coatings. `LensPowerRange` remains a reusable bounds master; it does not own stock.
+
+- New `LensProduct` creation requires an active coating; one coating per parent. Same other attrs with different coating creates a distinct parent, not extra variants on the first product.
+- Include the coating code in base/variant SKUs and its label in variant names; existing unclassified parents/SKUs remain unchanged. No inferred backfill from base/material/color.
+- List/detail/search/filter/preview expose coating. Existing legacy rows may still add variants under their null-coating parent.
+- Live quantities are still on the legacy lens leaves, while the new catalog matrix cells are view-only. Separate stock per new parent/variant needs the stock-management leaf cutover; this identity change does not manufacture stock balances.
+- 45° and 135° may share a displayed oblique-axis matrix section, but the exact axis remains on every row and cell.
 

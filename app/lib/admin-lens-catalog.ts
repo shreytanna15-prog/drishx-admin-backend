@@ -108,6 +108,7 @@ export type LensProductVariant = {
     materialId: string | null;
     indexId: string | null;
     colorId: string | null;
+    coatingId: string | null;
     diameterId: string | null;
     progressiveTypeId: string | null;
     family: LensFamilyRef;
@@ -115,6 +116,7 @@ export type LensProductVariant = {
     material: LensAttrRef | null;
     index: LensAttrValueRef | null;
     color: LensAttrRef | null;
+    coating: LensAttrRef | null;
     diameter: LensAttrRef | null;
     progressiveType: LensAttrRef | null;
     attributeSummary: string;
@@ -129,6 +131,7 @@ export type LensProduct = {
   materialId: string | null;
   indexId: string | null;
   colorId: string | null;
+  coatingId: string | null;
   diameterId: string | null;
   progressiveTypeId: string | null;
   isActive: boolean;
@@ -139,6 +142,7 @@ export type LensProduct = {
   material: LensAttrRef | null;
   index: LensAttrValueRef | null;
   color: LensAttrRef | null;
+  coating: LensAttrRef | null;
   diameter: LensAttrRef | null;
   progressiveType: LensAttrRef | null;
   attributeSummary: string;
@@ -260,6 +264,7 @@ export function fetchLensProducts(params?: {
   familyId?: string;
   baseId?: string;
   materialId?: string;
+  coatingId?: string;
   powerRangeId?: string;
   isActive?: boolean | null;
   page?: number;
@@ -271,6 +276,7 @@ export function fetchLensProducts(params?: {
   if (params?.familyId) sp.set("familyId", params.familyId);
   if (params?.baseId) sp.set("baseId", params.baseId);
   if (params?.materialId) sp.set("materialId", params.materialId);
+  if (params?.coatingId) sp.set("coatingId", params.coatingId);
   if (params?.powerRangeId) sp.set("powerRangeId", params.powerRangeId);
   if (params?.isActive === true) sp.set("isActive", "true");
   if (params?.isActive === false) sp.set("isActive", "false");

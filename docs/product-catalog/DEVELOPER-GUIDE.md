@@ -53,23 +53,22 @@
 ```
 Attribute masters
   LensFamily (supportsAxis / supportsAdd / supportsEye / supportsProgressiveType)
-  | LensBase | LensMaterial? | LensIndex | LensColor | LensDiameter?
+   | LensBase | LensMaterial? | LensIndex | LensCoating | LensColor | LensDiameter?
   | LensProgressiveType (V2) | LensAxis | LensAddition
-  + LensCoating (not identity)
   + LensBaseMaterialLink
   + LensPowerRange (sph/cyl bounds)
         │
         ▼
 LensProduct (parent)
-  material? · base · index · family · color · diameter? · progressiveType? (V2, optional)
+   material? · base · index · family · coating · color · diameter? · progressiveType? (V2, optional)
   unique on that combo; internal baseCode includes progressive type when set
         │ 1 → many
         ▼
 LensProductVariant
   powerRangeId × optional axisId × optional additionId × optional eye
   (CYL=0 ranges skip axes; V2 auto LEFT+RIGHT)
-  skuCode = [MATERIAL-]BASE-INDEX-FAMILY[-COLOR][-ADD…][-D…][-LEFT|RIGHT]-S…-C…[-A90]
-  name    = [Material] [Index] [Family] [Base] [Color] +4.00/+2.00 [90]
+   skuCode = [MATERIAL-]BASE[-INDEX]-FAMILY[-COATING][-COLOR][-ADD…][-D…][-LEFT|RIGHT]-S…-C…[-A90]
+   name    = [Material] [Index] [Family] [Base] [Coating] [Color] +4.00/+2.00 [90]
   purchasePrice · sellingPrice (default 0), isActive
         │
         ▼
@@ -96,10 +95,10 @@ Shared shape: `id`, `code` (unique), `name`, `isActive`, `sortOrder`, timestamps
 
 ### 3.3 `LensProduct` (parent)
 
-Identity attrs only: `familyId`, `baseId`, optional `materialId`, `indexId`, `colorId`.  
+Identity attrs: `familyId`, `baseId`, `coatingId`, optional `materialId`, `indexId`, `colorId`, `diameterId`, `progressiveTypeId`. Coating is required on new parents; legacy parents retain null until explicitly classified.  
 Internal `baseCode` (unique). No power bounds, no `skuCode`/`name` on parent.
 
-**Uniqueness:** parent attrs combo unique. Creating with an existing combo **adds variants** to that parent (or rejects duplicate range).
+**Uniqueness:** parent attrs combo including coating unique (`NULLS NOT DISTINCT`). Creating with an existing combo adds missing variants; the same range on a different coating creates a distinct parent and SKU. Never infer coating from a legacy base/material/color. Existing null-coating SKUs are unchanged; adding ranges to an existing legacy parent remains possible.
 
 ### 3.4 `LensProductVariant`
 
@@ -119,13 +118,13 @@ Unique `(productId, powerRangeId, axisId, additionId, eye)` with `NULLS NOT DIST
 **SKU** (`buildLensProductSkuCode`):
 
 ```
-[MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}
+[MATERIAL-]BASE[-INDEX]-FAMILY[-COATING][-COLOR]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}
 ```
 
 **Name** (`buildLensProductName`):
 
 ```
-[Material] [Index] [Family] [Base] [Color] -6.00/+2.00
+[Material] [Index] [Family] [Base] [Coating] [Color] -6.00/+2.00
 ```
 
 | Rule | Detail |
@@ -133,7 +132,7 @@ Unique `(productId, powerRangeId, axisId, additionId, eye)` with `NULLS NOT DIST
 | Codes | Uppercase; `.` → `P`; strip non-alphanumeric |
 | Powers in SKU | `M` for negative; `P` for decimal; from power-range bounds |
 | Powers in name | Human SPH label `-6.00/+2.00` |
-| Coating | Not in SKU or name |
+| Coating | Required for new parents; in parent identity, variant SKU and name. Null only on pre-existing products. |
 | Material | Optional; omit segment when absent |
 | Create | Server builds both; no typed `skuCode` or `name` |
 | Uniqueness | Parent attrs unique; variant `(productId, powerRangeId, axisId, additionId, eye)` + unique `skuCode` (name display-only) |
@@ -212,7 +211,7 @@ Validation: active FKs, base↔material when material set, ≥1 power range, uni
 
 Reusable pieces: `SkuChip`, `CatalogSelectField`, `PowerRangeMultiSelect`, `VariantPreviewTable`, `CatalogMatrixPanel`, plus shared `AdminTable` / `AdminSelect`.
 
-Matrix: `buildCatalogMatrix` in `catalog-matrix.ts` (0.25 steps, family sheets) — no per-cell API; cells `_ / _ / _` until stock. Each sheet carries explicit `stubColumns` (`sph` / `cyl` / `axis`), `dataAxis` (`cyl` for SV, `add` for KT/V2), and `dataColumns` (`ADD` or `RE`/`LE` × `ADD`). The panel stacks every sheet as an Excel-like table (no tabs), freezes stub columns, and puts axis blocks largest-first. `CatalogMatrixPanel` takes `familyLabel` for sheet titles.
+Matrix: `buildCatalogMatrix` in `catalog-matrix.ts` (0.25 steps, family sheets) — no per-cell API; cells `_ / _ / _` until stock. Each sheet carries explicit `stubColumns` (`sph` / `cyl` / `axis`), `dataAxis` (`cyl` for SV, `add` for KT/V2), and `dataColumns` (`ADD` or `RE`/`LE` × `ADD`). The panel stacks every sheet as an Excel-like table (no tabs), freezes stub columns, and puts axis blocks largest-first. The 135°/45° oblique pair shares a sheet while retaining separate exact-axis cell keys. `CatalogMatrixPanel` takes `familyLabel` for sheet titles.
 
 ---
 

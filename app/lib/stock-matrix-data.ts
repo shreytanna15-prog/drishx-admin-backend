@@ -183,9 +183,16 @@ export async function listMatrixProducts(input: {
   const slice = keyed.slice((page - 1) * pageSize, page * pageSize);
 
   // Rule coverage + below-threshold counts for this page only (batched).
-  const matrices = await Promise.all(
-    slice.map((p) => loadMatrixRows(db, input.lensType, p.key))
-  );
+  const matrices: MatrixLensRow[][] = [];
+  // One matrix loads several relations in parallel. Avoid issuing 20 such
+  // batches at once against the small Supabase transaction pool.
+  for (let i = 0; i < slice.length; i += 2) {
+    matrices.push(
+      ...(await Promise.all(
+        slice.slice(i, i + 2).map((p) => loadMatrixRows(db, input.lensType, p.key))
+      ))
+    );
+  }
   const products = slice.map((p, i) => {
     const matrix = buildProductMatrix(matrices[i]!);
     return {

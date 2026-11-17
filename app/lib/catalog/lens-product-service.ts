@@ -61,6 +61,7 @@ const parentInclude = {
   material: true,
   index: true,
   color: true,
+  coating: true,
   diameter: true,
   progressiveType: true,
   variants: {
@@ -84,6 +85,7 @@ const variantInclude = {
       material: true,
       index: true,
       color: true,
+      coating: true,
       diameter: true,
       progressiveType: true,
     },
@@ -175,6 +177,7 @@ function nestedProductAttrs(row: ParentRow) {
     materialId: row.materialId,
     indexId: row.indexId,
     colorId: row.colorId,
+    coatingId: row.coatingId,
     diameterId: row.diameterId,
     progressiveTypeId: row.progressiveTypeId,
     isActive: row.isActive,
@@ -185,6 +188,7 @@ function nestedProductAttrs(row: ParentRow) {
     material: row.material,
     index: row.index,
     color: row.color,
+    coating: row.coating,
     diameter: row.diameter,
     progressiveType: row.progressiveType,
   };
@@ -235,6 +239,7 @@ export function serializeLensProductVariant(row: VariantRow) {
       materialId: p.materialId,
       indexId: p.indexId,
       colorId: p.colorId,
+      coatingId: p.coatingId,
       diameterId: p.diameterId,
       progressiveTypeId: p.progressiveTypeId,
       family: serializeFamily(p.family),
@@ -247,6 +252,7 @@ export function serializeLensProductVariant(row: VariantRow) {
           }
         : null,
       color: p.color ? attrRef(p.color) : null,
+      coating: p.coating ? attrRef(p.coating) : null,
       diameter: p.diameter ? attrRef(p.diameter) : null,
       progressiveType: p.progressiveType ? attrRef(p.progressiveType) : null,
       attributeSummary: [
@@ -256,6 +262,7 @@ export function serializeLensProductVariant(row: VariantRow) {
         p.material?.code,
         p.index?.code,
         p.color?.code,
+        p.coating?.code,
         p.diameter?.code,
       ]
         .filter(Boolean)
@@ -273,6 +280,7 @@ export function serializeLensProduct(row: ParentRow) {
     materialId: row.materialId,
     indexId: row.indexId,
     colorId: row.colorId,
+    coatingId: row.coatingId,
     diameterId: row.diameterId,
     progressiveTypeId: row.progressiveTypeId,
     isActive: row.isActive,
@@ -285,6 +293,7 @@ export function serializeLensProduct(row: ParentRow) {
       ? { ...attrRef(row.index), value: num(row.index.value) }
       : null,
     color: row.color ? attrRef(row.color) : null,
+    coating: row.coating ? attrRef(row.coating) : null,
     diameter: row.diameter ? attrRef(row.diameter) : null,
     progressiveType: row.progressiveType
       ? attrRef(row.progressiveType)
@@ -296,6 +305,7 @@ export function serializeLensProduct(row: ParentRow) {
       row.material?.code,
       row.index?.code,
       row.color?.code,
+      row.coating?.code,
       row.diameter?.code,
     ]
       .filter(Boolean)
@@ -358,6 +368,7 @@ type ParentAttrs = {
   materialId: string | null;
   indexId: string | null;
   colorId: string | null;
+  coatingId: string | null;
   diameterId: string | null;
   progressiveTypeId: string | null;
 };
@@ -371,12 +382,14 @@ type CodeParts = {
   indexCode?: string | null;
   colorCode?: string | null;
   colorLabel?: string | null;
+  coatingCode?: string | null;
+  coatingLabel?: string | null;
   diameterCode?: string | null;
   progressiveTypeCode?: string | null;
 };
 
 async function loadParentAttrs(ids: ParentAttrs) {
-  const [family, base, material, indexRow, color, diameter, progressiveType] =
+  const [family, base, material, indexRow, color, coating, diameter, progressiveType] =
     await Promise.all([
       prisma.lensFamily.findUnique({ where: { id: ids.familyId } }),
       prisma.lensBase.findUnique({ where: { id: ids.baseId } }),
@@ -388,6 +401,9 @@ async function loadParentAttrs(ids: ParentAttrs) {
         : Promise.resolve(null),
       ids.colorId
         ? prisma.lensColor.findUnique({ where: { id: ids.colorId } })
+        : Promise.resolve(null),
+      ids.coatingId
+        ? prisma.lensCoating.findUnique({ where: { id: ids.coatingId } })
         : Promise.resolve(null),
       ids.diameterId
         ? prisma.lensDiameter.findUnique({ where: { id: ids.diameterId } })
@@ -404,6 +420,7 @@ async function loadParentAttrs(ids: ParentAttrs) {
   await assertActiveFk("Material", ids.materialId, async () => material);
   await assertActiveFk("Index", ids.indexId, async () => indexRow);
   await assertActiveFk("Color", ids.colorId, async () => color);
+  await assertActiveFk("Coating", ids.coatingId, async () => coating);
   await assertActiveFk("Diameter", ids.diameterId, async () => diameter);
   await assertActiveFk(
     "Progressive type",
@@ -422,6 +439,9 @@ async function loadParentAttrs(ids: ParentAttrs) {
   }
   if (ids.colorId && !color) {
     throw new LensProductServiceError("Color not found.", 400, "INVALID_FK");
+  }
+  if (ids.coatingId && !coating) {
+    throw new LensProductServiceError("Coating not found.", 400, "INVALID_FK");
   }
   if (ids.diameterId && !diameter) {
     throw new LensProductServiceError("Diameter not found.", 400, "INVALID_FK");
@@ -444,6 +464,8 @@ async function loadParentAttrs(ids: ParentAttrs) {
     indexCode: indexRow?.code ?? null,
     colorCode: color?.code ?? null,
     colorLabel: color ? color.name?.trim() || color.code : null,
+    coatingCode: coating?.code ?? null,
+    coatingLabel: coating ? coating.name?.trim() || coating.code : null,
     diameterCode: diameter?.code ?? null,
     progressiveTypeCode: progressiveType?.code ?? null,
   };
@@ -454,6 +476,7 @@ async function loadParentAttrs(ids: ParentAttrs) {
     material,
     indexRow,
     color,
+    coating,
     diameter,
     progressiveType,
     codeParts,
@@ -485,6 +508,7 @@ async function findParentByAttrs(ids: ParentAttrs, client: DbClient = prisma) {
       materialId: ids.materialId,
       indexId: ids.indexId,
       colorId: ids.colorId,
+      coatingId: ids.coatingId,
       diameterId: ids.diameterId,
       progressiveTypeId: ids.progressiveTypeId,
     },
@@ -693,6 +717,7 @@ function planVariants(opts: {
             indexCode: opts.codeParts.indexCode,
             colorLabel:
               opts.codeParts.colorLabel ?? opts.codeParts.colorCode ?? null,
+            coatingLabel: opts.codeParts.coatingLabel,
             axisValue: axisSlot.value,
             ...bounds,
           });
@@ -727,6 +752,8 @@ export type CreateLensProductInput = {
   materialId?: string | null;
   indexId?: string | null;
   colorId?: string | null;
+  /** Required for new products; nullable input is rejected by resolveVariantExpansion. */
+  coatingId?: string | null;
   diameterId?: string | null;
   /** V2 only — optional; blank stays null. */
   progressiveTypeId?: string | null;
@@ -760,6 +787,7 @@ type VariantExpansionInput = {
   materialId?: string | null;
   indexId?: string | null;
   colorId?: string | null;
+  coatingId?: string | null;
   diameterId?: string | null;
   progressiveTypeId?: string | null;
   powerRangeIds: string[];
@@ -767,7 +795,10 @@ type VariantExpansionInput = {
   additionIds?: string[];
 };
 
-async function resolveVariantExpansion(input: VariantExpansionInput) {
+async function resolveVariantExpansion(
+  input: VariantExpansionInput,
+  allowLegacyUnclassified = false
+) {
   const familyId = requireId("familyId", input.familyId);
   const familyRow = await prisma.lensFamily.findUnique({
     where: { id: familyId },
@@ -788,6 +819,9 @@ async function resolveVariantExpansion(input: VariantExpansionInput) {
     materialId: normalizeOptionalId(input.materialId),
     indexId: normalizeOptionalId(input.indexId),
     colorId: normalizeOptionalId(input.colorId),
+    coatingId: allowLegacyUnclassified
+      ? normalizeOptionalId(input.coatingId)
+      : requireId("coatingId", input.coatingId),
     diameterId: normalizeOptionalId(input.diameterId),
     progressiveTypeId,
   };
@@ -830,6 +864,7 @@ async function resolveVariantExpansion(input: VariantExpansionInput) {
     materialCode: codeParts.materialCode,
     indexCode: codeParts.indexCode,
     colorCode: codeParts.colorCode,
+    coatingCode: codeParts.coatingCode,
     progressiveTypeCode: codeParts.progressiveTypeCode,
     diameterCode: codeParts.diameterCode,
   });
@@ -1051,6 +1086,7 @@ export async function createLensProduct(input: CreateLensProductInput) {
           materialId: ids.materialId,
           indexId: ids.indexId,
           colorId: ids.colorId,
+          coatingId: ids.coatingId,
           diameterId: ids.diameterId,
           progressiveTypeId: ids.progressiveTypeId,
           isActive,
@@ -1184,12 +1220,13 @@ export async function addLensProductVariants(input: {
     materialId: parent.materialId,
     indexId: parent.indexId,
     colorId: parent.colorId,
+    coatingId: parent.coatingId,
     diameterId: parent.diameterId,
     progressiveTypeId: parent.progressiveTypeId,
     powerRangeIds: input.powerRangeIds,
     axisIds: input.axisIds,
     additionIds: input.additionIds,
-  });
+  }, true);
 
   const purchasePrice = normalizeMoney(input.purchasePrice, "purchasePrice");
   const sellingPrice = normalizeMoney(input.sellingPrice, "sellingPrice");
@@ -1271,6 +1308,7 @@ export async function listLensProductVariants(params: {
   familyId?: string;
   baseId?: string;
   materialId?: string;
+  coatingId?: string;
   powerRangeId?: string;
   isActive?: boolean | null;
   page?: number;
@@ -1289,6 +1327,7 @@ export async function listLensProductVariants(params: {
   if (params.familyId) productWhere.familyId = params.familyId;
   if (params.baseId) productWhere.baseId = params.baseId;
   if (params.materialId) productWhere.materialId = params.materialId;
+  if (params.coatingId) productWhere.coatingId = params.coatingId;
   if (Object.keys(productWhere).length > 0) {
     where.product = productWhere;
   }
@@ -1301,6 +1340,8 @@ export async function listLensProductVariants(params: {
       { product: { family: { code: { contains: q, mode: "insensitive" } } } },
       { product: { base: { code: { contains: q, mode: "insensitive" } } } },
       { product: { material: { code: { contains: q, mode: "insensitive" } } } },
+      { product: { coating: { code: { contains: q, mode: "insensitive" } } } },
+      { product: { coating: { name: { contains: q, mode: "insensitive" } } } },
     ];
   }
 
@@ -1330,6 +1371,7 @@ export async function listLensProducts(params: {
   familyId?: string;
   baseId?: string;
   materialId?: string;
+  coatingId?: string;
   isActive?: boolean | null;
   page?: number;
   limit?: number;
@@ -1341,6 +1383,7 @@ export async function listLensProducts(params: {
   if (params.familyId) where.familyId = params.familyId;
   if (params.baseId) where.baseId = params.baseId;
   if (params.materialId) where.materialId = params.materialId;
+  if (params.coatingId) where.coatingId = params.coatingId;
   if (params.isActive === true || params.isActive === false) {
     where.isActive = params.isActive;
   }
@@ -1351,6 +1394,8 @@ export async function listLensProducts(params: {
       { family: { code: { contains: q, mode: "insensitive" } } },
       { base: { code: { contains: q, mode: "insensitive" } } },
       { material: { code: { contains: q, mode: "insensitive" } } },
+      { coating: { code: { contains: q, mode: "insensitive" } } },
+      { coating: { name: { contains: q, mode: "insensitive" } } },
       { variants: { some: { skuCode: { contains: q, mode: "insensitive" } } } },
       { variants: { some: { name: { contains: q, mode: "insensitive" } } } },
     ];

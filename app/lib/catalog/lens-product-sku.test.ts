@@ -54,6 +54,24 @@ describe("lens product SKU + name", () => {
     );
   });
 
+  it("gives identical ranges separate product and variant identities per coating", () => {
+    const attrs = { familyCode: "KT", baseCode: "BR", materialCode: "POLY" };
+    const power = { sphMin: -6, sphMax: 0, cylMin: 0, cylMax: 2, axisValue: 45 };
+    const hc = buildLensProductSkuCode({ ...attrs, ...power, coatingCode: "HC" });
+    const blue = buildLensProductSkuCode({ ...attrs, ...power, coatingCode: "BLUE_COAT" });
+
+    assert.equal(buildLensProductBaseCode({ ...attrs, coatingCode: "HC" }), "POLY-BR-KT-HC");
+    assert.notEqual(hc, blue);
+    assert.equal(hc, "POLY-BR-KT-HC-SM6T0-C0T2-A45");
+    assert.equal(blue, "POLY-BR-KT-BLUECOAT-SM6T0-C0T2-A45");
+    assert.notEqual(
+      buildLensProductName({ ...attrs, ...power, coatingLabel: "Hard Coat" }),
+      buildLensProductName({ ...attrs, ...power, coatingLabel: "Blue Coat" })
+    );
+    // Existing, unclassified parents keep their historical codes.
+    assert.equal(buildLensProductBaseCode(attrs), "POLY-BR-KT");
+  });
+
   it("SKU encodes bounds, optional ADD/eye/axis", () => {
     assert.equal(
       buildLensProductSkuCode({

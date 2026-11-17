@@ -65,6 +65,7 @@ export default function ProductsCatalogPage() {
   const [familyId, setFamilyId] = useState("");
   const [baseId, setBaseId] = useState("");
   const [materialId, setMaterialId] = useState("");
+  const [coatingId, setCoatingId] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">(
     "all"
   );
@@ -79,6 +80,7 @@ export default function ProductsCatalogPage() {
   const [families, setFamilies] = useState<LensAttribute[]>([]);
   const [bases, setBases] = useState<LensAttribute[]>([]);
   const [materials, setMaterials] = useState<LensAttribute[]>([]);
+  const [coatings, setCoatings] = useState<LensAttribute[]>([]);
   /** RC-04 / CLIENT-PLAN: grouped view expands parents → variants */
   const [expandedParentIds, setExpandedParentIds] = useState<Set<string>>(
     () => new Set()
@@ -93,14 +95,16 @@ export default function ProductsCatalogPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const [f, b, m] = await Promise.all([
+        const [f, b, m, c] = await Promise.all([
           fetchLensAttributes("family", { activeOnly: true }),
           fetchLensAttributes("base", { activeOnly: true }),
           fetchLensAttributes("material", { activeOnly: true }),
+          fetchLensAttributes("coating", { activeOnly: true }),
         ]);
         setFamilies(f.items);
         setBases(b.items);
         setMaterials(m.items);
+        setCoatings(c.items);
       } catch {
         // filters optional
       }
@@ -118,6 +122,7 @@ export default function ProductsCatalogPage() {
         familyId: familyId || undefined,
         baseId: baseId || undefined,
         materialId: materialId || undefined,
+        coatingId: coatingId || undefined,
         isActive:
           activeFilter === "all" ? null : activeFilter === "true",
         page,
@@ -144,18 +149,20 @@ export default function ProductsCatalogPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, familyId, baseId, materialId, activeFilter, page, listView]);
+  }, [q, familyId, baseId, materialId, coatingId, activeFilter, page, listView]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch list on filter change
     void load();
   }, [load]);
 
   useEffect(() => {
     if (listView === "flat") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset grouping on filter change
       setExpandedNameGroups(new Set());
       setGroupPage(1);
     }
-  }, [listView, q, familyId, baseId, materialId, activeFilter]);
+  }, [listView, q, familyId, baseId, materialId, coatingId, activeFilter]);
 
   function applySearch() {
     setPage(1);
@@ -284,6 +291,23 @@ export default function ProductsCatalogPage() {
                 options={[
                   { value: "", label: "All" },
                   ...materials.map((m) => ({ value: m.id, label: m.code })),
+                ]}
+                placeholder="All"
+                size="sm"
+                triggerClassName="h-10 rounded-xl min-w-0"
+              />
+            </label>
+            <label className="w-40 space-y-1">
+              <span className={labelClass}>Coating</span>
+              <AdminSelect
+                value={coatingId}
+                onValueChange={(v) => {
+                  setCoatingId(v);
+                  setPage(1);
+                }}
+                options={[
+                  { value: "", label: "All" },
+                  ...coatings.map((c) => ({ value: c.id, label: c.name })),
                 ]}
                 placeholder="All"
                 size="sm"

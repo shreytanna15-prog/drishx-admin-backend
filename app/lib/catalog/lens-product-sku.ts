@@ -1,10 +1,11 @@
 /**
  * RC-04 LensProductVariant SKU + name builders.
  *
- * SKU:  [MATERIAL-]BASE[-INDEX]-FAMILY[-PROGTYPE][-COLOR][-ADD…][-D…][-LEFT|RIGHT]-S…-C…[-A{axis}]
- * Name: [Material] [Index] [Family] [Base] [Color] {max_SPH}/{max_CYL} [axis]
+ * SKU:  [MATERIAL-]BASE[-INDEX]-FAMILY[-COATING][-PROGTYPE][-COLOR][-ADD…][-D…][-LEFT|RIGHT]-S…-C…[-A{axis}]
+ * Name: [Material] [Index] [Family] [Base] [Coating] [Color] {max_SPH}/{max_CYL} [axis]
  * Progressive type is in SKU/baseCode only — not in the human name.
- * Coating is never included. Among new fields, name appends axis only.
+ * Coating distinguishes products that share the same power-range matrix.
+ * Legacy products without a coating retain their existing codes and names.
  */
 
 import {
@@ -20,6 +21,7 @@ export type LensProductSkuParts = {
   materialCode?: string | null;
   indexCode?: string | null;
   colorCode?: string | null;
+  coatingCode?: string | null;
   progressiveTypeCode?: string | null;
   additionCode?: string | null;
   diameterCode?: string | null;
@@ -41,6 +43,7 @@ export type LensProductNameParts = {
    * Prefer attribute display name; fall back to `colorCode` if omitted.
    */
   colorLabel?: string | null;
+  coatingLabel?: string | null;
   /** @deprecated Prefer `colorLabel` for names; kept for older call sites. */
   colorCode?: string | null;
   axisValue?: number | null;
@@ -83,6 +86,7 @@ export function buildLensProductBaseCode(parts: {
   materialCode?: string | null;
   indexCode?: string | null;
   colorCode?: string | null;
+  coatingCode?: string | null;
   progressiveTypeCode?: string | null;
   additionCode?: string | null;
   diameterCode?: string | null;
@@ -105,6 +109,10 @@ export function buildLensProductBaseCode(parts: {
     if (index) tokens.push(index);
   }
   tokens.push(family);
+  if (parts.coatingCode?.trim()) {
+    const coating = sanitizeSkuCodePart(parts.coatingCode);
+    if (coating) tokens.push(coating);
+  }
   if (
     parts.progressiveTypeCode != null &&
     String(parts.progressiveTypeCode).trim() !== ""
@@ -192,6 +200,8 @@ export function buildLensProductName(parts: LensProductNameParts): string {
     String(parts.familyCode).trim(),
     String(parts.baseCode).trim()
   );
+  const coatingWord = String(parts.coatingLabel ?? "").trim();
+  if (coatingWord) words.push(coatingWord);
   const colorWord = String(parts.colorLabel ?? parts.colorCode ?? "").trim();
   if (colorWord) words.push(colorWord);
   words.push(

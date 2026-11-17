@@ -11,14 +11,14 @@
 
 Give Admin a clear way to:
 
-1. Maintain **attribute lists** (Family, Base, Material, Index, Color, **Power range**; Coating master may remain but is **not** product identity) — add, rename, active / inactive.  
+1. Maintain **attribute lists** (Family, Base, Material, Index, Coating, Color, **Power range**) — add, rename, active / inactive.  
 2. **Create a product parent** once by selecting attributes (Material **optional**), then attach **one or more power-range attributes** as **variants** — without re-picking the same attrs for each range.  
 3. Browse catalog in **flat** (per variant) and **grouped** (by parent / group-by) views, plus grid where useful.  
 4. Open the **parent product** and see a **family-aware power matrix** composed from its variants (SV: SPH × CYL; KT/V2: Sphere / CYL+Axis / Compound / Cross with ADD or Eye×ADD columns).
 
 **SKU** and **name** are both **auto-built** (Admin does not type them). SKU is a compact machine code; name is human-readable for procurement / stock (no supplier brand fluff).
 
-Each variant is a fully separate sellable line (own SKU, name, price). The matrix is a **view** over sibling variants on the parent; future stock/PO leaves key off the same optical cell identity.
+Each variant is a fully separate sellable line (own SKU, name, price). The matrix is a **view** over sibling variants on the parent; future stock/PO leaves key off the same optical cell identity **within that coating-specific product**. Multiple products can reference the same power-range master without sharing stock.
 
 ---
 
@@ -26,7 +26,7 @@ Each variant is a fully separate sellable line (own SKU, name, price). The matri
 
 ### In scope
 
-- **Attributes** admin — tabs for Family, Base, Material, Index, Color, Power range (+ Coating tab optional / not used on create identity)
+- **Attributes** admin — tabs for Family, Base, Material, Index, Coating, Color, Power range
 - **Power range** add UX: select-based bounds (−40…+8 step rules), label like `-6.00/+2.00`
 - **Parent + variant** model (one attribute combo → many power ranges)
 - **Create product** — attrs once + **multi-select** power ranges; preview SKUs/names; save parent + N variants
@@ -55,9 +55,9 @@ Each variant is a fully separate sellable line (own SKU, name, price). The matri
 |-------|--------|
 | Flat product = attrs + typed range numbers + typed name | Parent = attrs; variants = power-range masters |
 | Re-create whole product for a second range | Same parent → **Add power range** (multi-select on create) |
-| SKU: `FAMILY-BASE-MATERIAL-…` | SKU: `[MATERIAL-]BASE-INDEX-FAMILY[-COLOR]-S…-C…` (no coating) |
+| SKU: `FAMILY-BASE-MATERIAL-…` | SKU: `[MATERIAL-]BASE-INDEX-FAMILY[-COATING][-COLOR]-S…-C…` |
 | Name typed by Admin | Name **auto**: human words + `-6.00/+2.00` |
-| Coating in SKU path | Coating **not** product identity; **Color** holds Green / Blue / … |
+| Coating in SKU path | Coating is again product identity; **Color** remains a separate attribute. Existing unclassified products keep their old SKU. |
 
 ---
 
@@ -67,7 +67,7 @@ Each variant is a fully separate sellable line (own SKU, name, price). The matri
 |---------|---------|
 | **Attribute** | Master value (HC, 1.56, Green, power range `-6.00/+2.00`, …). |
 | **Power range (attribute)** | Reusable SPH/CYL bounds master. Label e.g. **`-6.00/+2.00`**. |
-| **Product (parent)** | One attribute combination: Material? · Base · Index · Family · Color. Created once. Internal base code only (not shown). |
+| **Product (parent)** | One attribute combination: Material? · Base · Index · Family · Coating · Color. Each coating gets a separate parent even when ranges/axes/ADD match. |
 | **Variant** | Parent + one power range (+ axis/ADD/eye when family requires). **Sellable** catalog SKU: unique auto SKU, display name, price. |
 | **SKU code** | Compact machine id on the **variant** (not typed). |
 | **Name** | Human label on the **variant** (not typed; no brand). |
@@ -75,14 +75,14 @@ Each variant is a fully separate sellable line (own SKU, name, price). The matri
 
 ```
 Attributes (masters)
-  Family · Base · Material? · Index · Color
+  Family · Base · Material? · Index · Coating · Color
   + Power range masters (−6.00/+2.00, −6.00/+4.00, …)
         │
         ▼
 ┌─────────────────────────────────┐
 │  PARENT (LensProduct)           │
 │  Material? · Base · Index ·     │
-│  Family · Color                 │
+│  Family · Coating · Color       │
 │  (internal base code only)      │
 └────────────┬────────────────────┘
              │ 1 → many
@@ -119,7 +119,7 @@ Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and 
 | Diameter | 55…120 step 5 mm | Optional single on parent |
 | Eye | LEFT / RIGHT | Auto on V2 variants only (no create picker) |
 | **Power range** | `-6.00/+2.00`, … | On **variant** (multi) |
-| Coating | (optional master) | **Not** identity / SKU / name |
+| Coating | HC, HMC, Blue Coat, … | Required for new parents; identity, SKU and name |
 
 ### 5.2 What Admin can do on each tab
 
@@ -156,14 +156,14 @@ Example: parent `PG · BR · 1.56 · KT · Green` with ranges `-6.00/+2.00` and 
 | **Flat view** | One row per **variant** (SKU, name, attrs, range label, status) — server-paginated |
 | **Grouped view** | Parents (or group-by family/base/…); expand loads variants |
 | **Grid** | Optional card tiles (variant summary) |
-| **Search / filters** | Server-side by SKU, name, family, base, material, active |
+| **Search / filters** | Server-side by SKU, name, family, base, material, coating, active |
 | **Create product** | Button → create form |
 
 ### 6.2 Create product
 
 **Path:** `/inventory/products-catalog/new`
 
-1. **Family** → **Base** → **Material** (optional) → **Index** → **Color** → **Diameter** (optional) → **Progressive type** (V2 only; optional, no default)  
+1. **Family** → **Base** → **Material** (optional) → **Index** → **Coating** (required) → **Color** → **Diameter** (optional) → **Progressive type** (V2 only; optional, no default)  
 2. **Power ranges** — multi-select (≥1)  
 3. If family supports Axis and a selected range has CYL ≠ 0 → optional **Axes** multi-select  
 4. If family supports ADD → optional **Additions** multi-select  
@@ -195,9 +195,9 @@ If the attribute combo already exists → do not duplicate parent; go to that pa
 
 ### 6.3 SKU format (variant — locked)
 
-Compact codes; omit Material when absent; **all families** (SV, KT, V2, …); **no coating**:
+Compact codes; omit Material when absent; **all families** (SV, KT, V2, …); coating after family:
 
-`[MATERIAL-]BASE-INDEX-FAMILY[-PROGTYPE][-COLOR][-ADD…][-D{mm}][-LEFT|RIGHT]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}[-A{axis}]`
+`[MATERIAL-]BASE[-INDEX]-FAMILY[-COATING][-PROGTYPE][-COLOR][-ADD…][-D{mm}][-LEFT|RIGHT]-S{sphMin}T{sphMax}-C{cylMin}T{cylMax}[-A{axis}]`
 
 | Rule | Detail |
 |------|--------|
@@ -205,7 +205,7 @@ Compact codes; omit Material when absent; **all families** (SV, KT, V2, …); **
 | Powers | Negatives → `M` (`-6` → `M6`); decimals use `P` |
 | Source | Bounds from selected **power-range attribute** |
 | Uniqueness | Variant `skuCode` unique; `name` is display-only and may repeat. Existing `(range, axis, ADD, eye)` children are skipped; only missing children are inserted. |
-| Parent uniqueness | `(family, base, material?, index?, color?, diameter?, progressiveType?)` — **absent optional attr = none** (omit from SKU/name; no “None” label required). Same combo without an optional attr must be **one** parent (Postgres `NULLS NOT DISTINCT`). |
+| Parent uniqueness | `(family, base, material?, index?, color?, diameter?, progressiveType?, coating?)` with `NULLS NOT DISTINCT`. Coating is mandatory on new parents; null remains only for legacy unclassified parents. Never guess a legacy coating. |
 
 Example: `PG-BR-1P56-KT-GREEN-SM6TP2-C0TM2`
 
@@ -215,7 +215,7 @@ Parent may keep an **internal** base code without the power segment (not shown i
 
 Fully auto; human-readable; power as **`-6.00/+2.00`**; no brand:
 
-`[Material] [Index] [Family] [Base] [Color] -6.00/+2.00`
+`[Material] [Index] [Family] [Base] [Coating] [Color] -6.00/+2.00`
 
 Example: `PG 1.56 KT BR Green -6.00/+2.00`  
 
@@ -245,7 +245,7 @@ Sheets are **stacked Excel-like tables** (no tabs/buttons). Each table has expli
 |------|--------|
 | Steps | 0.25 from variant ranges |
 | Stub columns | Only render a dimension that exists on the sheet (`Axis` omitted when no axis) |
-| Axis blocks | One table per axis, largest first (`180` → `90`); rows `0.00` → max per axis |
+| Axis blocks | Largest first (`180` → `90`); 135° and 45° share one oblique-axis table with the exact axis in each row/cell. |
 | Compound vs cross | Compound sheet excludes cross-pattern combos; cross gets its own sheet |
 | Presence | Cell shows triad only when a variant covers that power (+ ADD/axis/eye) |
 | Behaviour | View only until stock phase; same layout later binds live qty |
@@ -327,7 +327,7 @@ Two separate sellable products; Admin did not re-enter PG/BR/1.56/KT/Green for t
 ### Shipped (RC-03 + RC-04)
 
 - [x] Power range Attributes tab (selects; `-6.00/+2.00` label; −40…+8 steps)
-- [x] Material optional; coating not product identity
+- [x] Material optional; coating added to new product identity per 14 Nov call (RC-08)
 - [x] Parent + multi power-range variants; Add range without re-picking attrs
 - [x] Auto SKU + auto name (locked formats); no typed name
 - [x] Flat + grouped catalog views (server pagination; expand parent → variants)
