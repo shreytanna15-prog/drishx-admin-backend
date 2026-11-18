@@ -795,10 +795,7 @@ type VariantExpansionInput = {
   additionIds?: string[];
 };
 
-async function resolveVariantExpansion(
-  input: VariantExpansionInput,
-  allowLegacyUnclassified = false
-) {
+async function resolveVariantExpansion(input: VariantExpansionInput) {
   const familyId = requireId("familyId", input.familyId);
   const familyRow = await prisma.lensFamily.findUnique({
     where: { id: familyId },
@@ -819,9 +816,7 @@ async function resolveVariantExpansion(
     materialId: normalizeOptionalId(input.materialId),
     indexId: normalizeOptionalId(input.indexId),
     colorId: normalizeOptionalId(input.colorId),
-    coatingId: allowLegacyUnclassified
-      ? normalizeOptionalId(input.coatingId)
-      : requireId("coatingId", input.coatingId),
+    coatingId: normalizeOptionalId(input.coatingId),
     diameterId: normalizeOptionalId(input.diameterId),
     progressiveTypeId,
   };

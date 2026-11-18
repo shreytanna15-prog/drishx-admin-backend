@@ -220,7 +220,7 @@ export default function NewLensProductPage() {
       baseId,
       materialId: materialId || null,
       indexId: indexId || null,
-      coatingId,
+      coatingId: coatingId || null,
       colorId: colorId || null,
       diameterId: diameterId || null,
       progressiveTypeId: supportsProgressiveType
@@ -249,7 +249,7 @@ export default function NewLensProductPage() {
   );
 
   const canPreview =
-    Boolean(familyId && baseId && coatingId) && powerRangeIds.length > 0;
+    Boolean(familyId && baseId) && powerRangeIds.length > 0;
 
   useEffect(() => {
     if (!canPreview) {
@@ -280,8 +280,8 @@ export default function NewLensProductPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    if (!familyId || !baseId || !coatingId) {
-      setError("Family, base, and coating are required.");
+    if (!familyId || !baseId) {
+      setError("Family and base are required.");
       return;
     }
     if (powerRangeIds.length === 0) {
@@ -367,12 +367,11 @@ export default function NewLensProductPage() {
           />
           <CatalogSelectField
             label="Coating"
-            required
             value={coatingId}
             onValueChange={setCoatingId}
-            options={toOptions(coatings)}
+            options={toOptions(coatings, "None (optional)")}
             disabled={attrsLoading}
-            placeholder="Select coating"
+            placeholder="Optional"
           />
           <CatalogSelectField
             label="Color"

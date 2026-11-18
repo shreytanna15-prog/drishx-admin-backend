@@ -187,8 +187,18 @@ export function buildPowerNameToken(
   return `${compact} (${formatPowerRangeSpan(sphMin, sphMax)} / ${formatPowerRangeSpan(cylMin, cylMax)})`;
 }
 
-/** Human-readable variant name; Admin does not type this. */
-export function buildLensProductName(parts: LensProductNameParts): string {
+function lensProductNameAttrWords(
+  parts: Pick<
+    LensProductNameParts,
+    | "materialCode"
+    | "indexCode"
+    | "familyCode"
+    | "baseCode"
+    | "coatingLabel"
+    | "colorLabel"
+    | "colorCode"
+  >
+): string[] {
   const words: string[] = [];
   if (parts.materialCode != null && String(parts.materialCode).trim() !== "") {
     words.push(String(parts.materialCode).trim());
@@ -204,8 +214,55 @@ export function buildLensProductName(parts: LensProductNameParts): string {
   if (coatingWord) words.push(coatingWord);
   const colorWord = String(parts.colorLabel ?? parts.colorCode ?? "").trim();
   if (colorWord) words.push(colorWord);
+  return words;
+}
+
+/** Human-readable variant name; Admin does not type this. */
+export function buildLensProductName(parts: LensProductNameParts): string {
+  const words = lensProductNameAttrWords(parts);
   words.push(
     buildPowerNameToken(parts.sphMin, parts.sphMax, parts.cylMin, parts.cylMax)
+  );
+  if (
+    parts.axisValue != null &&
+    Number.isFinite(parts.axisValue) &&
+    Math.trunc(parts.axisValue) === parts.axisValue
+  ) {
+    words.push(String(Math.trunc(parts.axisValue)));
+  }
+  return words.filter(Boolean).join(" ");
+}
+
+/**
+ * Flat list labels — same attribute order as {@link buildLensProductName},
+ * compact power only (no span). Parent omits axis; leaf includes axis.
+ */
+export function buildLensProductFlatGroupName(
+  parts: Omit<LensProductNameParts, "axisValue">
+): string {
+  const words = lensProductNameAttrWords(parts);
+  words.push(
+    formatPowerRangeCompact(
+      parts.sphMin,
+      parts.sphMax,
+      parts.cylMin,
+      parts.cylMax
+    )
+  );
+  return words.filter(Boolean).join(" ");
+}
+
+export function buildLensProductFlatLeafName(
+  parts: LensProductNameParts
+): string {
+  const words = lensProductNameAttrWords(parts);
+  words.push(
+    formatPowerRangeCompact(
+      parts.sphMin,
+      parts.sphMax,
+      parts.cylMin,
+      parts.cylMax
+    )
   );
   if (
     parts.axisValue != null &&
