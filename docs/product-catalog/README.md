@@ -1,24 +1,22 @@
 # Product catalog (SKU master)
 
-Admin **Attributes** + **Product catalog** — parent attribute combinations with **power-range variants**, auto SKU + auto name, list/grid and **parent family-aware power matrix**.
+Admin **Attributes** + **Product catalog** — parent attribute combinations with **power-range variants**, auto SKU + auto name, **Flat** + **Grid** list views, and **parent family-aware power matrix**.
 
-**Status (Nov 2026):** Phases A–C shipped (Oct flat `LensProduct` baseline). **Target contract:**
+**Status (Nov 2026):** Phases A–C + **RC-03** + **RC-04** + coating-as-optional-parent identity **shipped** in code baseline. This folder is the **locked product contract**. Remaining UI polish (Grid cards, coating on detail summaries, future attr lock) is tracked in [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) §11.
 
-- **[RC-03](../requested-changes.md#rc-03--product-catalog-optional-material--power-range-as-attribute)** — Material optional; power range as attribute  
-- **[RC-04](../requested-changes.md#rc-04--product-catalog-parent--variants-new-skuname-builders)** — parent + variants; new SKU/name builders; flat + grouped list  
-
-Track further catalog RCs in [`../requested-changes.md`](../requested-changes.md); keep CLIENT-PLAN in sync when locked.
-
-Hierarchy: [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/). Product identity = Material? · Base · Index · Family · Coating · Color (+ power range on the **variant**). Coating-specific parents can reuse the same power range without sharing stock.
+Hierarchy: [`../product-catalog-hierarchy/`](../product-catalog-hierarchy/).  
+**Parent identity** = Family · Base · Material? · Index? · Coating? · Color? · Diameter? · Progressive type?  
+**Variant** = parent × power range × axis? × ADD? × eye?  
+Coating is an optional parent attribute like Color / Material / Index — included in uniqueness, SKU, and name when set.
 
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [CLIENT-PLAN.md](./CLIENT-PLAN.md) | Client + product | Screens, flows, what admin does, acceptance |
-| [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | Schema, APIs, UI routes, phases, checklists |
+| [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | Schema, APIs, UI routes/styles, gaps, handoff checklist |
 
-**Related:** [RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers); deltas in [requested-changes.md](../requested-changes.md).  
+**Related:** [RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers); deltas in [requested-changes.md](../requested-changes.md) (RC-03, RC-04, RC-08 — coating **optional**, not mandatory).  
 **Next (stock + PO):** [`../stock-management/`](../stock-management/) — same parent matrix view; live qty on optical cell leaves.
 
-**SKU / name (locked target):** both auto-built on the variant — compact SKU codes; human name with `-6.00/+2.00`. Admin does not type either.
+**SKU / name (locked):** both auto-built on the variant. Admin does not type either.
 
 **Out of slice:** live stock cells, PO/receive, shop/mobile rewrite, deleting legacy lens tables.

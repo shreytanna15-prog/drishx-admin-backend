@@ -588,9 +588,11 @@ Backend admin catalog (schema + services + Attributes/Create UI).
 
 The client requires identical power-range/axis/ADD matrices under multiple distinct products (hard coat, blue cut, poly hard coat, etc.). Coating must separate parent products and variant SKUs so future per-cell stock and PO records cannot mix between coatings. `LensPowerRange` remains a reusable bounds master; it does not own stock.
 
-- New `LensProduct` creation requires an active coating; one coating per parent. Same other attrs with different coating creates a distinct parent, not extra variants on the first product.
-- Include the coating code in base/variant SKUs and its label in variant names; existing unclassified parents/SKUs remain unchanged. No inferred backfill from base/material/color.
+- ~~New `LensProduct` creation requires an active coating~~ **Superseded (Nov 2026 contract):** coating is an **optional** parent attribute (same class as Material / Index / Color). Only Family + Base are required. When coating is set, it participates in parent uniqueness, SKU, and name — so different coatings still create distinct parents.
+- Include the coating code in base/variant SKUs and its label in variant names when set; existing unclassified parents/SKUs remain unchanged. No inferred backfill from base/material/color.
 - List/detail/search/filter/preview expose coating. Existing legacy rows may still add variants under their null-coating parent.
 - Live quantities are still on the legacy lens leaves, while the new catalog matrix cells are view-only. Separate stock per new parent/variant needs the stock-management leaf cutover; this identity change does not manufacture stock balances.
 - 45° and 135° may share a displayed oblique-axis matrix section, but the exact axis remains on every row and cell.
+
+**Locked contract:** [`docs/product-catalog/`](./product-catalog/).
 
