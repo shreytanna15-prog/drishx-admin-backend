@@ -1315,7 +1315,8 @@ export async function listLensProductVariants(params: {
   limit?: number;
 }) {
   const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(50, Math.max(1, params.limit ?? 20));
+  /** Admin flat catalog may request up to 500 so Progressive / multi-axis sets are not truncated. */
+  const limit = Math.min(500, Math.max(1, params.limit ?? 20));
   const where: Prisma.LensProductVariantWhereInput = {};
 
   if (params.powerRangeId) where.powerRangeId = params.powerRangeId;
@@ -1377,7 +1378,7 @@ export async function listLensProducts(params: {
   limit?: number;
 }) {
   const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(50, Math.max(1, params.limit ?? 20));
+  const limit = Math.min(500, Math.max(1, params.limit ?? 20));
   const where: Prisma.LensProductWhereInput = {};
 
   if (params.familyId) where.familyId = params.familyId;

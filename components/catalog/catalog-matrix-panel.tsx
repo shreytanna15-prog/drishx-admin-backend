@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   buildCatalogMatrix,
   toCatalogMatrixVariants,
@@ -30,17 +30,30 @@ type VariantLike = {
   addMin?: number | null;
 };
 
+function sheetMatchesAxis(sheet: CatalogMatrixSheet, axis: number): boolean {
+  return sheet.rows.some((row) => {
+    const raw = row.stub.axis;
+    if (raw == null || raw === "—") return false;
+    const n = Number(raw);
+    return Number.isFinite(n) && Math.abs(n - axis) < 1e-9;
+  });
+}
+
 export function CatalogMatrixPanel({
   variants,
   family,
   familyLabel,
+  highlightAxis,
   className,
 }: {
   variants: VariantLike[];
   family: CatalogMatrixFamilyCaps;
   familyLabel?: string | null;
+  /** From list deep-link `?axis=` — scroll/highlight matching sheets. */
+  highlightAxis?: number | null;
   className?: string;
 }) {
+  const highlightRef = useRef<HTMLDivElement | null>(null);
   const model = useMemo(
     () =>
       buildCatalogMatrix(
@@ -61,12 +74,46 @@ export function CatalogMatrixPanel({
     ]
   );
 
-  const sheets = model.sheets;
+  const sheets = useMemo(() => {
+    if (highlightAxis == null) return model.sheets;
+    // Selected axis first so deep-link doesn't open on a different axis sheet.
+    const matched: CatalogMatrixSheet[] = [];
+    const rest: CatalogMatrixSheet[] = [];
+    for (const sheet of model.sheets) {
+      if (sheetMatchesAxis(sheet, highlightAxis)) matched.push(sheet);
+      else rest.push(sheet);
+    }
+    return [...matched, ...rest];
+  }, [model.sheets, highlightAxis]);
+
+  const panelRef = useRef<HTMLElement | null>(null);
+  const firstHighlightKey = useMemo(() => {
+    if (highlightAxis == null) return null;
+    return (
+      sheets.find((sheet) => sheetMatchesAxis(sheet, highlightAxis))?.key ??
+      null
+    );
+  }, [sheets, highlightAxis]);
+
+  useEffect(() => {
+    if (highlightAxis == null) return;
+    // Land flush on the selected-axis sheet so Attributes above is fully
+    // scrolled off-screen (no partial "Digital" peek under the chrome).
+    const timer = window.setTimeout(() => {
+      const target =
+        highlightRef.current ??
+        panelRef.current ??
+        document.getElementById("matrix");
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [highlightAxis, firstHighlightKey, sheets.length]);
 
   if (sheets.length === 0) {
     return (
       <section
         id="matrix"
+        ref={panelRef}
         className={cn(
           "rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5",
           className
@@ -85,10 +132,11 @@ export function CatalogMatrixPanel({
   return (
     <section
       id="matrix"
-      className={cn(
-        "rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5",
-        className
-      )}
+      ref={panelRef}
+        className={cn(
+          "rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5",
+          className
+        )}
     >
       <div className="mb-4">
         <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
@@ -98,12 +146,35 @@ export function CatalogMatrixPanel({
           Cells: Current / Threshold / Target — placeholders until stock is
           live.
         </p>
+        {highlightAxis != null ? (
+          <div className="mt-3 rounded-xl border-2 border-(--brand-primary) bg-(--brand-primary)/20 px-3 py-2 text-sm font-bold text-(--brand-text)">
+            Axis {highlightAxis}°
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-6">
-        {sheets.map((sheet) => (
-          <CatalogMatrixTable key={sheet.key} sheet={sheet} />
-        ))}
+        {sheets.map((sheet) => {
+          const match =
+            highlightAxis != null && sheetMatchesAxis(sheet, highlightAxis);
+          const dimOthers = highlightAxis != null && !match;
+          const isScrollTarget = sheet.key === firstHighlightKey;
+          return (
+            <div
+              key={sheet.key}
+              ref={isScrollTarget ? highlightRef : undefined}
+              className={cn(
+                "rounded-xl transition-opacity",
+                isScrollTarget && "scroll-mt-28",
+                match &&
+                  "border-2 border-(--brand-primary) bg-(--brand-primary)/10 p-1 shadow-[0_0_0_3px_color-mix(in_oklab,var(--brand-primary)_35%,transparent)]",
+                dimOthers && "opacity-40"
+              )}
+            >
+              <CatalogMatrixTable sheet={sheet} />
+            </div>
+          );
+        })}
       </div>
     </section>
   );

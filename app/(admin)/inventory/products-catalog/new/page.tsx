@@ -373,7 +373,6 @@ export default function NewLensProductPage() {
             options={toOptions(coatings)}
             disabled={attrsLoading}
             placeholder="Select coating"
-            hint="Each coating has its own product and variants; power ranges can be shared."
           />
           <CatalogSelectField
             label="Color"

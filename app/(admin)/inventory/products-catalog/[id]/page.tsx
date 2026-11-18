@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { DetailSkeleton } from "@/components/admin-skeletons";
@@ -69,7 +69,14 @@ function attrNumericOptions(items: LensAttribute[]) {
 
 export default function LensProductParentDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const id = typeof params.id === "string" ? params.id : "";
+  const highlightAxis = useMemo(() => {
+    const raw = searchParams.get("axis");
+    if (raw == null || raw.trim() === "") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }, [searchParams]);
   const [product, setProduct] = useState<LensProduct | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -269,6 +276,7 @@ export default function LensProductParentDetailPage() {
         className="mb-6"
         variants={product.variants}
         familyLabel={product.family.name}
+        highlightAxis={highlightAxis}
         family={{
           supportsAdd: product.family.supportsAdd,
           supportsAxis: product.family.supportsAxis,

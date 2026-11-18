@@ -360,9 +360,10 @@ function groupVariants(
     const aa = groupAxes(a)[0] ?? -1;
     const bb = groupAxes(b)[0] ?? -1;
     if (aa !== bb) return bb - aa;
+    // CYL-first, then SPH (matches compound/cross row order).
     return (
-      Math.min(a.sphMin, a.sphMax) - Math.min(b.sphMin, b.sphMax) ||
-      Math.min(a.cylMin, a.cylMax) - Math.min(b.cylMin, b.cylMax)
+      Math.min(a.cylMin, a.cylMax) - Math.min(b.cylMin, b.cylMax) ||
+      Math.min(a.sphMin, a.sphMax) - Math.min(b.sphMin, b.sphMax)
     );
   });
 }
@@ -574,9 +575,10 @@ function buildCompoundSheet(
   const cylValues = steppedRange(group.cylMin, group.cylMax);
   const dataColumns = buildAddColumns(group.variants, withEye);
 
+  // CYL-major row order (outer CYL, inner SPH) per client matrix rule for KT/V2.
   const points: Array<{ sph: number; cyl: number }> = [];
-  for (const sph of sphValues) {
-    for (const cyl of cylValues) {
+  for (const cyl of cylValues) {
+    for (const sph of sphValues) {
       if (isPlano(sph) || isPlano(cyl)) continue;
       if (kind === "cross") {
         if (!isAllowedCrossCombo(sph, cyl)) continue;
