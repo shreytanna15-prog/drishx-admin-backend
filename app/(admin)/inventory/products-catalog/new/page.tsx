@@ -24,7 +24,10 @@ import {
   type VariantPreview,
 } from "@/app/lib/admin-lens-catalog";
 import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
-import { formatPowerRangeCompact } from "@/app/lib/catalog/catalog-power-select-options";
+import {
+  formatPowerRangeCompact,
+  formatPowerRangeSpan,
+} from "@/app/lib/catalog/catalog-power-select-options";
 import type { AdminSelectOption } from "@/components/admin-select";
 
 const CATALOG_HREF = "/inventory/products-catalog";
@@ -431,7 +434,7 @@ export default function NewLensProductPage() {
               r.cylMin,
               r.cylMax
             ),
-            cylSummary: "",
+            cylSummary: `${formatPowerRangeSpan(r.sphMin, r.sphMax)} / ${formatPowerRangeSpan(r.cylMin, r.cylMax)}`,
           }))}
           selectedIds={powerRangeIds}
           onChange={setPowerRangeIds}
