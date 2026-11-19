@@ -247,6 +247,12 @@ export default function LensProductParentDetailPage() {
             <dd className="font-semibold">{product.index?.code ?? "—"}</dd>
           </div>
           <div>
+            <dt className="text-(--brand-label)">Coating</dt>
+            <dd className="font-semibold">
+              {product.coating?.name || product.coating?.code || "—"}
+            </dd>
+          </div>
+          <div>
             <dt className="text-(--brand-label)">Color</dt>
             <dd className="font-semibold">
               {product.color?.name || product.color?.code || "—"}

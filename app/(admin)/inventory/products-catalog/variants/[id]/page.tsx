@@ -237,6 +237,12 @@ export default function LensProductVariantDetailPage() {
               <dd className="font-semibold">{attributes.index?.code ?? "—"}</dd>
             </div>
             <div>
+              <dt className="text-(--brand-label)">Coating</dt>
+              <dd className="font-semibold">
+                {attributes.coating?.name || attributes.coating?.code || "—"}
+              </dd>
+            </div>
+            <div>
               <dt className="text-(--brand-label)">Color</dt>
               <dd className="font-semibold">
                 {attributes.color?.name || attributes.color?.code || "—"}

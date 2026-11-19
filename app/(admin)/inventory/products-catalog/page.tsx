@@ -35,6 +35,8 @@ import {
   type LensProduct,
   type LensProductVariant,
 } from "@/app/lib/admin-lens-catalog";
+
+type CatalogListView = "flat" | "grid";
 import { formatPowerRangeSpan } from "@/app/lib/catalog/catalog-power-select-options";
 import {
   buildLensProductFlatGroupName,
@@ -47,9 +49,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-const PAGE_SIZE = 20;
 const GROUP_SIZE = 10;
-const FLAT_FETCH_LIMIT = 500;
+const LIST_FETCH_LIMIT = 500;
 
 const labelClass =
   "text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)";
@@ -150,8 +151,22 @@ function flatParentGroupKey(v: LensProductVariant): string {
   return `${v.productId}::${v.powerRangeId}`;
 }
 
+function attrChipsFromVariant(v: LensProductVariant): string[] {
+  const p = v.product;
+  return [
+    p.family.code,
+    p.base.code,
+    p.material?.code,
+    p.index?.code,
+    p.coating?.name || p.coating?.code,
+    p.color?.name || p.color?.code,
+    p.diameter?.code,
+    p.progressiveType?.code,
+  ].flatMap((x) => (x ? [x] : []));
+}
+
 export default function ProductsCatalogPage() {
-  const [listView, setListView] = useState<"flat" | "grouped">("flat");
+  const [listView, setListView] = useState<CatalogListView>("flat");
   const [q, setQ] = useState("");
   const [qDraft, setQDraft] = useState("");
   const [familyId, setFamilyId] = useState("");
@@ -161,23 +176,13 @@ export default function ProductsCatalogPage() {
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">(
     "all"
   );
-  const [page, setPage] = useState(1);
-  const [items, setItems] = useState<Array<LensProduct | LensProductVariant>>(
-    []
-  );
-  const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [families, setFamilies] = useState<LensAttribute[]>([]);
   const [bases, setBases] = useState<LensAttribute[]>([]);
   const [materials, setMaterials] = useState<LensAttribute[]>([]);
   const [coatings, setCoatings] = useState<LensAttribute[]>([]);
-  /** RC-04 / CLIENT-PLAN: grouped view expands parents → variants */
-  const [expandedParentIds, setExpandedParentIds] = useState<Set<string>>(
-    () => new Set()
-  );
-  /** Flat view: collapsible name groups → axis subgroups → SKUs */
+  /** Flat + Grid: same groups → axis → SKUs */
   const [expandedNameGroups, setExpandedNameGroups] = useState<Set<string>>(
     () => new Set()
   );
@@ -210,9 +215,8 @@ export default function ProductsCatalogPage() {
     setLoading(true);
     setError("");
     try {
-      const fetchLimit = listView === "flat" ? FLAT_FETCH_LIMIT : PAGE_SIZE;
       const res = await fetchLensProducts({
-        view: listView,
+        view: "flat",
         q: q || undefined,
         familyId: familyId || undefined,
         baseId: baseId || undefined,
@@ -220,31 +224,17 @@ export default function ProductsCatalogPage() {
         coatingId: coatingId || undefined,
         isActive:
           activeFilter === "all" ? null : activeFilter === "true",
-        page,
-        limit: fetchLimit,
+        page: 1,
+        limit: LIST_FETCH_LIMIT,
       });
-      if (listView === "flat") {
-        const variants = res.items.filter(isVariant);
-        setFlatVariants(variants);
-        setItems([]);
-        setTotal(variants.length);
-        setHasMore(false);
-      } else {
-        setFlatVariants([]);
-        setItems(res.items);
-        setTotal(res.total ?? res.items.length);
-        setHasMore(res.hasMore);
-      }
+      setFlatVariants(res.items.filter(isVariant));
     } catch (err) {
       setError(errorMessage(err, "Failed to load products."));
-      setItems([]);
       setFlatVariants([]);
-      setTotal(0);
-      setHasMore(false);
     } finally {
       setLoading(false);
     }
-  }, [q, familyId, baseId, materialId, coatingId, activeFilter, page, listView]);
+  }, [q, familyId, baseId, materialId, coatingId, activeFilter]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch list on filter change
@@ -252,16 +242,13 @@ export default function ProductsCatalogPage() {
   }, [load]);
 
   useEffect(() => {
-    if (listView === "flat") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset grouping on filter change
-      setExpandedNameGroups(new Set());
-      setExpandedAxisGroups(new Set());
-      setGroupPage(1);
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset grouping on filter/view change
+    setExpandedNameGroups(new Set());
+    setExpandedAxisGroups(new Set());
+    setGroupPage(1);
   }, [listView, q, familyId, baseId, materialId, coatingId, activeFilter]);
 
   function applySearch() {
-    setPage(1);
     setQ(qDraft.trim());
   }
 
@@ -365,7 +352,7 @@ export default function ProductsCatalogPage() {
   return (
     <AdminPage
       title="Products & catalog"
-      subtitle="Flat: name + power → axis → SKUs (compact names; material/coating/color when set)."
+      subtitle="Flat table or Grid cards — same groups (name + power → axis → SKUs)."
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -398,7 +385,7 @@ export default function ProductsCatalogPage() {
                 value={familyId}
                 onValueChange={(v) => {
                   setFamilyId(v);
-                  setPage(1);
+                  setGroupPage(1);
                 }}
                 options={[
                   { value: "", label: "All" },
@@ -415,7 +402,7 @@ export default function ProductsCatalogPage() {
                 value={baseId}
                 onValueChange={(v) => {
                   setBaseId(v);
-                  setPage(1);
+                  setGroupPage(1);
                 }}
                 options={[
                   { value: "", label: "All" },
@@ -432,7 +419,7 @@ export default function ProductsCatalogPage() {
                 value={materialId}
                 onValueChange={(v) => {
                   setMaterialId(v);
-                  setPage(1);
+                  setGroupPage(1);
                 }}
                 options={[
                   { value: "", label: "All" },
@@ -449,7 +436,7 @@ export default function ProductsCatalogPage() {
                 value={coatingId}
                 onValueChange={(v) => {
                   setCoatingId(v);
-                  setPage(1);
+                  setGroupPage(1);
                 }}
                 options={[
                   { value: "", label: "All" },
@@ -466,7 +453,7 @@ export default function ProductsCatalogPage() {
                 value={activeFilter}
                 onValueChange={(v) => {
                   setActiveFilter(v as "all" | "true" | "false");
-                  setPage(1);
+                  setGroupPage(1);
                 }}
                 options={[
                   { value: "all", label: "All" },
@@ -492,7 +479,6 @@ export default function ProductsCatalogPage() {
                 )}
                 onClick={() => {
                   setListView("flat");
-                  setPage(1);
                   setGroupPage(1);
                   setExpandedNameGroups(new Set());
                   setExpandedAxisGroups(new Set());
@@ -500,21 +486,22 @@ export default function ProductsCatalogPage() {
               >
                 <LayoutList className="inline size-4" /> Flat
               </button>
-            <button
-              type="button"
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-sm font-bold",
-                listView === "grouped"
-                  ? "bg-(--brand-primary) text-black"
-                  : "text-(--brand-text-muted)"
-              )}
-              onClick={() => {
-                setListView("grouped");
-                setPage(1);
-                setExpandedParentIds(new Set());
-              }}
+              <button
+                type="button"
+                className={cn(
+                  "rounded-lg px-3 py-1.5 text-sm font-bold",
+                  listView === "grid"
+                    ? "bg-(--brand-primary) text-black"
+                    : "text-(--brand-text-muted)"
+                )}
+                onClick={() => {
+                  setListView("grid");
+                  setGroupPage(1);
+                  setExpandedNameGroups(new Set());
+                  setExpandedAxisGroups(new Set());
+                }}
               >
-                <LayoutGrid className="inline size-4" /> Grouped
+                <LayoutGrid className="inline size-4" /> Grid
               </button>
             </div>
             <Button
@@ -533,7 +520,7 @@ export default function ProductsCatalogPage() {
 
         {loading ? (
           <TableSkeleton rows={8} />
-        ) : (listView === "flat" ? flatVariants.length === 0 : items.length === 0) ? (
+        ) : flatVariants.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-(--brand-card-border) px-6 py-16 text-center">
             <p className="text-sm font-bold text-(--brand-text)">
               No catalog products yet
@@ -794,170 +781,196 @@ export default function ProductsCatalogPage() {
             </Table>
           </AdminTable>
         ) : (
-          <AdminTable>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10" />
-                  <TableHead>Parent</TableHead>
-                  <TableHead>Attributes</TableHead>
-                  <TableHead>Variants</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items
-                  .filter((row): row is LensProduct => !isVariant(row))
-                  .flatMap((p) => {
-                    const open = expandedParentIds.has(p.id);
-                    const parentRow = (
-                      <TableRow key={p.id}>
-                        <TableCell className="w-10 pr-0">
-                          <button
-                            type="button"
-                            className="inline-flex size-8 items-center justify-center rounded-lg text-(--brand-text-muted) hover:bg-(--brand-input-bg) hover:text-(--brand-text)"
-                            aria-expanded={open}
-                            aria-label={
-                              open
-                                ? "Collapse variants"
-                                : "Expand variants"
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {pageGroups.map((g) => {
+              const open = expandedNameGroups.has(g.groupKey);
+              const sample = g.variants[0]!;
+              const chips = attrChipsFromVariant(sample);
+              const allActive = g.variants.every((v) => v.isActive);
+              const anyActive = g.variants.some((v) => v.isActive);
+              return (
+                <div
+                  key={g.groupKey}
+                  className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4 shadow-(--brand-card-shadow)"
+                >
+                  <button
+                    type="button"
+                    className="flex w-full items-start gap-2 text-left"
+                    aria-expanded={open}
+                    onClick={() => {
+                      setExpandedNameGroups((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(g.groupKey)) {
+                          next.delete(g.groupKey);
+                          setExpandedAxisGroups((axes) => {
+                            const pruned = new Set(axes);
+                            for (const k of axes) {
+                              if (k.startsWith(`${g.groupKey}::`)) {
+                                pruned.delete(k);
+                              }
                             }
-                            onClick={() => {
-                              setExpandedParentIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(p.id)) next.delete(p.id);
-                                else next.add(p.id);
-                                return next;
-                              });
-                            }}
-                          >
-                            {open ? (
-                              <ChevronDown className="size-4" />
-                            ) : (
-                              <ChevronRight className="size-4" />
-                            )}
-                          </button>
-                        </TableCell>
-                        <TableCell>
-                          <Link
-                            href={`/inventory/products-catalog/${p.id}`}
-                            className="font-semibold hover:underline"
-                          >
-                            {p.attributeSummary}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="text-sm text-(--brand-text-muted)">
-                          {p.family.code} · {p.base.code}
-                          {p.material ? ` · ${p.material.code}` : ""}
-                        </TableCell>
-                        <TableCell>{p.variantCount}</TableCell>
-                        <TableCell>
+                            return pruned;
+                          });
+                        } else {
+                          next.add(g.groupKey);
+                        }
+                        return next;
+                      });
+                    }}
+                  >
+                    <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-(--brand-text-muted)">
+                      {open ? (
+                        <ChevronDown className="size-4" />
+                      ) : (
+                        <ChevronRight className="size-4" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="block">
+                            <span className="font-semibold text-(--brand-text)">
+                              {g.label}
+                            </span>
+                            <span className="mt-0.5 block text-[11px] text-(--brand-text-muted)">
+                              {g.boundsLabel}
+                            </span>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {g.boundsLabel}
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {chips.map((chip) => (
                           <Badge
-                            variant="outline"
-                            className={
-                              p.isActive
-                                ? "border-emerald-500/40 text-emerald-700"
-                                : "border-zinc-400/40 text-zinc-500"
-                            }
+                            key={chip}
+                            variant="secondary"
+                            className="text-[10px]"
                           >
-                            {p.isActive ? "Active" : "Inactive"}
+                            {chip}
                           </Badge>
-                        </TableCell>
-                      </TableRow>
-                    );
-                    if (!open) return [parentRow];
-                    const variantRows =
-                      (p.variants ?? []).length === 0
-                        ? [
-                            <TableRow
-                              key={`${p.id}-empty`}
-                              className="bg-(--brand-input-bg)/40"
+                        ))}
+                        <Badge variant="secondary" className="text-[10px]">
+                          {g.rangeLabel}
+                        </Badge>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {g.axes.length}{" "}
+                          {g.axes.length === 1 ? "axis" : "axes"} ·{" "}
+                          {g.variants.length} SKU
+                          {g.variants.length === 1 ? "" : "s"}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={
+                            allActive
+                              ? "border-emerald-500/40 text-emerald-700"
+                              : anyActive
+                                ? "border-amber-500/40 text-amber-700"
+                                : "border-zinc-400/40 text-zinc-500"
+                          }
+                        >
+                          {allActive
+                            ? "Active"
+                            : anyActive
+                              ? "Mixed"
+                              : "Inactive"}
+                        </Badge>
+                      </div>
+                    </span>
+                  </button>
+
+                  {open ? (
+                    <div className="mt-3 space-y-2 border-t border-(--brand-card-border) pt-3">
+                      {g.axes.map((ax) => {
+                        const axKey = axisExpandKey(g.groupKey, ax.key);
+                        const axOpen = expandedAxisGroups.has(axKey);
+                        return (
+                          <div key={axKey} className="rounded-xl bg-(--brand-input-bg)/30 p-2">
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 text-left"
+                              aria-expanded={axOpen}
+                              onClick={() => {
+                                setExpandedAxisGroups((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(axKey)) next.delete(axKey);
+                                  else next.add(axKey);
+                                  return next;
+                                });
+                              }}
                             >
-                              <TableCell />
-                              <TableCell
-                                colSpan={4}
-                                className="text-sm text-(--brand-text-muted)"
+                              {axOpen ? (
+                                <ChevronDown className="size-4 text-(--brand-text-muted)" />
+                              ) : (
+                                <ChevronRight className="size-4 text-(--brand-text-muted)" />
+                              )}
+                              <span className="font-medium text-(--brand-text)">
+                                {ax.label}
+                              </span>
+                              <Badge
+                                variant="secondary"
+                                className="text-[10px]"
                               >
-                                No variants on this parent.
-                              </TableCell>
-                            </TableRow>,
-                          ]
-                        : (p.variants ?? []).map((v) => (
-                            <TableRow
-                              key={v.id}
-                              className="bg-(--brand-input-bg)/40"
-                            >
-                              <TableCell />
-                              <TableCell className="pl-6">
-                                <div className="flex flex-col gap-1">
-                                  <Link
-                                    href={`/inventory/products-catalog/variants/${v.id}`}
-                                    className="font-semibold hover:underline"
+                                {ax.variants.length} SKU
+                                {ax.variants.length === 1 ? "" : "s"}
+                              </Badge>
+                            </button>
+                            {axOpen ? (
+                              <ul className="mt-2 space-y-2 pl-6">
+                                {ax.variants.map((v) => (
+                                  <li
+                                    key={v.id}
+                                    className="rounded-lg border border-(--brand-card-border)/60 bg-(--brand-card) px-3 py-2"
                                   >
-                                    {v.name}
-                                  </Link>
-                                  <SkuChip sku={v.skuCode} />
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm text-(--brand-text-muted)">
-                                {v.rangeLabel}
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  asChild
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8 rounded-lg"
-                                >
-                                  <Link
-                                    href={`/inventory/products-catalog/variants/${v.id}`}
-                                  >
-                                    Matrix
-                                  </Link>
-                                </Button>
-                              </TableCell>
-                              <TableCell>
-                                <Badge
-                                  variant="outline"
-                                  className={
-                                    v.isActive
-                                      ? "border-emerald-500/40 text-emerald-700"
-                                      : "border-zinc-400/40 text-zinc-500"
-                                  }
-                                >
-                                  {v.isActive ? "Active" : "Inactive"}
-                                </Badge>
-                              </TableCell>
-                            </TableRow>
-                          ));
-                    return [parentRow, ...variantRows];
-                  })}
-              </TableBody>
-            </Table>
-          </AdminTable>
+                                    <Link
+                                      href={`/inventory/products-catalog/variants/${v.id}`}
+                                      className="font-semibold text-(--brand-text) hover:underline"
+                                    >
+                                      {flatLeafLabel(v)}
+                                    </Link>
+                                    <p className="mt-0.5 text-[11px] text-(--brand-text-muted)">
+                                      {flatPowerBoundsLabel(v)}
+                                    </p>
+                                    <div className="mt-1">
+                                      <SkuChip sku={v.skuCode} />
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                      <div className="pt-1">
+                        <Button asChild size="sm" variant="outline" className="h-8 rounded-lg">
+                          <Link
+                            href={`/inventory/products-catalog/${sample.productId}`}
+                          >
+                            Open parent
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
         )}
 
-        {!loading &&
-        (listView === "flat" ? totalGroups > 0 : items.length > 0) ? (
+        {!loading && totalGroups > 0 ? (
           <div className="flex items-center justify-between gap-3 text-sm text-(--brand-text-muted)">
             <span>
-              {listView === "flat"
-                ? `Page ${groupPage} of ${Math.ceil(totalGroups / GROUP_SIZE)} groups`
-                : `Page ${page}${total > 0 ? ` · ${total} total` : null}`}
+              Page {groupPage} of {Math.ceil(totalGroups / GROUP_SIZE)} groups
             </span>
             <div className="flex gap-2">
               <Button
                 type="button"
                 variant="outline"
                 className="h-9 rounded-xl"
-                disabled={listView === "flat" ? groupPage <= 1 : page <= 1}
-                onClick={() => {
-                  if (listView === "flat") {
-                    setGroupPage((p) => Math.max(1, p - 1));
-                  } else {
-                    setPage((p) => Math.max(1, p - 1));
-                  }
-                }}
+                disabled={groupPage <= 1}
+                onClick={() => setGroupPage((p) => Math.max(1, p - 1))}
               >
                 <ChevronLeft className="size-4" />
               </Button>
@@ -965,18 +978,8 @@ export default function ProductsCatalogPage() {
                 type="button"
                 variant="outline"
                 className="h-9 rounded-xl"
-                disabled={
-                  listView === "flat"
-                    ? groupPage >= Math.ceil(totalGroups / GROUP_SIZE)
-                    : !hasMore
-                }
-                onClick={() => {
-                  if (listView === "flat") {
-                    setGroupPage((p) => p + 1);
-                  } else {
-                    setPage((p) => p + 1);
-                  }
-                }}
+                disabled={groupPage >= Math.ceil(totalGroups / GROUP_SIZE)}
+                onClick={() => setGroupPage((p) => p + 1)}
               >
                 <ChevronRight className="size-4" />
               </Button>
