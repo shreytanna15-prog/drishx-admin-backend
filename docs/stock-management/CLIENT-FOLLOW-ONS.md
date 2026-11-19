@@ -55,13 +55,13 @@ These points came from the same review notes as stock. They stay in this file so
 | Later change | If qty was rejected or customer refuses return of powers, Admin can **edit again** and accept so stock stays correct |
 
 **Module:** Returns & Replacements.  
-**Stock plan link:** return movements use catalog power identity; editable decision UX is Returns.
+**Stock plan link:** return movements use the stock leaf (`variant` + SPH + CYL); editable decision UX is Returns.
 
 ---
 
 ## 5. Finance — weighted average purchase cost
 
-On purchase / receive for the same SKU (power):
+On purchase / receive for the same stock leaf (variant SKU + SPH/CYL):
 
 | Supplier | Qty | Unit cost | Line |
 |----------|-----|-----------|------|

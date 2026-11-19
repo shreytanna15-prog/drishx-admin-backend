@@ -1,38 +1,44 @@
 # Stock management & procurement — Developer guide
 
 **Companion:** [CLIENT-PLAN.md](./CLIENT-PLAN.md) (product contract — do not contradict without updating both)  
-**Catalog:** [../product-catalog/DEVELOPER-GUIDE.md](../product-catalog/DEVELOPER-GUIDE.md)  
+**Catalog:** [../product-catalog/DEVELOPER-GUIDE.md](../product-catalog/DEVELOPER-GUIDE.md) + [CLIENT-PLAN.md](../product-catalog/CLIENT-PLAN.md)  
 **Notes:** [../stock-management-notes.md](../stock-management-notes.md)  
-**Legacy tracker:** [../remaining-work.md](../remaining-work.md) → RW-08 (keep **rules**; replace **identity** with `LensProduct` + power leaf)
+**Legacy tracker:** [../remaining-work.md](../remaining-work.md) → RW-08 (keep **rules**; replace **identity** with catalog stock leaf)
 
 **Repos:** `drishx-admin-backend`  
 **Data note:** Development phase — no production stock to preserve. Prefer clean identity under catalog; dual-write to legacy lens rows only if shop/orders still require `lensType`+`lensId` until cutover.
+
+**Locked stock identity:** `(lensProductVariantId, sph, cyl)` — axis / ADD / eye / parent attrs / range come from the variant (+ parent). Do **not** key stock by parent + duplicated optical dims.
 
 ---
 
 ## 0. How to use this doc
 
 1. Read **CLIENT-PLAN.md** for the target experience (do not expose migration language to the client).  
-2. Implement **phases S1→S5** below.  
-3. **Reuse** PO / receive / open-power-lock / Confirm-only post — do not rewrite from scratch.  
-4. **Rebind** stock identity from legacy `lensType`+`lensId` to **catalog product + power** (new leaf table).  
-5. Follow `drishx-api-auth-audit`, `drishx-client-api`, `drishx-prisma`.  
-6. Never add a free-edit `quantity` field in UI. Stock moves only via audited events: Confirm Receipt (accepted), Stock Adjustment / stock check, reserve/release, pack deduct, return/reversal (see CLIENT-PLAN §5).
+2. Read **product-catalog** docs for parent / variant / matrix shell — stock binds live qty onto that matrix.  
+3. Implement **phases S1→S5** below.  
+4. **Reuse** PO / receive / open-power-lock / Confirm-only post — do not rewrite from scratch.  
+5. **Rebind** stock identity from legacy `lensType`+`lensId` to **variant + SPH + CYL** leaf.  
+6. Follow `drishx-api-auth-audit`, `drishx-client-api`, `drishx-prisma`.  
+7. Never add a free-edit `quantity` field in UI. Stock moves only via audited events (CLIENT-PLAN §5).
 
 ---
 
 ## 1. Target architecture
 
 ```
-LensFamily / Base / Material / Index / Coating / Color
+LensFamily / Base / Material? / Index? / Coating? / Color? / Diameter? / ProgressiveType?
                     │
                     ▼
-              LensProduct          (catalog — already shipped)
+              LensProduct                 (parent — attrs only)
+                    │ 1 → many
+                    ▼
+           LensProductVariant             (sellable: range × axis? × ADD? × eye? · SKU)
                     │ 1 → many (lazy)
                     ▼
-           LensProductPower        (NEW — stock leaf)
-              quantity, minStock, targetStock
-              sph, cyl, (+ add/axis/eye when needed)
+           LensProductPower               (NEW — stock leaf)
+              @@unique([lensProductVariantId, sph, cyl])
+              quantity, blockedQty, minStock, targetStock
                     │
         ┌───────────┼───────────┬──────────────┐
         ▼           ▼           ▼              ▼
@@ -42,7 +48,9 @@ LensFamily / Base / Material / Index / Coating / Color
 
 **Warehouse v1:** `warehouseCode = "MAIN"` (already on PO / receipt).
 
-**Lazy leaves:** Matrix renders every 0.25 cell from `LensProduct` range. Missing `LensProductPower` → display current `0`. Insert/update leaf on first adjustment or Confirm Receipt (and when saving threshold/target if desired).
+**Lazy leaves:** Parent matrix renders every 0.25 cell covered by sibling variants (same `buildCatalogMatrix` coverage). Missing `LensProductPower` → display current `0`. Insert/update leaf on first adjustment, Confirm Receipt, or threshold/target save.
+
+**Labels:** Resolve `variant → product` for parent attrs; use `variant.skuCode` / `name` + SPH/CYL (+ variant.axis / addition / eye) on PO, power-wise, and adjustment screens.
 
 ---
 
@@ -52,11 +60,11 @@ LensFamily / Base / Material / Index / Coating / Color
 
 | Area | Path |
 |------|------|
-| LensProduct + attributes | `prisma/schema.prisma`, seed `seed-lens-catalog-attributes.ts` |
-| Admin UI | `/inventory/attributes`, `/inventory/products-catalog`, `/new`, `/[id]` |
-| APIs | `/api/admin/catalog/attributes/*`, `/api/admin/catalog/lens-products/*` |
-| SKU | `app/lib/catalog/lens-product-sku.ts` |
-| Matrix shell | `[id]/page.tsx` — currently `_ / _ / _` placeholders |
+| `LensProduct` + `LensProductVariant` + attributes | `prisma/schema.prisma`, seed `seed-lens-catalog-attributes.ts` |
+| Admin UI | `/inventory/attributes`, `/inventory/products-catalog`, `/new`, `/[id]`, `/variants/[id]` |
+| APIs | `/api/admin/catalog/attributes/*`, `/api/admin/catalog/power-ranges/*`, `/api/admin/catalog/lens-products/*` |
+| SKU / name | `app/lib/catalog/lens-product-sku.ts` |
+| Matrix shell | `app/lib/catalog/catalog-matrix.ts`, `CatalogMatrixPanel` — currently `_ / _ / _` placeholders |
 | Client wrappers | `app/lib/admin-lens-catalog.ts` |
 
 ### 2.2 Procurement / stock (reuse behaviour, rebind identity)
@@ -76,21 +84,22 @@ LensFamily / Base / Material / Index / Coating / Color
 | Stock post patterns | `app/lib/stock-intake.ts` (or confirm-receipt path) |
 | Prisma | `PurchaseOrder`, `PurchaseOrderLine`, `GoodsReceipt*`, `OpenPurchaseOrderPower`, `ReorderRule`, `ProcurementRequest`, `StockMovement` |
 
-### 2.3 Identity problem (why client rejected the story)
+### 2.3 Identity problem (why client rejected the old story)
 
 | Today | Target |
 |-------|--------|
-| PO line / reorder / movement / lock keyed by `lensType` + `lensId` (legacy lens tables) | Keyed by **`lensProductPowerId`** (or `lensProductId` + power fields) |
-| Stock matrix products = string-group of legacy leaves | Matrix = **`LensProduct`** detail |
-| Catalog matrix display-only | Same route, **live** C / T / Target |
+| PO line / reorder / movement / lock keyed by `lensType` + `lensId` (legacy lens tables) | Keyed by **`lensProductPowerId`** where leaf = **variant + sph + cyl** |
+| Stock matrix products = string-group of legacy leaves | Matrix = **`LensProduct`** parent detail (family sheets) |
+| Catalog matrix display-only | Same route / panel, **live** C / T / Target from leaves |
+| Flat “product = attrs + range + SKU” language | Parent attrs + **variants**; SKU on variant; stock on cell |
 | No first-class Stock Adjustment module | Controlled adjustment API + UI |
 | Modules feel scattered | Suite under catalog-centered navigation |
 
-**Keep:** Confirm-only stock post, open-PO power lock, bill+Excel receive, manual Run reorder, close-outstanding reasons, PO statuses.
+**Keep:** Confirm-only stock post, open-PO power lock, bill+Excel receive, manual Run reorder, close-outstanding reasons, PO statuses, reorder math.
 
-**Change:** Foreign keys / lookups / UI product pickers / matrix data source.
+**Change:** Foreign keys / lookups / UI product pickers / matrix data source → variant leaf.
 
-**Do not:** Delete PO tables and rewrite from zero; do not free-edit `quantity`.
+**Do not:** Delete PO tables and rewrite from zero; do not free-edit `quantity`; do not invent a parent-only optical unique key that re-stores axis/ADD/eye.
 
 ---
 
@@ -100,39 +109,40 @@ LensFamily / Base / Material / Index / Coating / Color
 
 ```prisma
 model LensProductPower {
-  id             String   @id @default(cuid())
-  lensProductId  String
-  lensProduct    LensProduct @relation(...)
-  /// Optical cell — SV uses sph/cyl; KT/V2 may set add/axis/eye
-  sph            Decimal
-  cyl            Decimal
-  add            Decimal?
-  axis           Int?
-  eye            String?
-  quantity       Int      @default(0)   // on hand
-  /// reserved often derived from open orders; store or compute — pick one and document in code
-  blockedQty     Int      @default(0)   // discrepancy hold until Admin adjusts
-  minStock       Int      @default(0)   // threshold
-  targetStock    Int      @default(0)
+  id                    String   @id @default(cuid())
+  lensProductVariantId  String
+  lensProductVariant    LensProductVariant @relation(...)
+  /// Exact cell inside the variant’s power range (0.25 grid)
+  sph                   Decimal  @db.Decimal(6, 2)
+  cyl                   Decimal  @db.Decimal(6, 2)
+  quantity              Int      @default(0)   // on hand
+  /// reserved: derive from open orders OR store — pick one and document in code
+  blockedQty            Int      @default(0)   // discrepancy hold until Admin adjusts
+  minStock              Int      @default(0)   // threshold
+  targetStock           Int      @default(0)
   /// Optional bridge while shop still uses legacy leaves
-  legacyLensType LensType?
-  legacyLensId   String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  legacyLensType        LensType?
+  legacyLensId          String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  @@unique([lensProductId, sph, cyl, add, axis, eye]) // refine nulls per DB rules
-  @@index([lensProductId])
+  @@unique([lensProductVariantId, sph, cyl])
+  @@index([lensProductVariantId])
   @@index([legacyLensType, legacyLensId])
 }
 ```
+
+**Do not** put `add` / `axis` / `eye` on the leaf for identity — they live on `LensProductVariant`. Denormalize for query/display only if a list screen needs it without joins (optional later).
+
+Add `powers LensProductPower[]` on `LensProductVariant`.
 
 ### 3.2 Rebind existing models (migrations)
 
 | Model | Change |
 |-------|--------|
-| `PurchaseOrderLine` | Add `lensProductId`, `lensProductPowerId` (nullable during transition); stop requiring legacy ids once cut over |
-| `OpenPurchaseOrderPower` | PK / unique on `lensProductPowerId` (or product+power) instead of `lensType`+`lensId` |
-| `GoodsReceiptLine` | Same power FK |
+| `PurchaseOrderLine` | Add `lensProductVariantId`, `lensProductPowerId`, `sph`, `cyl` (as needed); stop requiring legacy ids once cut over |
+| `OpenPurchaseOrderPower` | PK / unique on `lensProductPowerId` instead of `lensType`+`lensId` |
+| `GoodsReceiptLine` | Same leaf FK |
 | `ReorderRule` | Unique on `lensProductPowerId` |
 | `ProcurementRequest` | Point at power leaf |
 | `StockMovement` | Prefer `lensProductPowerId`; keep legacy columns only if dual-writing |
@@ -142,9 +152,13 @@ model LensProductPower {
 
 No production data to migrate. Prefer:
 
-1. Create powers under `LensProduct` as ops use them.  
-2. Leave legacy lens `quantity` alone until shop cutover (or zero / ignore for admin stock UI).  
+1. Create leaves under variants as ops use them (lazy).  
+2. Leave legacy lens `quantity` alone until shop cutover.  
 3. If a demo still needs shop orders: optional dual-write leaf ↔ legacy row via `legacyLensId`.
+
+### 3.4 Catalog attribute lock (hook)
+
+When parent-attr edit is introduced: if any variant of the parent has related `LensProductPower` with activity (or any orders), reject parent attr changes. See product-catalog CLIENT-PLAN §6.7.
 
 ---
 
@@ -154,14 +168,16 @@ No production data to migrate. Prefer:
 
 | Method | Path (proposed) | Purpose |
 |--------|-----------------|---------|
-| GET | `/api/admin/catalog/lens-products/:id/matrix` | Cells: current, min, target (0 if no leaf) |
-| PATCH | `/api/admin/catalog/lens-products/:id/matrix/rules` | Bulk/single update min/target (upsert leaf) |
-| GET | `/api/admin/stock/powers` | Power-wise list + filters (product attrs, q) |
+| GET | `/api/admin/catalog/lens-products/:id/matrix` | Family sheets + cells: current, min, target (0 if no leaf); each cell must resolve covering `variantId` |
+| PATCH | `/api/admin/catalog/lens-products/:id/matrix/rules` | Bulk/single update min/target (upsert leaf by variantId+sph+cyl) |
+| GET | `/api/admin/stock/powers` | Power-wise list + filters (parent attrs, variant SKU, q) |
 | GET | `/api/admin/stock/powers/:id` | Position: onHand, reserved, available, incoming |
 | GET | `/api/admin/stock/transactions` | Ledger |
 | POST | `/api/admin/stock/adjustments` | Controlled adjustment |
 | GET | `/api/admin/stock/adjustments` | History |
 | GET | `/api/admin/stock/overview` | Aggregates / shortages |
+
+Matrix GET should reuse / wrap `buildCatalogMatrix` coverage so SV/KT/V2 sheet layout stays identical to catalog placeholders.
 
 ### 4.2 Existing procurement (extend, don’t fork)
 
@@ -169,9 +185,9 @@ Keep `/api/procurement/purchase-orders/**` and `/api/procurement/receipts/**`.
 
 **Code changes inside:**
 
-- Create line / queue add: resolve `LensProduct` + power → upsert `LensProductPower` → set FKs  
+- Create line / queue add: resolve variant + SPH/CYL → upsert `LensProductPower` → set FKs  
 - `OpenPurchaseOrderPower`: lock by `lensProductPowerId`  
-- Confirm Receipt: `quantity += accepted` on `LensProductPower`; write `StockMovement` with new FK  
+- Confirm Receipt: `quantity += accepted` on leaf; write `StockMovement` with new FK  
 - Reorder-check: rules + available/reserved/incoming from new leaves + open PO qty  
 
 Reorder-check route today: `app/api/inventory/reorder-check/route.ts`.
@@ -179,7 +195,7 @@ Reorder-check route today: `app/api/inventory/reorder-check/route.ts`.
 ### 4.3 Client wrappers
 
 - Extend `admin-lens-catalog.ts` or add `admin-stock.ts`  
-- Reuse `admin-procurement.ts` with updated DTOs (product SKU, power labels from catalog)
+- Reuse `admin-procurement.ts` with updated DTOs (variant SKU, parent attrs, SPH/CYL labels)
 
 ---
 
@@ -187,14 +203,17 @@ Reorder-check route today: `app/api/inventory/reorder-check/route.ts`.
 
 | Screen | Action |
 |--------|--------|
-| `/inventory/products-catalog/[id]` | Replace `_/_/_` with live matrix from GET matrix; edit threshold/target; no current edit |
-| `/inventory/stock-matrix` | Prefer redirect/deep-link to catalog product detail **or** rebuild list as `LensProduct` cards → same matrix |
-| `/inventory/power-wise-stock` | List `LensProductPower`; filters by catalog attrs; Run reorder against new rules |
-| `/inventory/stock-overview` | Drive from catalog powers / products |
+| `/inventory/products-catalog/[id]` | Replace `_/_/_` with live matrix from GET matrix; edit threshold/target; no current edit; keep family sheet layout |
+| `/inventory/products-catalog/variants/[id]` | May show same live matrix (sibling context) with current variant highlighted — optional polish |
+| `/inventory/stock-matrix` | Prefer redirect/deep-link to catalog parent detail **or** rebuild list as `LensProduct` cards → same matrix |
+| `/inventory/power-wise-stock` | List `LensProductPower`; filters by parent attrs + variant SKU; Run reorder against new rules |
+| `/inventory/stock-overview` | Drive from catalog leaves |
 | **New** `/inventory/stock-adjustments` | Form per CLIENT-PLAN + history |
 | **New** `/inventory/stock-transactions` | Ledger table |
-| PO create / receive | Product picker from `LensProduct`; power picker from range / leaves; labels = catalog SKU + power |
+| PO create / receive | Picker: parent → variant → SPH/CYL (or matrix pick); labels = variant SKU + power + axis/ADD/eye |
 | Sidebar | Group Stock Management entries; keep POs under Procurement |
+
+**UI styles:** Match existing admin inventory / catalog patterns (`AdminPage`, brand card borders, `AdminSelect`, matrix panel). Do not invent a separate visual system.
 
 ---
 
@@ -203,20 +222,21 @@ Reorder-check route today: `app/api/inventory/reorder-check/route.ts`.
 From RW-08 / CLIENT-PLAN — do not regress:
 
 1. Manual Run reorder only; consolidated queue; draft editable before approve.  
-2. Power-wise stock truth; range for grouping/bills.  
+2. Leaf-wise stock truth; variant/range for grouping/bills/SKU label.  
 3. Current not free-editable.  
-4. Open PO → no second PO for same power; expose **incoming** on UI/API.  
+4. Open PO → no second PO for same leaf; expose **incoming** on UI/API.  
 5. On-hand posts: Confirm Receipt (**accepted** only) + Stock Adjustment / stock check + pack deduct + return/reversal. Available also changes via reserve/release / blocked. Never free-edit qty.  
 6. Close outstanding with reason list.  
-7. Incoming = outstanding qty on open PO lines for that power.  
+7. Incoming = outstanding qty on open PO lines for that leaf.  
 8. Reorder math per **§6.1** (available + incoming; never double-count reserved).  
 9. Reject adjustments that would make available &lt; 0.  
 10. Stock check: Employee API must **not** return system qty; Admin verifies.  
-11. Open count session → **freeze** stock mutations on those powers until complete.  
+11. Open count session → **freeze** stock mutations on those leaves until complete.  
 12. Pick short → blocked/discrepancy until Admin adjusts.  
-13. Full audit on every stock-affecting mutation.
+13. Full audit on every stock-affecting mutation.  
+14. Two variants that cover similar powers remain **separate** leaves (keyed by `variantId`).
 
-Client follow-ons (order modify, WAC, etc.): [CLIENT-FOLLOW-ONS.md](./CLIENT-FOLLOW-ONS.md) — do not implement inside S1–S5 unless stock hooks only.
+Client follow-ons: [CLIENT-FOLLOW-ONS.md](./CLIENT-FOLLOW-ONS.md) — do not implement inside S1–S5 unless stock hooks only.
 
 ### 6.1 Reorder calculation (implement exactly)
 
@@ -225,32 +245,26 @@ Align with [CLIENT-PLAN §8.1](./CLIENT-PLAN.md). Existing helpers in `app/lib/p
 - gate: `available <= minStock` (`isAtOrBelowMinimum`)
 - need: `required = trunc(targetStock - available - incoming)` (`computeRecommendedQuantity` base)
 
-**Definitions (catalog power leaf):**
+**Definitions (stock leaf):**
 
 ```
 available = onHand - reserved - blocked
-incoming  = sum(outstanding open-PO qty for this power)   // OPEN / SENT / PARTIALLY_RECEIVED
+incoming  = sum(outstanding open-PO qty for this leaf)   // OPEN / SENT / PARTIALLY_RECEIVED
 ```
 
-**Run reorder per power:**
+**Run reorder per leaf:**
 
 ```
-if openPoExists(power):
-  // do NOT create new PR/PO line for this power
-  // still return position for UI: available, incoming, threshold, target
-  skipNewRequirement = true
-else if available <= threshold:  // threshold = minStock
+if openPoExists(leaf):
+  skipNewRequirement = true   // still return position for UI
+else if available <= threshold:
   required = max(0, target - available - incoming)
-  // unreserved customer shortage (never reserved):
   required = max(required, max(0, unreservedShortage - incoming))
-  // NEVER add `reserved` into required (already excluded from available)
+  // NEVER add `reserved` into required
   enqueue consolidated queue with required
 else:
   skip
 ```
-
-**Worked example (client):** onHand 20, reserved 8, blocked 2 → available 10; threshold 12; target 30; incoming 10 on open PO → **skip new PO**; UI shows Incoming 10.  
-If no open PO: `required = max(0, 30 - 10 - 0) = 20`.
 
 **Code touchpoints:** `procurement-rules.ts`, `reorder-check` route, `OpenPurchaseOrderPower` (rebind to `lensProductPowerId`), power-wise + Run reorder UI columns for incoming.
 
@@ -258,13 +272,13 @@ If no open PO: `required = max(0, 30 - 10 - 0) = 20`.
 
 ## 7. Phases (implement in order)
 
-### S1 — Live matrix on `LensProduct`
+### S1 — Live matrix on `LensProduct` parent
 
-- Add `LensProductPower` migration (include reserved/blocked fields or compute reserved from orders)  
+- Add `LensProductPower` migration (`variantId` + `sph` + `cyl`)  
 - GET matrix + PATCH rules (upsert leaf)  
-- Wire product detail UI  
+- Wire parent detail UI (`CatalogMatrixPanel` live values)  
 
-**Done when:** Admin opens a catalog product and sees real C/T/Target; threshold/target save.
+**Done when:** Admin opens a catalog parent and sees real C/T/Target on family sheets; threshold/target save creates/updates leaf.
 
 ### S2 — Stock Adjustment + movements + guards
 
@@ -277,20 +291,20 @@ If no open PO: `required = max(0, 30 - 10 - 0) = 20`.
 
 ### S2b — Stock Check + freeze
 
-- Count session model (product/range, status, frozen power ids)  
+- Count session model (leaves, status, frozen leaf ids)  
 - Employee submit counted qty only (strip live qty from responses)  
 - Admin verify → create adjustment  
-- Block Confirm Receipt / other adjusts on frozen powers  
+- Block Confirm Receipt / other adjusts on frozen leaves  
 
 **Done when:** End-to-end count → verify → adjust → unfreeze.
 
 ### S3 — Rebind PO + Confirm Receipt
 
-- Lines / locks / receipt lines use `lensProductPowerId`  
+- Lines / locks / receipt lines use `lensProductPowerId` (+ variant/sph/cyl as needed)  
 - Accept/reject lines; only accepted updates on hand  
 - Dual-write to legacy **only** if still required for orders  
 
-**Done when:** PO → receive → confirm updates catalog power stock; open-PO lock works.
+**Done when:** PO → receive → confirm updates catalog stock leaf; open-PO lock works.
 
 ### S4 — Overview, power-wise, reserved/blocked, Run reorder
 
@@ -303,30 +317,32 @@ If no open PO: `required = max(0, 30 - 10 - 0) = 20`.
 ### S5 — Reports + polish
 
 - Stock reports on new movements  
-- Returns stock hooks use power id (full returns UX = follow-on)  
+- Returns stock hooks use leaf id (full returns UX = follow-on)  
 - Hide legacy-only stock-matrix if replaced  
 
 ---
 
 ## 8. Testing checklist
 
-- [ ] Matrix cell count = stepped range; missing leaf shows 0 current  
+- [ ] Matrix cell coverage matches catalog family sheets; missing leaf shows 0 current  
+- [ ] Leaf unique on `(variantId, sph, cyl)`; axis/ADD/eye not required on leaf row  
 - [ ] Cannot PATCH quantity directly via a public “set qty” admin field  
 - [ ] Adjustment: before/after + reason + actor; available cannot go negative  
 - [ ] Employee stock-check response has no system qty  
-- [ ] Frozen powers reject concurrent stock posts  
+- [ ] Frozen leaves reject concurrent stock posts  
 - [ ] Confirm Receipt posts accepted only; rejected stays out  
 - [ ] Confirm Receipt idempotent (`confirmationKey`)  
-- [ ] Second PO for same power while open → rejected  
+- [ ] Second PO for same leaf while open → rejected  
 - [ ] Reorder: `required = max(0, target - available - incoming)` (+ unreserved shortage max); reserved not added again  
 - [ ] Open PO → no second requirement; API/UI returns **incoming**  
+- [ ] Two variants with overlapping numeric powers keep separate stock piles  
 - [ ] Legacy shop order path still works until explicit cutover  
 
 ---
 
 ## 9. Suggested PR order
 
-1. `LensProductPower` + matrix GET/PATCH + product detail UI (S1)  
+1. `LensProductPower` (variant+sph+cyl) + matrix GET/PATCH + parent detail UI (S1)  
 2. StockAdjustment + transactions + available guard (S2)  
 3. Stock Check session + freeze + employee/admin APIs (S2b)  
 4. PO/receipt/reorder FK rebind + confirm accepted-only (S3)  
@@ -337,9 +353,10 @@ If no open PO: `required = max(0, 30 - 10 - 0) = 20`.
 
 ## 10. Open engineering decisions
 
-1. Exact unique constraint for KT/V2 powers (nullable add/axis/eye).  
+1. Reserved: store column vs derive from open order lines (document choice in code).  
 2. Dual-write to `SingleVisionLens.quantity` during S3 — yes/no (default **no** if shop not demoing stock).  
-3. Freeze granularity: whole product range vs powers on the count sheet.  
+3. Freeze granularity: all leaves under parent vs leaves on the count sheet.  
 4. Deprecate `/inventory/stock-matrix` vs keep as product list facade.  
 5. When shop/cart switch to `lensProductPowerId` (separate cutover RW).  
-6. Order/returns/WAC follow-ons — see CLIENT-FOLLOW-ONS.md.
+6. Order/returns/WAC follow-ons — see CLIENT-FOLLOW-ONS.md.  
+7. Matrix cell → covering variant resolution when UI paints parent sheets (must pick the variant that owns the cell for live qty).

@@ -18,7 +18,7 @@ Give Admin a clear way to:
 
 **SKU** and **name** are both **auto-built** (Admin does not type them). SKU is a compact machine code; name is human-readable for procurement / stock (no supplier brand fluff).
 
-Each variant is a fully separate sellable line (own SKU, name, price). The matrix is a **view** over sibling variants on the parent; future stock/PO leaves key off the same optical cell identity **within that parent**. Multiple products can reference the same power-range master without sharing stock.
+Each variant is a fully separate sellable line (own SKU, name, price). The matrix is a **view** over sibling variants on the parent; future stock/PO leaves key off **`variant` + exact SPH + CYL** (axis/ADD/eye already on the variant). See [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md). Multiple products can reference the same power-range master without sharing stock.
 
 ---
 
@@ -369,7 +369,7 @@ Two separate sellable products; Admin did not re-enter parent attrs for the seco
 
 ## 11. Open points (non-blocking)
 
-1. Overlapping power ranges across variants — order/stock allocation later.  
-2. Live stock on parent matrix cells → stock-management (`LensProductPower` / leaf keyed by sph·cyl·add·axis·eye).  
+1. Overlapping power ranges across variants — stock piles stay separate per variant leaf (`variantId + sph + cyl`); order UX that picks “which variant” when both cover a cell may still need a later RC.  
+2. Live stock on parent matrix cells → stock-management (`LensProductPower` / leaf keyed by **variantId + sph + cyl**).  
 3. Whether Brand becomes a real attribute later (ignored for now).  
 4. Further catalog RCs → [`requested-changes.md`](../requested-changes.md).

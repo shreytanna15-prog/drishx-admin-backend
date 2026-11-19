@@ -15,7 +15,7 @@ Coating is an optional parent attribute like Color / Material / Index — includ
 | [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | Schema, APIs, UI routes/styles, gaps, handoff checklist |
 
 **Related:** [RW-09](../remaining-work.md#rw-09--products--catalog-admin-product-master--ranges--powers); deltas in [requested-changes.md](../requested-changes.md) (RC-03, RC-04, RC-08 — coating **optional**, not mandatory).  
-**Next (stock + PO):** [`../stock-management/`](../stock-management/) — same parent matrix view; live qty on optical cell leaves.
+**Next (stock + PO):** [`../stock-management/`](../stock-management/) — same parent matrix view; live qty on leaves keyed by **variant + SPH + CYL**.
 
 **SKU / name (locked):** both auto-built on the variant. Admin does not type either.
 

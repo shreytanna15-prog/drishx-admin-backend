@@ -1221,7 +1221,7 @@ export async function addLensProductVariants(input: {
     powerRangeIds: input.powerRangeIds,
     axisIds: input.axisIds,
     additionIds: input.additionIds,
-  }, true);
+  });
 
   const purchasePrice = normalizeMoney(input.purchasePrice, "purchasePrice");
   const sellingPrice = normalizeMoney(input.sellingPrice, "sellingPrice");

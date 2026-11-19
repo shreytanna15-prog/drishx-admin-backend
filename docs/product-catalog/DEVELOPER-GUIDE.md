@@ -320,7 +320,7 @@ Smoke: `scripts/lens-catalog-e2e-smoke.mjs`, `scripts/lens-catalog-present-prep.
 ## 10. Open engineering decisions
 
 1. Broader **partial** range overlap policy — if/when client asks.  
-2. When to introduce exact-power stock leaf (`LensProductPower`) keyed by sph·cyl·add·axis·eye (stock-management).  
+2. When to introduce exact-power stock leaf (`LensProductPower`) keyed by **`lensProductVariantId` + sph + cyl** (stock-management).  
 3. Long-term: retire or bridge older `CatalogProduct` / range→leaf path vs `LensProduct` master.  
 4. Whether to keep a third “Grouped parents” mode after Grid ships (default: no — Flat + Grid only).
 
