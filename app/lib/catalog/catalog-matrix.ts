@@ -134,23 +134,36 @@ function isPlano(value: number): boolean {
   return Math.abs(value) < POWER_EPS;
 }
 
+/** Cross territory: +SPH with −CYL (gap rule applied on Cross sheet only). */
+function isCrossQuadrant(sph: number, cyl: number): boolean {
+  return sph > POWER_EPS && cyl < -POWER_EPS;
+}
+
 function bandHasNonPlano(min: number, max: number): boolean {
   return !isPlano(min) || !isPlano(max);
 }
 
-/** Optical sort: minus from plano outward, then plus from plano outward. */
-export function compareOpticalPowers(a: number, b: number): number {
+/**
+ * Matrix power order: sign is display only — sort by absolute magnitude
+ * ascending (0.25 before 1.00 whether + or −). Same magnitude → signed value.
+ */
+export function comparePowerMagnitude(a: number, b: number): number {
   const ra = roundQuarter(a);
   const rb = roundQuarter(b);
-  const rank = (v: number) => {
-    if (Math.abs(v) < POWER_EPS) return [0, 0];
-    return [v < 0 ? 0 : 1, Math.abs(v)];
-  };
-  const aa = rank(ra);
-  const bb = rank(rb);
-  if (aa[0] !== bb[0]) return aa[0]! - bb[0]!;
-  if (aa[1] !== bb[1]) return aa[1]! - bb[1]!;
+  const aa = Math.abs(ra);
+  const bb = Math.abs(rb);
+  if (Math.abs(aa - bb) > POWER_EPS) return aa - bb;
   return ra - rb;
+}
+
+/** @deprecated Prefer comparePowerMagnitude for matrix SPH/CYL order. */
+export function compareOpticalPowers(a: number, b: number): number {
+  return comparePowerMagnitude(a, b);
+}
+
+/** 0.25 steps from bounds, ordered by magnitude (sign ignored for ranking). */
+function steppedPowersSorted(min: number, max: number): number[] {
+  return steppedRange(min, max).toSorted(comparePowerMagnitude);
 }
 
 export function classifyVariantPowerShape(
@@ -197,7 +210,7 @@ function uniqueSortedPowers(values: number[]): number[] {
     const r = roundQuarter(v);
     map.set(r.toFixed(2), r);
   }
-  return [...map.values()].sort(compareOpticalPowers);
+  return [...map.values()].toSorted(comparePowerMagnitude);
 }
 
 function rangeText(min: number, max: number): string {
@@ -328,8 +341,8 @@ function groupVariants(
   for (const variant of variants) {
     const shape = classifyVariantPowerShape(variant);
     const axis = shape === "sphere" ? null : variant.axis;
-    // 45° and 135° share a visual sheet, not an optical cell or SKU.
-    const axisGroup = axis === 45 || axis === 135 ? "oblique" : axis ?? "none";
+    // One sheet per axis — never merge 45° / 135° (or any other axes).
+    const axisGroup = axis ?? "none";
     const key = `${shape}|${rangeKeyOf(variant)}|axis:${axisGroup}`;
     const existing = groups.get(key);
     if (existing) {
@@ -406,7 +419,7 @@ function buildSphCylSheet(
   group: VariantGroup,
   familyLabel: string | null
 ): CatalogMatrixSheet {
-  const sphValues = steppedRange(group.sphMin, group.sphMax);
+  const sphValues = steppedPowersSorted(group.sphMin, group.sphMax);
   const cylValues = uniqueSortedPowers(
     group.variants.flatMap((v) => steppedRange(v.cylMin, v.cylMax))
   );
@@ -433,12 +446,10 @@ function buildSphCylSheet(
       const variant = group.variants.find((v) =>
         variantCovers(v, sph, cyl)
       );
-      // SV single sheet mixes compound + cross quadrants: in +SPH/−CYL,
-      // only valid cross combos may show an editable triad (Style B).
-      const allowed =
-        sph > POWER_EPS && cyl < -POWER_EPS
-          ? isAllowedCrossCombo(sph, cyl)
-          : true;
+      // SV single sheet mixes compound + cross quadrants: Style B on +SPH/−CYL.
+      const allowed = isCrossQuadrant(sph, cyl)
+        ? isAllowedCrossCombo(sph, cyl)
+        : true;
       cells[column.key] = variant
         ? coveredCell(cellKey, variant.id, allowed)
         : emptyCell(cellKey, allowed);
@@ -470,7 +481,7 @@ function buildSphereSheet(
   withEye: boolean,
   familyLabel: string | null
 ): CatalogMatrixSheet {
-  const sphValues = steppedRange(group.sphMin, group.sphMax);
+  const sphValues = steppedPowersSorted(group.sphMin, group.sphMax);
   const dataColumns = buildAddColumns(group.variants, withEye);
 
   const rows: CatalogMatrixRow[] = sphValues.map((sph) => {
@@ -523,7 +534,7 @@ function buildCylAxisSheet(
   withEye: boolean,
   familyLabel: string | null
 ): CatalogMatrixSheet {
-  const cylValues = steppedRange(group.cylMin, group.cylMax);
+  const cylValues = steppedPowersSorted(group.cylMin, group.cylMax);
   const dataColumns = buildAddColumns(group.variants, withEye);
   const axes = groupAxes(group);
   const showAxis = axes.some((axis) => axis != null);
@@ -597,24 +608,23 @@ function buildCompoundSheet(
   kind: "compound" | "cross",
   familyLabel: string | null
 ): CatalogMatrixSheet | null {
-  const sphValues = steppedRange(group.sphMin, group.sphMax);
-  const cylValues = steppedRange(group.cylMin, group.cylMax);
+  const sphValues = steppedPowersSorted(group.sphMin, group.sphMax);
+  const cylValues = steppedPowersSorted(group.cylMin, group.cylMax);
   const dataColumns = buildAddColumns(group.variants, withEye);
 
-  // CYL-major row order (outer CYL, inner SPH) per client matrix rule for KT/V2.
-  // Cross Style B: keep the full +SPH/−CYL rectangle; mark gap-fail cells
-  // allowed:false (no editable triad) instead of omitting them.
+  // CYL-major row order (outer CYL, inner SPH); both axes magnitude-sorted.
+  // Cross Style B: full +SPH/−CYL rectangle; gap-fail → allowed:false.
+  // Compound never owns the cross quadrant (valid or gap-fail) — KT/V2 parity with SV.
   const points: Array<{ sph: number; cyl: number; allowed: boolean }> = [];
   for (const cyl of cylValues) {
     for (const sph of sphValues) {
       if (isPlano(sph) || isPlano(cyl)) continue;
       if (kind === "cross") {
-        // Cross sheet = +SPH / −CYL candidates only (matches warehouse sketch).
-        if (sph <= POWER_EPS || cyl >= -POWER_EPS) continue;
+        if (!isCrossQuadrant(sph, cyl)) continue;
         points.push({ sph, cyl, allowed: isAllowedCrossCombo(sph, cyl) });
       } else {
+        if (isCrossQuadrant(sph, cyl)) continue;
         if (!isAllowedCompoundCombo(sph, cyl)) continue;
-        if (isAllowedCrossCombo(sph, cyl)) continue;
         points.push({ sph, cyl, allowed: true });
       }
     }

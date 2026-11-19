@@ -315,7 +315,7 @@ During an open **stock check** for selected leaves:
 | **V2** | Same sheet kinds; RE then LE blocks  | variant already has axis + ADD + eye; cell adds SPH + CYL |
 
 
-Power steps stay **0.25** from the variants’ ranges. Empty sheets are omitted. Layout matches catalog (left labels, axis blocks largest-first, 135°/45° sharing one sheet, etc.).
+Power steps stay **0.25** from the variants’ ranges. Empty sheets are omitted. Layout matches catalog: left labels; **one sheet per axis** (largest first); SPH/CYL ordered by absolute size (sign is display only); Compound / Cross rows **CYL first**.
 
 **Cross power (same as catalog):** On Cross sheets, Admin still sees the full +SPH / −CYL grid (like the warehouse sketch). Combinations that break the cross rule (cylinder must be at least **0.25** stronger than sphere) are **disabled** — marked ×, no Threshold/Target boxes, and **not** a stock cell. Valid cells use the three values below.
 

@@ -592,7 +592,7 @@ The client requires identical power-range/axis/ADD matrices under multiple disti
 - Include the coating code in base/variant SKUs and its label in variant names when set; existing unclassified parents/SKUs remain unchanged. No inferred backfill from base/material/color.
 - List/detail/search/filter/preview expose coating. Existing legacy rows may still add variants under their null-coating parent.
 - Live quantities are still on the legacy lens leaves, while the new catalog matrix cells are view-only. Separate stock per new parent/variant needs the stock-management leaf cutover; this identity change does not manufacture stock balances.
-- 45° and 135° may share a displayed oblique-axis matrix section, but the exact axis remains on every row and cell.
+- Each axis has its own matrix sheet (45° and 135° are not shared); exact axis remains on every row and cell.
 
 **Locked contract:** [`docs/product-catalog/`](./product-catalog/).
 

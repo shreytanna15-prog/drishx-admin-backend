@@ -275,9 +275,10 @@ Sheets are **stacked Excel-like tables** (no tabs/buttons). Each table has expli
 |------|--------|
 | Steps | 0.25 from variant ranges |
 | Stub columns | Only render a dimension that exists on the sheet |
-| Axis blocks | Largest first (`180` → `90`); 135° and 45° share one oblique-axis table with the exact axis in each row/cell |
-| Compound vs cross | Compound sheet excludes cross-pattern combos; cross gets its own sheet |
-| Cross power | Cross sheet keeps the full +SPH / −CYL grid; cells that break the cross rule (cylinder at least **0.25** stronger than sphere) are **disabled** (×, no boxes) — same as the warehouse sketch |
+| Axis blocks | **One sheet per axis** (never share); stack largest first (`180` → `90` → `135` → `45`) |
+| SPH / CYL order | By **absolute size** ascending (0.25 before 1.00; sign is display only). Compound / Cross rows are **CYL first**, then SPH |
+| Compound vs cross | Compound excludes the whole **+SPH / −CYL** quadrant; Cross owns that grid (SV applies the same rule on its single SPH×CYL sheet) |
+| Cross power | Full +SPH / −CYL grid; cells that break the cross rule (cylinder at least **0.25** stronger than sphere) are **disabled** (×, no boxes) — SV, KT, and V2 |
 | Presence | Cell shows Current / Threshold / Target only when the combo is valid and a variant covers that power (+ ADD / axis / eye) |
 | Behaviour | Boxes always for valid covered cells; Threshold / Target save when stock is live; same layout shows live qty |
 

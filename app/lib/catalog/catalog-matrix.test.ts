@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildCatalogMatrix,
   classifyVariantPowerShape,
-  compareOpticalPowers,
+  comparePowerMagnitude,
   formatMatrixPower,
   type CatalogMatrixVariantInput,
 } from "./catalog-matrix";
@@ -46,9 +46,10 @@ describe("catalog-matrix helpers", () => {
     assert.equal(formatMatrixPower(-2), "-2.00");
   });
 
-  it("orders optical powers plano, minus outward, then plus", () => {
-    const sorted = [2, -1, 0, -2, 0.25].sort(compareOpticalPowers);
-    assert.deepEqual(sorted, [0, -1, -2, 0.25, 2]);
+  it("orders powers by absolute magnitude (sign ignored for ranking)", () => {
+    const sorted = [2, -1, 0, -2, 0.25].toSorted(comparePowerMagnitude);
+    // abs: 0 < 0.25 < 1 < 2; same abs → signed order (−2 before +2)
+    assert.deepEqual(sorted, [0, 0.25, -1, -2, 2]);
   });
 
   it("classifies power shapes from ranges", () => {
@@ -292,6 +293,55 @@ describe("buildCatalogMatrix KT", () => {
     const edgeBad = cross.cells["sph:1.75|cyl:-1.75|axis:180"]!["add:1.00"]!;
     assert.equal(edgeBad.allowed, false);
     assert.equal(edgeBad.present, false);
+
+    // Pure cross band → no Compound sheet (quadrant owned by Cross only).
+    assert.equal(
+      model.sheets.find((s) => s.kind === "compound"),
+      undefined
+    );
+  });
+
+  it("KT Compound excludes the whole +SPH/−CYL quadrant (cross owns Style B)", () => {
+    const model = buildCatalogMatrix(
+      [
+        v({
+          id: "mixed",
+          // Includes -- compound and +/− cross territory in one range band.
+          sphMin: -1,
+          sphMax: 1,
+          cylMin: -1,
+          cylMax: -0.25,
+          axis: 90,
+          add: 1,
+        }),
+      ],
+      KT
+    );
+
+    const compound = model.sheets.find((s) => s.kind === "compound")!;
+    const cross = model.sheets.find((s) => s.kind === "cross")!;
+    assert.ok(compound);
+    assert.ok(cross);
+
+    // Valid -- compound cell stays on Compound.
+    assert.equal(
+      compound.cells["sph:-1.00|cyl:-1.00|axis:90"]!["add:1.00"]!.present,
+      true
+    );
+
+    // Cross quadrant (even gap-fail) is absent from Compound.
+    assert.equal(compound.cells["sph:0.50|cyl:-0.25|axis:90"], undefined);
+    assert.equal(compound.cells["sph:0.50|cyl:-1.00|axis:90"], undefined);
+
+    // Same cells live on Cross with Style B.
+    assert.equal(
+      cross.cells["sph:0.50|cyl:-0.25|axis:90"]!["add:1.00"]!.allowed,
+      false
+    );
+    assert.equal(
+      cross.cells["sph:0.50|cyl:-1.00|axis:90"]!["add:1.00"]!.allowed,
+      true
+    );
   });
 
   it("omits the Axis stub when the sheet has no axis", () => {
@@ -334,7 +384,7 @@ describe("buildCatalogMatrix KT", () => {
     assert.deepEqual(axes, ["180", "90"]);
   });
 
-  it("groups 135° and 45° in one sheet without merging their cells", () => {
+  it("gives 135° and 45° separate sheets (no shared oblique sheet)", () => {
     const variants = [135, 45].flatMap((axis) => [
       v({ id: `cyl-${axis}`, sphMin: 0, sphMax: 0, cylMin: -1, cylMax: -1, axis, add: 1 }),
       v({ id: `comp-${axis}`, sphMin: -1, sphMax: -1, cylMin: -1, cylMax: -1, axis, add: 1 }),
@@ -343,18 +393,63 @@ describe("buildCatalogMatrix KT", () => {
     const cylinders = model.sheets.filter((s) => s.kind === "cyl-axis");
     const compounds = model.sheets.filter((s) => s.kind === "compound");
 
-    assert.equal(cylinders.length, 1);
-    assert.equal(compounds.length, 1);
-    assert.match(cylinders[0]!.title, /135° \/ 45°/);
-    assert.deepEqual(cylinders[0]!.rows.map((r) => r.stub.axis), ["135", "45"]);
+    assert.equal(cylinders.length, 2);
+    assert.equal(compounds.length, 2);
+    assert.deepEqual(
+      cylinders.map((s) => s.rows[0]!.stub.axis),
+      ["135", "45"]
+    );
     for (const axis of [135, 45]) {
-      const cylCell = cylinders[0]!.cells[`cyl:-1.00|axis:${axis}`]!["add:1.00"]!;
-      const compCell = compounds[0]!.cells[`sph:-1.00|cyl:-1.00|axis:${axis}`]!["add:1.00"]!;
-      assert.equal(cylCell.variantId, `cyl-${axis}`);
-      assert.equal(cylCell.cellKey.axis, axis);
-      assert.equal(compCell.variantId, `comp-${axis}`);
-      assert.equal(compCell.cellKey.axis, axis);
+      const cylSheet = cylinders.find((s) => s.rows[0]!.stub.axis === String(axis))!;
+      const compSheet = compounds.find((s) =>
+        s.rows.some((r) => r.stub.axis === String(axis))
+      )!;
+      assert.equal(
+        cylSheet.cells[`cyl:-1.00|axis:${axis}`]!["add:1.00"]!.variantId,
+        `cyl-${axis}`
+      );
+      assert.equal(
+        compSheet.cells[`sph:-1.00|cyl:-1.00|axis:${axis}`]!["add:1.00"]!.variantId,
+        `comp-${axis}`
+      );
     }
+  });
+
+  it("orders Compound/Cross rows CYL-first by magnitude then SPH", () => {
+    const model = buildCatalogMatrix(
+      [
+        v({
+          id: "comp",
+          sphMin: -1,
+          sphMax: -0.25,
+          cylMin: -1,
+          cylMax: -0.25,
+          axis: 90,
+          add: 1,
+        }),
+      ],
+      KT
+    );
+    const compound = model.sheets.find((s) => s.kind === "compound")!;
+    const stubPairs = compound.rows.map((r) => `${r.stub.cyl}|${r.stub.sph}`);
+    assert.deepEqual(stubPairs, [
+      "-0.25|-0.25",
+      "-0.25|-0.50",
+      "-0.25|-0.75",
+      "-0.25|-1.00",
+      "-0.50|-0.25",
+      "-0.50|-0.50",
+      "-0.50|-0.75",
+      "-0.50|-1.00",
+      "-0.75|-0.25",
+      "-0.75|-0.50",
+      "-0.75|-0.75",
+      "-0.75|-1.00",
+      "-1.00|-0.25",
+      "-1.00|-0.50",
+      "-1.00|-0.75",
+      "-1.00|-1.00",
+    ]);
   });
 });
 

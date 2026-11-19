@@ -251,7 +251,7 @@ Match current inventory catalog look — do not invent a new visual system.
 
 ### 6.2 Matrix
 
-`buildCatalogMatrix` in `catalog-matrix.ts` (0.25 steps, family sheets) — no per-cell API. Each sheet: `stubColumns`, `dataAxis`, `dataColumns`. Cells carry `present` + `allowed` (`allowed: false` = Cross Style B gap-fail / disabled triad). Panel stacks sheets Excel-like; freezes stubs; axis blocks largest-first; 135°/45° share oblique sheet with exact axis keys. Pass `familyLabel` for sheet titles. `CatalogMatrixPanel` renders Current/Threshold/Target boxes; pass `editable` when stock leaf rules can save.
+`buildCatalogMatrix` in `catalog-matrix.ts` (0.25 steps, family sheets) — no per-cell API. Each sheet: `stubColumns`, `dataAxis`, `dataColumns`. Cells carry `present` + `allowed` (`allowed: false` = Cross Style B gap-fail / disabled triad). Panel stacks sheets Excel-like; freezes stubs; **one sheet per axis** (largest first); SPH/CYL via `comparePowerMagnitude` (abs ascending); Compound/Cross CYL-major. Pass `familyLabel` for sheet titles. `CatalogMatrixPanel` renders Current/Threshold/Target boxes; pass `editable` when stock leaf rules can save.
 
 ---
 
