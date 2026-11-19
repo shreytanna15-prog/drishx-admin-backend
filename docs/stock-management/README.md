@@ -1,10 +1,10 @@
 # Stock management & procurement
 
-Admin **stock** + **purchase order** plan — catalog **parent** at the center, live family matrix, stock on the **deepest leaf** (`variant` + exact SPH + CYL).
+Admin **stock** + **purchase order** plan — **Products & catalog parent** at the center, live family matrix, quantity on the **deepest cell** (variant + exact SPH + CYL).
 
-Product master (attributes + `LensProduct` + `LensProductVariant` + matrix shell): see [`../product-catalog/`](../product-catalog/).  
+Product master (attributes + parents + variants + matrix): see [`../product-catalog/`](../product-catalog/).  
 Raw client feedback notes: [`../stock-management-notes.md`](../stock-management-notes.md).  
-Earlier PO task tracker: [`../remaining-work.md`](../remaining-work.md) → RW-08 (superseded for *identity* by this plan; keep PO *rules*).
+Earlier PO task tracker: [`../remaining-work.md`](../remaining-work.md) → RW-08 (keep PO *rules*; identity follows this plan).
 
 | Document | Audience | Purpose |
 |----------|----------|---------|
@@ -12,4 +12,8 @@ Earlier PO task tracker: [`../remaining-work.md`](../remaining-work.md) → RW-0
 | [CLIENT-FOLLOW-ONS.md](./CLIENT-FOLLOW-ONS.md) | Client + product | Agreed points for **Orders / Returns / Finance** — after stock |
 | [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | What exists today, what to build/change, schema, APIs, phases |
 
-**Spine:** `LensProduct` (parent) → `LensProductVariant` (SKU / range / axis? / ADD? / eye?) → stock leaf `(variantId, sph, cyl)` → qty only via **audited events** (receipt, adjustment/stock check, reserve/release, pack deduct, return/reversal). No free-edit quantity.
+**What we build on (locked):** the **new** Products & catalog — parent → variants → same family matrix → stock cell (this variant + this SPH + this CYL). Stock does **not** invent a second matrix; it makes the **same** catalog matrix show live **Current / Threshold / Target**, with invalid **cross power** cells disabled.
+
+**How stock moves:** receipt, adjustment / stock check, reserve / release, pack deduct, return / reversal — always audited. No free-edit quantity.
+
+**Out of scope for this phase:** redesigning older separate stock-grid screens; new work stays on the catalog parent matrix.

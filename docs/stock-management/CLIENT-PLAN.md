@@ -1,14 +1,23 @@
 # Stock management & procurement — Client plan
 
 **Document type:** Stock + purchase order plan  
-**Repos:** Admin panel (primary). Shared backend APIs.  
-**Depends on:** [Product catalog](../product-catalog/CLIENT-PLAN.md) — **parent + variants + family matrix** (locked Nov 2026 contract)  
-**Feedback source:** [stock-management-notes.md](../stock-management-notes.md)  
+**Surface:** Admin panel (primary)  
+**Depends on:** [Product catalog](../product-catalog/CLIENT-PLAN.md) — **parent + variants + family power matrix** (locked Nov 2026)  
 **Related (later modules):** [CLIENT-FOLLOW-ONS.md](./CLIENT-FOLLOW-ONS.md)
 
 This plan describes the **finished** stock and procurement experience.  
-**Product catalog** defines parents, variants (SKU/name/price), and the matrix shell.  
+**Product catalog** defines parents, variants (SKU / name / price), and the power matrix layout.  
 **Stock** puts live quantity on each **matrix cell** — the deepest pin-point under a variant.
+
+### What we build on (locked Nov 2026)
+
+| Layer | Meaning |
+|-------|---------|
+| Product master + matrix layout | The **new** Products & catalog (parent + power-range variants + family sheets) |
+| Live Current / Threshold / Target | The **same** matrix on the parent product screen — stock makes Threshold and Target **editable** (Current stays read-only) |
+| Where quantity lives | One stock cell = **this variant + this SPH + this CYL** |
+
+Older separate stock grids and old lens product lists are **not** the design for new work. The **cross power** rule (full +SPH / −CYL grid; invalid cells shown as disabled ×) is already on the catalog matrix and carries into stock automatically.
 
 ---
 
@@ -66,7 +75,8 @@ Shop / mobile order cutover to the new stock leaves can follow once admin stock 
 - Weighted average purchase cost (Finance)  
 - Detailed live vs non-live shop checkout policy (Orders)  
 - Customer website / mobile rewrite to new leaves  
-- Auto-creating a PO without Admin approve
+- Auto-creating a PO without Admin approve  
+- Redesigning or extending the **older** separate stock grid screens — new work uses only the **Products & catalog → parent** matrix
 
 ---
 
@@ -291,32 +301,35 @@ During an open **stock check** for selected leaves:
 
 ## 7. Product matrix (live stock)
 
-**Where:** Products & catalog → open **parent**.
+**Where:** **Products & catalog → open a parent product** (same matrix Admin already sees in catalog — not a different stock-only screen).
 
 **Header:** Parent attribute summary (Family · Base · Material? · Index? · Coating? · Color? · Diameter? · Progressive type?) + list/summary of variants (SKU / range / axis / ADD / eye). Parent has **no** single SKU.
 
-**Grid:** Same **family-aware stacked sheets** as the catalog matrix (not a single flat SPH×CYL table only):
+**Grid:** Same **family-aware stacked sheets** as the catalog matrix (not one flat table only):
 
 
-| Family | Sheets (stacked)                     | Cell identity                                             |
+| Family | Sheets (stacked)                     | What each cell means                                      |
 | ------ | ------------------------------------ | --------------------------------------------------------- |
-| **SV** | SPH × CYL                            | variant + SPH + CYL                                       |
+| **SV** | SPH × CYL                            | this variant + SPH + CYL                                  |
 | **KT** | Sphere → CYL+Axis → Compound → Cross | variant already has axis + ADD; cell adds SPH + CYL       |
 | **V2** | Same sheet kinds; RE then LE blocks  | variant already has axis + ADD + eye; cell adds SPH + CYL |
 
 
-Steps stay **0.25** from the covering variants’ ranges. Empty sheets omitted. Layout rules match catalog (stub columns, axis blocks largest-first, 135°/45° oblique sharing, etc.).
+Power steps stay **0.25** from the variants’ ranges. Empty sheets are omitted. Layout matches catalog (left labels, axis blocks largest-first, 135°/45° sharing one sheet, etc.).
+
+**Cross power (same as catalog):** On Cross sheets, Admin still sees the full +SPH / −CYL grid (like the warehouse sketch). Combinations that break the cross rule (cylinder must be at least **0.25** stronger than sphere) are **disabled** — marked ×, no Threshold/Target boxes, and **not** a stock cell. Valid cells use the three values below.
 
 
 | Cell          | Meaning                                                  |
 | ------------- | -------------------------------------------------------- |
-| **Current**   | On hand for that leaf — **not** typed freely             |
+| **Current**   | On hand for that cell — **not** typed freely             |
 | **Threshold** | Reorder min (editable with permission)                   |
 | **Target**    | Desired level after replenish (editable with permission) |
 
 
 Below threshold → highlight. Sticky headers for large sheets.  
-Missing leaf → show Current **0** until first receipt / adjustment / rule save (lazy create).
+If a valid cell has never received stock yet → Current shows **0** until first receipt, adjustment, or threshold/target save.  
+Disabled cross cell → no stock and no reorder settings.
 
 ---
 
@@ -473,17 +486,17 @@ Stock adjustment / stock check
 
 
 
-## 11. APIs (capability view)
+## 11. What the system must support
 
 
-| Area            | Capabilities                                                                                                   |
+| Area            | What Admin / staff can do                                                                                      |
 | --------------- | -------------------------------------------------------------------------------------------------------------- |
-| Product stock   | Parent matrix (current / threshold / target per cell); patch threshold/target on leaf                          |
-| Power inventory | List/search leaves; on hand, reserved, available, blocked, incoming; labels from parent + variant              |
-| Stock check     | Start/complete session; employee submit counts (no live qty in response); admin verify                         |
-| Adjustments     | Create / approve adjustment; reject if available would go negative                                             |
-| Transactions    | Ledger by leaf / variant / product / type / date (**audit**)                                                   |
-| Reorder         | Rules; Run reorder per §8.1; consolidated queue; show incoming; block 2nd open PO per leaf                     |
+| Product stock   | See Current / Threshold / Target on the parent matrix; edit Threshold / Target on a stock cell                 |
+| Power inventory | Search every stock cell; see on hand, reserved, available, blocked, incoming; clear parent + variant labels    |
+| Stock check     | Start / finish a count; employee enters counted qty only (no live stock shown); Admin verifies                 |
+| Adjustments     | Create / approve a correction; system rejects changes that would make available go negative                    |
+| Transactions    | Full ledger by cell / variant / product / type / date (**audit**)                                              |
+| Reorder         | Rules; Run reorder per §8.1; consolidated queue; show incoming; no second open PO for the same cell            |
 | Purchase orders | Draft (editable) → approve → sent; close outstanding                                                           |
 | Receipts        | Upload Excel; side-by-side vs PO; short/extra summary; accept/reject; confirm (accepted only → sellable stock) |
 
@@ -497,7 +510,7 @@ Stock adjustment / stock check
 
 | Phase   | Outcome                                                                           |
 | ------- | --------------------------------------------------------------------------------- |
-| **S1**  | Live matrix on parent (current / threshold / target) keyed by variant + SPH + CYL |
+| **S1**  | Live matrix on parent (Current / Threshold / Target) for each variant + SPH + CYL cell |
 | **S2**  | Stock Adjustment + audit transactions + negative-available guard                  |
 | **S2b** | Stock Check (employee count, no live qty) + freeze + Admin verify                 |
 | **S3**  | POs / Confirm Receipt → stock leaf (accepted only)                                |
@@ -537,10 +550,10 @@ Order/returns/costing follow-ons: [CLIENT-FOLLOW-ONS.md](./CLIENT-FOLLOW-ONS.md)
 
 ## 14. Open points (non-blocking)
 
-1. Freeze granularity: all leaves under a parent vs only leaves listed on the count sheet.
-2. Receive Excel final column template (must identify variant SKU + SPH/CYL clearly).
-3. Send PO via Email live vs stub.
-4. Shop/mobile cutover timing to new stock leaves.
-5. Whether leaves “already on open PO” stay visible on the Run-reorder result list (read-only + incoming) or only on PO / power-wise detail.
-6. If two variants’ ranges visually overlap on the parent matrix, UI must still attribute each cell to the correct **variant** leaf (no shared pile).
+1. During a stock check: freeze **all** powers under that parent, or only the powers listed on the count sheet?
+2. Final receive Excel columns (must clearly show variant SKU + SPH / CYL).
+3. Send PO by email for real vs temporary stub.
+4. When shop / mobile should start using the new stock cells.
+5. On Run reorder: show cells that already have an open PO (read-only + incoming), or only show them on PO / power-wise screens?
+6. If two variants’ ranges look similar on the parent matrix, each cell must still belong to the correct **variant** (separate stock piles — never one shared pile).
 

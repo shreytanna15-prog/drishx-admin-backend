@@ -3,7 +3,7 @@
 **Companion:** [CLIENT-PLAN.md](./CLIENT-PLAN.md) (product contract — do not contradict without updating both)  
 **Hierarchy:** [ATTRIBUTE-TABLES-AND-HIERARCHY.md](../product-catalog-hierarchy/ATTRIBUTE-TABLES-AND-HIERARCHY.md)  
 **Repos:** `drishx-admin-backend` (admin + API). Shop/mobile cutover is out of this slice.  
-**Status:** Phases **A–C** + **RC-03** + **RC-04** shipped (parent `LensProduct` + `LensProductVariant`; power-range masters; optional parent attrs including coating; new SKU/name builders; Flat list). Remaining UI/handoff work in **§11**.
+**Status:** Phases **A–C** + **RC-03** + **RC-04** shipped (parent `LensProduct` + `LensProductVariant`; power-range masters; optional parent attrs including coating; new SKU/name builders; Flat SKU tree + Grid parent browse). Remaining: future attr lock — **§11**.
 
 ---
 
@@ -24,7 +24,7 @@
 | Area | Path |
 |------|------|
 | Attributes UI | `app/(admin)/inventory/attributes/page.tsx` (+ `power-range-tab.tsx`) |
-| Products list (Flat / Grouped today) | `app/(admin)/inventory/products-catalog/page.tsx` |
+| Products list (Flat / Grid) | `app/(admin)/inventory/products-catalog/page.tsx` |
 | Create parent + variants | `app/(admin)/inventory/products-catalog/new/page.tsx` |
 | Parent detail + matrix + add ranges | `app/(admin)/inventory/products-catalog/[id]/page.tsx` |
 | Variant detail | `app/(admin)/inventory/products-catalog/variants/[id]/page.tsx` |
@@ -76,7 +76,7 @@ LensProductVariant
   purchasePrice · sellingPrice (default 0), isActive
         │
         ▼
-Admin UI — Flat (+ Grid TBD); parent detail + add ranges; variant matrix
+Admin UI — Flat (SKU tree) + Grid (parent cards); parent detail + add ranges; variant matrix
 ```
 
 **Not in this slice:** ExactPower / stock leaf rows (see stock-management).
@@ -221,10 +221,10 @@ Validation: Family + Base required; other parent FKs optional but must be active
 | Page | Route | Notes |
 |------|-------|--------|
 | Attributes | `/inventory/attributes` | Tabs for all masters + Power range |
-| Catalog | `/inventory/products-catalog` | **Flat** shipped; **Grid** cards = remaining (§11) |
+| Catalog | `/inventory/products-catalog` | **Flat** = SKU tree; **Grid** = parent browse cards → `[id]` |
 | New | `/inventory/products-catalog/new` | Parent attrs (Family/Base required); multi ranges; live preview |
-| Parent | `/inventory/products-catalog/[id]` | Family matrix; variants table; add ranges — **show Coating** (§11) |
-| Variant | `/inventory/products-catalog/variants/[id]` | Variant card + parent attrs + matrix + siblings — **show Coating** (§11) |
+| Parent | `/inventory/products-catalog/[id]` | Family matrix; variants table; add ranges; Coating in attribute summary |
+| Variant | `/inventory/products-catalog/variants/[id]` | Variant card + parent attrs (incl. Coating) + matrix + siblings |
 
 Reusable pieces: `SkuChip`, fields in `catalog-field.tsx`, `VariantPreviewTable`, `CatalogMatrixPanel`, plus shared `AdminTable` / `AdminSelect` / `AdminPage`.
 
@@ -242,18 +242,16 @@ Match current inventory catalog look — do not invent a new visual system.
 | Badges | Active / Inactive via `Badge` |
 | Errors | Red border banner (`border-red-300 bg-red-50 …`) |
 | Buttons | Existing `Button` variants; primary create CTAs already on catalog pages |
-| Matrix | `CatalogMatrixPanel` — stacked sheets, frozen stubs, `"_ / _ / _"` placeholders, no tabs |
+| Matrix | `CatalogMatrixPanel` — stacked sheets, frozen stubs, Current/Threshold/Target triad boxes; Cross Style B disables gap-fail cells (`allowed: false`), no tabs |
 | SKU display | `SkuChip` for compact codes |
 
-**Flat view (shipped):** expandable rows — top-level group (flat group name + power bounds) → axis subgroup → variant SKU rows. Filters: search, family, base, material, coating, active.
+**Flat view:** expandable rows — top-level group (flat group name + power bounds) → axis subgroup → variant SKU rows. Fetches `view=flat`. Filters: search, family, base, material, coating, active.
 
-**Grid view (target — §11):** same data hierarchy and filters as Flat; **card = Flat top-level group**. Card face: attr chips + power label + variant count + status. Expand/open → same axis → SKU layers. Reuse Flat grouping helpers (`buildLensProductFlatGroupName` / leaf helpers) so Flat and Grid never diverge.
-
-**Grouped toggle today:** parent-table expand exists in `page.tsx`. Product contract is Flat + **Grid**. Prefer replacing/repurposing the second toggle into Grid cards rather than keeping three modes.
+**Grid view:** **parent browse cards** — one card per `LensProduct`. Face: family/base title, attribute summary, attr chips, variant count, unique range labels, status. Entire card links to `/inventory/products-catalog/[id]`. Fetches `view=grouped` with server pagination. **Do not** nest Flat’s axis→SKU tree inside cards.
 
 ### 6.2 Matrix
 
-`buildCatalogMatrix` in `catalog-matrix.ts` (0.25 steps, family sheets) — no per-cell API. Each sheet: `stubColumns`, `dataAxis`, `dataColumns`. Panel stacks sheets Excel-like; freezes stubs; axis blocks largest-first; 135°/45° share oblique sheet with exact axis keys. Pass `familyLabel` for sheet titles.
+`buildCatalogMatrix` in `catalog-matrix.ts` (0.25 steps, family sheets) — no per-cell API. Each sheet: `stubColumns`, `dataAxis`, `dataColumns`. Cells carry `present` + `allowed` (`allowed: false` = Cross Style B gap-fail / disabled triad). Panel stacks sheets Excel-like; freezes stubs; axis blocks largest-first; 135°/45° share oblique sheet with exact axis keys. Pass `familyLabel` for sheet titles. `CatalogMatrixPanel` renders Current/Threshold/Target boxes; pass `editable` when stock leaf rules can save.
 
 ---
 
@@ -275,11 +273,14 @@ Match current inventory catalog look — do not invent a new visual system.
 |------|--------|
 | Coating optional on parent (SKU/name/uniqueness when set) | **Done** in create/service/SKU builders |
 | Flat nested catalog view | **Done** |
-| Grid card view (Flat hierarchy) | **Remaining** — §11 |
-| Coating on parent/variant attribute summaries | **Remaining** — §11 |
+| Grid parent browse cards → parent detail | **Done** |
+| Coating on parent/variant attribute summaries | **Done** |
 | Attribute lock after stock/orders | **Documented**; implement when parent-attr edit exists — §11 |
+| Cross Style B on family matrix (`allowed` + disabled ×) | **Done** — shared shell for stock |
 | Audit trail depth | Partial via activity messages |
 | Broader partial-range overlap | Not required yet |
+
+**Stock SoT:** this catalog matrix is the only matrix to bind live qty. Do not extend Cross Style B into legacy `/inventory/stock-matrix`.
 
 ---
 
@@ -290,7 +291,8 @@ Match current inventory catalog look — do not invent a new visual system.
 | Free-text Admin SKU on create | Locked to auto format |
 | Require coating on create | Optional parent attr (same as Material/Index/Color) |
 | Bulk insert of every SPH×CYL leaf at qty 0 | Inventory later |
-| Live stock on matrix | See stock-management |
+| Live stock save on matrix | See stock-management (same panel + `editable`) |
+| Retrofit legacy `/inventory/stock-matrix` | Out of scope — leave alone until redirect/cutover |
 | Delete legacy lens tables | Orders/cart depend on them |
 | Replace wholesale `CatalogProductLine` | Different concept |
 | Customer-facing fetch from `LensProduct` | Follow-on cutover |
@@ -307,8 +309,8 @@ Match current inventory catalog look — do not invent a new visual system.
 - [x] Progressive type optional (V2); in SKU not name  
 - [x] Flat list nested groups + filters (incl. coating)  
 - [x] Parent family matrix @ 0.25  
-- [ ] Grid card view parity with Flat grouping  
-- [ ] Coating visible on parent + variant detail attribute blocks  
+- [x] Grid parent browse cards (not Flat tree in card chrome)  
+- [x] Coating visible on parent + variant detail attribute blocks  
 - [x] Legacy `/api/lenses*` and existing orders unaffected  
 
 Unit: `app/lib/catalog/lens-product-sku.test.ts`, `app/lib/catalog/catalog-matrix.test.ts`  
@@ -322,7 +324,7 @@ Smoke: `scripts/lens-catalog-e2e-smoke.mjs`, `scripts/lens-catalog-present-prep.
 1. Broader **partial** range overlap policy — if/when client asks.  
 2. When to introduce exact-power stock leaf (`LensProductPower`) keyed by **`lensProductVariantId` + sph + cyl** (stock-management).  
 3. Long-term: retire or bridge older `CatalogProduct` / range→leaf path vs `LensProduct` master.  
-4. Whether to keep a third “Grouped parents” mode after Grid ships (default: no — Flat + Grid only).
+4. Flat + Grid only (no third “Grouped” mode).
 
 ---
 
@@ -330,24 +332,9 @@ Smoke: `scripts/lens-catalog-e2e-smoke.mjs`, `scripts/lens-catalog-present-prep.
 
 Docs are the contract. Implement these in code — **do not** change the locked SKU/name/parent rules without updating CLIENT-PLAN + this guide together.
 
-### Must do (UI)
-
-1. **Show Coating on detail summaries**  
-   - `app/(admin)/inventory/products-catalog/[id]/page.tsx` — Attributes `<dl>`  
-   - `app/(admin)/inventory/products-catalog/variants/[id]/page.tsx` — Product attributes `<dl>`  
-   - Show coating name/code or `—` when null (same pattern as Color / Material).
-
-2. **Grid catalog view**  
-   - Target: `/inventory/products-catalog` second view = **Grid cards**.  
-   - Reuse Flat’s top-level grouping (same keys / `buildLensProductFlatGroupName`).  
-   - Card face: attrs + power label + variant count + status.  
-   - Expand/open → axis subgroups → SKU rows (same as Flat).  
-   - Same filters (q, family, base, material, coating, active).  
-   - Follow §6.1 UI styles. Prefer replacing today’s “Grouped” toggle with Grid rather than three modes.
-
 ### Must do when adding parent-attr edit (not this sprint unless edit ships)
 
-3. **Attribute lock after stock/orders**  
+1. **Attribute lock after stock/orders**  
    - If parent attributes become editable, make them read-only once any sibling variant has stock or orders.  
    - Until edit exists, no UI change required — rule is locked in CLIENT-PLAN §6.7.
 
@@ -359,6 +346,8 @@ Docs are the contract. Implement these in code — **do not** change the locked 
 - Preview via `POST /lens-products` + `preview: true`  
 - Add ranges via `POST /lens-products/:id`  
 - Flat nested list + coating filter  
+- Grid = parent browse cards → `[id]` (not Flat expand tree)  
+- Coating on parent + variant detail attribute summaries  
 - Family matrix stacked sheets  
 
 ### Out of scope for this handoff

@@ -109,6 +109,7 @@ describe("buildCatalogMatrix SV", () => {
 
     const cell = sheet.cells["sph:0.00"]!["cyl:-0.25"]!;
     assert.equal(cell.present, true);
+    assert.equal(cell.allowed, true);
     assert.equal(cell.variantId, "sv1");
     assert.deepEqual(cell.cellKey, {
       sph: 0,
@@ -117,6 +118,31 @@ describe("buildCatalogMatrix SV", () => {
       axis: null,
       eye: null,
     });
+  });
+
+  it("SV SPH×CYL disables invalid cross-quadrant cells (Style B)", () => {
+    const model = buildCatalogMatrix(
+      [
+        v({
+          id: "sv-cross-band",
+          sphMin: 0.25,
+          sphMax: 1.0,
+          cylMin: -0.5,
+          cylMax: -2,
+        }),
+      ],
+      SV
+    );
+    const sheet = model.sheets[0]!;
+    assert.equal(sheet.kind, "sph-cyl");
+
+    const ok = sheet.cells["sph:0.50"]!["cyl:-2.00"]!;
+    assert.equal(ok.allowed, true);
+    assert.equal(ok.present, true);
+
+    const blocked = sheet.cells["sph:0.50"]!["cyl:-0.50"]!;
+    assert.equal(blocked.allowed, false);
+    assert.equal(blocked.present, false);
   });
 });
 
@@ -217,7 +243,55 @@ describe("buildCatalogMatrix KT", () => {
       cross.cells["sph:0.50|cyl:-2.00|axis:180"]!["add:1.00"]!.variantId,
       "kt-cross"
     );
+    assert.equal(
+      cross.cells["sph:0.50|cyl:-2.00|axis:180"]!["add:1.00"]!.allowed,
+      true
+    );
     assert.equal(cross.cells["sph:-1.00|cyl:-1.00|axis:90"], undefined);
+  });
+
+  it("Cross Style B keeps gap-fail cells as allowed:false (disabled triad)", () => {
+    // CROSS −2 warehouse sketch: SPH +0.25…+1.75 × CYL −0.50…−2.00
+    const model = buildCatalogMatrix(
+      [
+        v({
+          id: "kt-cross-band",
+          sphMin: 0.25,
+          sphMax: 1.75,
+          cylMin: -0.5,
+          cylMax: -2,
+          axis: 180,
+          add: 1,
+        }),
+      ],
+      KT,
+      { familyLabel: "KRYPTOK" }
+    );
+
+    const cross = model.sheets.find((s) => s.kind === "cross")!;
+    assert.ok(cross);
+
+    // Valid: |−2| − 0.50 = 1.50 ≥ 0.25
+    const ok = cross.cells["sph:0.50|cyl:-2.00|axis:180"]!["add:1.00"]!;
+    assert.equal(ok.allowed, true);
+    assert.equal(ok.present, true);
+    assert.equal(ok.variantId, "kt-cross-band");
+
+    // Invalid: |−0.50| − 0.50 = 0 < 0.25 → disabled, no triad
+    const blocked = cross.cells["sph:0.50|cyl:-0.50|axis:180"]!["add:1.00"]!;
+    assert.equal(blocked.allowed, false);
+    assert.equal(blocked.present, false);
+    assert.equal(blocked.variantId, null);
+
+    // Edge valid: |−2| − 1.75 = 0.25
+    const edge = cross.cells["sph:1.75|cyl:-2.00|axis:180"]!["add:1.00"]!;
+    assert.equal(edge.allowed, true);
+    assert.equal(edge.present, true);
+
+    // Edge invalid: |−1.75| − 1.75 = 0
+    const edgeBad = cross.cells["sph:1.75|cyl:-1.75|axis:180"]!["add:1.00"]!;
+    assert.equal(edgeBad.allowed, false);
+    assert.equal(edgeBad.present, false);
   });
 
   it("omits the Axis stub when the sheet has no axis", () => {

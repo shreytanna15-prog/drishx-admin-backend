@@ -4,13 +4,12 @@ import { useEffect, useMemo, useRef } from "react";
 import {
   buildCatalogMatrix,
   toCatalogMatrixVariants,
+  type CatalogMatrixCell,
   type CatalogMatrixFamilyCaps,
   type CatalogMatrixSheet,
   type CatalogMatrixStubColumn,
 } from "@/app/lib/catalog/catalog-matrix";
 import { cn } from "@/lib/utils";
-
-const PLACEHOLDER = "_ / _ / _";
 
 const STUB_WIDTH: Record<CatalogMatrixStubColumn["key"], number> = {
   sph: 68,
@@ -45,6 +44,8 @@ export function CatalogMatrixPanel({
   familyLabel,
   highlightAxis,
   className,
+  /** When true, Threshold/Target inputs are enabled (stock phase). */
+  editable = false,
 }: {
   variants: VariantLike[];
   family: CatalogMatrixFamilyCaps;
@@ -52,6 +53,7 @@ export function CatalogMatrixPanel({
   /** From list deep-link `?axis=` — scroll/highlight matching sheets. */
   highlightAxis?: number | null;
   className?: string;
+  editable?: boolean;
 }) {
   const highlightRef = useRef<HTMLDivElement | null>(null);
   const model = useMemo(
@@ -133,18 +135,22 @@ export function CatalogMatrixPanel({
     <section
       id="matrix"
       ref={panelRef}
-        className={cn(
-          "rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5",
-          className
-        )}
+      className={cn(
+        "rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5",
+        className
+      )}
     >
       <div className="mb-4">
         <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
           Power matrix
         </h2>
         <p className="mt-1 text-xs text-(--brand-text-muted)">
-          Cells: Current / Threshold / Target — placeholders until stock is
-          live.
+          Cells: Current / Threshold / Target
+          {editable
+            ? ". Threshold and Target are editable; Current is read-only."
+            : ". Triad boxes are ready; Threshold/Target save with stock leaf."}
+          {" "}
+          Cross sheet keeps the full +SPH/−CYL grid — gap-fail cells are disabled.
         </p>
         {highlightAxis != null ? (
           <div className="mt-3 rounded-xl border-2 border-(--brand-primary) bg-(--brand-primary)/20 px-3 py-2 text-sm font-bold text-(--brand-text)">
@@ -171,7 +177,7 @@ export function CatalogMatrixPanel({
                 dimOthers && "opacity-40"
               )}
             >
-              <CatalogMatrixTable sheet={sheet} />
+              <CatalogMatrixTable sheet={sheet} editable={editable} />
             </div>
           );
         })}
@@ -191,7 +197,13 @@ function stubLeft(
   return { left, width: STUB_WIDTH[sheet.stubColumns[index]!.key] };
 }
 
-function CatalogMatrixTable({ sheet }: { sheet: CatalogMatrixSheet }) {
+function CatalogMatrixTable({
+  sheet,
+  editable,
+}: {
+  sheet: CatalogMatrixSheet;
+  editable: boolean;
+}) {
   if (sheet.rows.length === 0 || sheet.dataColumns.length === 0) {
     return (
       <div className="rounded-xl border border-(--brand-card-border) p-4">
@@ -205,7 +217,7 @@ function CatalogMatrixTable({ sheet }: { sheet: CatalogMatrixSheet }) {
     );
   }
 
-  const dataWidth = sheet.dataAxis === "cyl" ? 56 : 92;
+  const dataWidth = sheet.dataAxis === "cyl" ? 108 : 118;
 
   return (
     <div className="overflow-hidden rounded-xl border border-(--brand-card-border)">
@@ -218,7 +230,7 @@ function CatalogMatrixTable({ sheet }: { sheet: CatalogMatrixSheet }) {
         </p>
       </div>
 
-      <div className="max-h-[70vh] overflow-auto">
+      <div className="thin-scrollbar max-h-[70vh] overflow-auto">
         <table className="min-w-full border-collapse text-xs">
           <thead className="sticky top-0 z-20">
             <tr>
@@ -267,24 +279,17 @@ function CatalogMatrixTable({ sheet }: { sheet: CatalogMatrixSheet }) {
                 })}
                 {sheet.dataColumns.map((column) => {
                   const cell = row.cells[column.key];
-                  const present = Boolean(cell?.present);
                   return (
                     <td
                       key={column.key}
-                      className={cn(
-                        "border border-(--brand-card-border) px-2 py-1 text-center tabular-nums",
-                        present
-                          ? "text-(--brand-text-muted)"
-                          : "text-(--brand-text-muted)/30"
-                      )}
+                      className="border border-(--brand-card-border) p-1 align-middle"
                       style={{ minWidth: dataWidth }}
-                      title={
-                        present && cell?.variantId
-                          ? `Variant ${cell.variantId}`
-                          : undefined
-                      }
                     >
-                      {present ? PLACEHOLDER : ""}
+                      <MatrixTriadCell
+                        cell={cell}
+                        editable={editable}
+                        sheetKind={sheet.kind}
+                      />
                     </td>
                   );
                 })}
@@ -293,6 +298,94 @@ function CatalogMatrixTable({ sheet }: { sheet: CatalogMatrixSheet }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function MatrixTriadCell({
+  cell,
+  editable,
+  sheetKind,
+}: {
+  cell: CatalogMatrixCell | undefined;
+  editable: boolean;
+  sheetKind: CatalogMatrixSheet["kind"];
+}) {
+  if (!cell || !cell.allowed) {
+    return (
+      <div
+        className="flex h-9 items-center justify-center rounded-md bg-(--brand-input-bg)/50 text-(--brand-text-muted)/40"
+        title={
+          sheetKind === "cross" || sheetKind === "sph-cyl"
+            ? "Cross gap rule: |CYL| − SPH must be ≥ 0.25 — not editable"
+            : "Not an allowed power combo"
+        }
+        aria-label="Disabled power cell"
+      >
+        <span className="text-sm font-bold" aria-hidden>
+          ×
+        </span>
+      </div>
+    );
+  }
+
+  if (!cell.present) {
+    return (
+      <div
+        className="h-9 rounded-md"
+        aria-label="No variant covers this power"
+      />
+    );
+  }
+
+  const canEditThreshold = editable;
+  const powerHint = [
+    `SPH ${cell.cellKey.sph.toFixed(2)}`,
+    `CYL ${cell.cellKey.cyl.toFixed(2)}`,
+    cell.variantId ? `Variant ${cell.variantId}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div
+      className="flex h-9 items-center justify-center gap-0.5 rounded-md border border-dashed border-(--brand-card-border) px-1"
+      title={powerHint}
+    >
+      <span
+        className="min-w-6 rounded bg-(--brand-input-bg) px-1 py-0.5 text-center text-[11px] font-semibold tabular-nums text-(--brand-text-muted)"
+        aria-label="Current stock (read-only)"
+      >
+        –
+      </span>
+      <span className="text-(--brand-text-muted)/50">/</span>
+      <input
+        inputMode="numeric"
+        defaultValue=""
+        placeholder="–"
+        disabled={!canEditThreshold}
+        readOnly={!canEditThreshold}
+        aria-label={`Threshold for ${powerHint}`}
+        className={cn(
+          "h-6 w-8 rounded border border-(--brand-card-border) bg-(--brand-card) px-0.5 text-center text-[11px] tabular-nums text-(--brand-text)",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+          "disabled:cursor-not-allowed disabled:opacity-60"
+        )}
+      />
+      <span className="text-(--brand-text-muted)/50">/</span>
+      <input
+        inputMode="numeric"
+        defaultValue=""
+        placeholder="–"
+        disabled={!canEditThreshold}
+        readOnly={!canEditThreshold}
+        aria-label={`Target for ${powerHint}`}
+        className={cn(
+          "h-6 w-8 rounded border border-(--brand-card-border) bg-(--brand-card) px-0.5 text-center text-[11px] tabular-nums text-(--brand-text)",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+          "disabled:cursor-not-allowed disabled:opacity-60"
+        )}
+      />
     </div>
   );
 }

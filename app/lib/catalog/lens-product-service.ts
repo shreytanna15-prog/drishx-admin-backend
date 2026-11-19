@@ -752,7 +752,7 @@ export type CreateLensProductInput = {
   materialId?: string | null;
   indexId?: string | null;
   colorId?: string | null;
-  /** Required for new products; nullable input is rejected by resolveVariantExpansion. */
+  /** Optional parent attr — included in uniqueness / SKU / name when set. */
   coatingId?: string | null;
   diameterId?: string | null;
   /** V2 only — optional; blank stays null. */

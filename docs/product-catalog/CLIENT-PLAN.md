@@ -3,7 +3,7 @@
 **Document type:** Product catalog / SKU master plan  
 **Repos:** Admin panel (primary). Shared backend APIs.  
 **Hierarchy reference:** [CLIENT-HIERARCHY-CONFIRMATION.md](../product-catalog-hierarchy/CLIENT-HIERARCHY-CONFIRMATION.md) (approved)  
-**Status:** Oct baseline + **RC-03** + **RC-04** **shipped**. Parent + variants; auto SKU/name; Flat list. **Coating** is an optional parent attribute (same class as Material / Index / Color) — in uniqueness, SKU, and name when set (clarifies / supersedes the “coating required” wording in RC-08). Follow-ups: Grid card view, coating on detail summaries, future attribute lock — see [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) §11. More catalog RCs may follow in [`../requested-changes.md`](../requested-changes.md).
+**Status:** Oct baseline + **RC-03** + **RC-04** **shipped**. Parent + variants; auto SKU/name; Flat SKU tree + Grid parent browse. **Coating** is an optional parent attribute (same class as Material / Index / Color) — in uniqueness, SKU, and name when set (clarifies / supersedes the “coating required” wording in RC-08). Remaining: future attr lock — see [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) §11. More catalog RCs may follow in [`../requested-changes.md`](../requested-changes.md).
 
 ---
 
@@ -13,7 +13,7 @@ Give Admin a clear way to:
 
 1. Maintain **attribute lists** (Family, Base, Material, Index, Coating, Color, Diameter, Progressive type, Axis, Addition, **Power range**) — add, rename, active / inactive.  
 2. **Create a product parent** once by selecting parent attributes (only Family + Base required), then attach **one or more power-range attributes** as **variants** — without re-picking the same attrs for each range.  
-3. Browse catalog in **Flat** (easy nested scan) and **Grid** (same hierarchy as cards).  
+3. Browse catalog in **Flat** (SKU drill-down) and **Grid** (parent browse cards → open matrix).  
 4. Open the **parent product** and see a **family-aware power matrix** composed from its variants (SV: SPH × CYL; KT/V2: Sphere / CYL+Axis / Compound / Cross with ADD or Eye×ADD columns).
 
 **SKU** and **name** are both **auto-built** (Admin does not type them). SKU is a compact machine code; name is human-readable for procurement / stock (no supplier brand fluff).
@@ -31,20 +31,21 @@ Each variant is a fully separate sellable line (own SKU, name, price). The matri
 - **Parent + variant** model (one parent attr combo → many power-range children)  
 - **Create product** — parent attrs once + multi-select power ranges (+ axes / ADDs when allowed); preview SKUs/names; save  
 - **Reuse parent** when attrs already exist → add missing children only  
-- **Catalog list** — Flat + Grid (same grouping logic, different chrome)  
+- **Catalog list** — Flat (SKU tree) + Grid (parent cards)  
 - Auto **SKU** + auto **name** builders (locked formats below)  
-- Product parent detail + family-aware matrix (view-only cells `_ / _ / _` this phase)  
+- Product parent detail + family-aware matrix (Current / Threshold / Target boxes; invalid **cross power** cells disabled; saving Threshold/Target is the stock phase)  
 - Variant detail (variant card + product attributes + full family matrix + all siblings on one page)  
 
 ### Out of scope (this phase)
 
-- Saving stock numbers into every matrix cell / bulk leaf rows  
-  *(See [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md) — same matrix view, live qty later.)*  
+- Saving live stock numbers into every matrix cell  
+  *(See [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md) — the **same** matrix becomes live/editable later; this catalog is the source of truth.)*  
 - Brand / supplier fancy names (DECENTRX, Night Ryder, 75mm, …)  
-- Overlapping-range order allocation (which variant fills a shared power) — later orders/stock RC  
+- Overlapping-range order allocation (which variant fills a shared power) — later orders/stock discussion  
 - Customer website / mobile catalog rewrite  
-- Removing legacy `SingleVisionLens` / `KryptokLens` / `ProgressiveLens` tables  
-- Editing Current / Threshold / Target on matrix cells  
+- Removing older lens product lists from the system (still used by existing orders)  
+- Redesigning older separate stock-grid screens — stock will use this parent matrix  
+- Saving Threshold / Target until stock is wired  
 - Free-edit of parent attributes after create (see §6.5 lock rule for when edit is added later)
 
 ---
@@ -72,7 +73,7 @@ Each variant is a fully separate sellable line (own SKU, name, price). The matri
 | **Variant (child)** | Parent × power range × optional axis × optional ADD × optional eye. **Sellable** catalog SKU. |
 | **SKU code** | Compact machine id on the **variant** (not typed). |
 | **Name** | Human label on the **variant** (not typed; no brand). |
-| **Matrix** | Parent-level family sheets over all variants; cells `_ / _ / _` until stock is live. |
+| **Matrix** | Parent-level family sheets over all variants; each cell shows Current / Threshold / Target (stock save comes later). |
 
 ```
 Attributes (masters)
@@ -81,12 +82,11 @@ Attributes (masters)
         │
         ▼
 ┌─────────────────────────────────┐
-│  PARENT (LensProduct)           │
+│  PARENT product                 │
 │  Family · Base                  │
 │  + optional Material / Index /  │
 │    Coating / Color / Diameter / │
 │    Progressive type             │
-│  (internal base code only)      │
 └────────────┬────────────────────┘
              │ 1 → many
              ▼
@@ -94,7 +94,7 @@ Attributes (masters)
 │  VARIANT (sellable child)       │
 │  power range × axis? × ADD?     │
 │  × eye?                         │
-│  skuCode · name · price · active│
+│  SKU · name · price · active    │
 └─────────────────────────────────┘
 ```
 
@@ -104,7 +104,7 @@ Attributes (masters)
 
 ### 5.1 Page
 
-**Path:** `/inventory/attributes` (sidebar: **Attributes**)
+**Where:** Admin sidebar → **Attributes**
 
 | Tab | Role | On create product? |
 |-----|------|--------------------|
@@ -149,20 +149,20 @@ Attributes (masters)
 
 ### 6.1 Catalog page
 
-**Path:** `/inventory/products-catalog`
+**Where:** Admin sidebar → **Products & catalog**
 
 | Feature | Detail |
 |---------|--------|
-| **Flat view** | Dense expandable scan: top-level groups (parent attrs + power label) → axis subgroups → SKU rows. Same filters as Grid. |
-| **Grid view** | **Same hierarchy and filters as Flat**, card chrome instead of a dense table. Each **card = Flat’s top-level group**. Card face: attr chips + power label + variant count + status. Expand / open card → same next layers as Flat (axis → SKUs). |
+| **Flat view** | Dense expandable SKU drill-down: top-level groups (parent attrs + power label) → axis subgroups → SKU rows. |
+| **Grid view** | **Compact full-width parent card list** (not a multi-column tile grid, not Flat’s expand tree). One row-card per catalog **parent**: title + status + counts, attr chips, power ranges as wrapping chips (**compact label + span subtitle always visible**, no tooltip). Click → **parent detail** (matrix). Same filters as Flat. |
 | **Search / filters** | Server-side by SKU, name, family, base, material, coating, active |
 | **Create product** | Button → create form |
 
-> **Note:** An older “Grouped” parent-table toggle may exist in code; product contract is **Flat + Grid** as above. Implementers should align the second view to Grid (cards), not invent a third grouping.
+> **Jobs:** Flat = find/scan SKUs. Grid = browse parents and open the matrix. Do not nest axis→SKU inside Grid cards.
 
 ### 6.2 Create product
 
-**Path:** `/inventory/products-catalog/new`
+**Where:** Products & catalog → **New product**
 
 1. **Family** + **Base** (required)  
 2. Optionally **Material**, **Index**, **Coating**, **Color**, **Diameter**, **Progressive type** (V2 only; optional; no default)  
@@ -217,7 +217,7 @@ If the parent attribute combo already exists → do not duplicate parent; attach
 | Optional parent segments | Material, Index, Coating, Color, Progressive type, Diameter — omit when absent |
 | Progressive type | In SKU when set; **not** in name |
 | Coating | Same as other optional parent attrs — in SKU when set |
-| Uniqueness | Variant `skuCode` unique; `name` display-only and may repeat |
+| Uniqueness | Variant SKU is unique; display name may repeat |
 | Parent uniqueness | Full parent combo including optional nulls with `NULLS NOT DISTINCT` (Family, Base, Material?, Index?, Coating?, Color?, Diameter?, Progressive type?) |
 
 Example shape: `PG-BR-1P56-KT-HC-GREEN-SM6TP2-C0TM2`
@@ -251,7 +251,7 @@ With axis: `… -6.00/+2.00 90`
 
 ### 6.7 Parent detail + family matrix
 
-**Parent path:** `/inventory/products-catalog/[id]`
+**Where:** Products & catalog → open a **parent**
 
 - Attribute summary must show the full parent group: Material? · Base · Index? · Family · **Coating?** · Color? · Diameter? · Progressive type?  
 - **Power matrix** (family-aware sheets from sibling variants)  
@@ -261,7 +261,7 @@ With axis: `… -6.00/+2.00 90`
 **Attribute lock (keep — future edit rule):**  
 If Admin later gets “edit parent attributes”, those fields become **read-only** once **any variant** of that parent has **stock** or **orders**. Changing identity under live stock/orders is not allowed — create a new parent combo instead. (No free parent-attr edit in this phase.)
 
-**Matrix (parent):** view-only `_ / _ / _` per covered optical cell. No DB change — composed from existing variants.
+**Matrix (parent):** Current / Threshold / Target boxes on covered valid cells (Threshold / Target save comes with stock). Layout is built from the parent’s variants.
 
 Sheets are **stacked Excel-like tables** (no tabs/buttons). Each table has explicit left stub columns and its own data columns.
 
@@ -277,10 +277,11 @@ Sheets are **stacked Excel-like tables** (no tabs/buttons). Each table has expli
 | Stub columns | Only render a dimension that exists on the sheet |
 | Axis blocks | Largest first (`180` → `90`); 135° and 45° share one oblique-axis table with the exact axis in each row/cell |
 | Compound vs cross | Compound sheet excludes cross-pattern combos; cross gets its own sheet |
-| Presence | Cell shows triad only when a variant covers that power (+ ADD/axis/eye) |
-| Behaviour | View only until stock phase; same layout later binds live qty |
+| Cross power | Cross sheet keeps the full +SPH / −CYL grid; cells that break the cross rule (cylinder at least **0.25** stronger than sphere) are **disabled** (×, no boxes) — same as the warehouse sketch |
+| Presence | Cell shows Current / Threshold / Target only when the combo is valid and a variant covers that power (+ ADD / axis / eye) |
+| Behaviour | Boxes always for valid covered cells; Threshold / Target save when stock is live; same layout shows live qty |
 
-**Variant path:** `/inventory/products-catalog/variants/[id]` — variant card + **full parent attributes (incl. Coating)** + full family matrix + all siblings on the same page. No separate matrix page or `#matrix` hop.
+**Variant screen:** open a variant → variant card + **full parent attributes (incl. Coating)** + full family matrix + all siblings on the same page. No separate matrix-only page.
 
 ---
 
@@ -356,20 +357,21 @@ Two separate sellable products; Admin did not re-enter parent attrs for the seco
 - [x] Parent + multi power-range variants; Add range without re-picking attrs  
 - [x] Auto SKU + auto name (locked formats); no typed name  
 - [x] Flat catalog view (nested groups → axis → SKUs)  
-- [x] Family matrix `_ / _ / _`  
-- [x] Legacy stock / orders unaffected  
+- [x] **Grid** parent browse cards (open parent detail; Flat keeps SKU tree)  
+- [x] Coating on parent + variant attribute summaries  
+- [x] Family matrix Current / Threshold / Target boxes (cross power cells disabled where required)  
+- [x] Existing stock / orders flows unaffected  
 
-### Remaining (UI / handoff — not blocking the contract)
 
-- [ ] **Grid** card view (same hierarchy as Flat)  
-- [ ] Show **Coating** on parent + variant attribute summaries  
+### Remaining (not blocking)
+
 - [ ] Attribute lock when parent-attr edit is introduced and stock/orders exist  
 
 ---
 
 ## 11. Open points (non-blocking)
 
-1. Overlapping power ranges across variants — stock piles stay separate per variant leaf (`variantId + sph + cyl`); order UX that picks “which variant” when both cover a cell may still need a later RC.  
-2. Live stock on parent matrix cells → stock-management (`LensProductPower` / leaf keyed by **variantId + sph + cyl**).  
+1. Overlapping power ranges across variants — stock piles stay separate per variant (this variant + SPH + CYL); order UX that picks “which variant” when both cover a cell may still need a later change.  
+2. Live stock on parent matrix cells → see [stock-management CLIENT-PLAN](../stock-management/CLIENT-PLAN.md).  
 3. Whether Brand becomes a real attribute later (ignored for now).  
-4. Further catalog RCs → [`requested-changes.md`](../requested-changes.md).
+4. Further catalog change requests may follow.

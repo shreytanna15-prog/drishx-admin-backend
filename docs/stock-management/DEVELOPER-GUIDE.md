@@ -10,6 +10,10 @@
 
 **Locked stock identity:** `(lensProductVariantId, sph, cyl)` — axis / ADD / eye / parent attrs / range come from the variant (+ parent). Do **not** key stock by parent + duplicated optical dims.
 
+**Source of truth:** new multi-layer catalog (`LensProduct` / variants / `catalog-matrix.ts` + `CatalogMatrixPanel`). Stock = **same matrix**, triad editable when rules API is live. Cross Style B (`allowed: false` → disabled ×) is already on that shell — do **not** re-implement it on legacy stock-matrix.
+
+**Do not touch (this phase):** `/inventory/stock-matrix`, `app/lib/stock-matrix.ts` band expansion for cross, or legacy lens-table identity — leave until cutover / redirect. All new stock matrix work goes on catalog parent detail.
+
 ---
 
 ## 0. How to use this doc
@@ -18,9 +22,10 @@
 2. Read **product-catalog** docs for parent / variant / matrix shell — stock binds live qty onto that matrix.  
 3. Implement **phases S1→S5** below.  
 4. **Reuse** PO / receive / open-power-lock / Confirm-only post — do not rewrite from scratch.  
-5. **Rebind** stock identity from legacy `lensType`+`lensId` to **variant + SPH + CYL** leaf.  
+5. **Rebind** stock identity from legacy `lensType`+`lensId` to **variant + SPH + CYL** leaf (when wiring movements/PO — not by editing the old stock-matrix grid).  
 6. Follow `drishx-api-auth-audit`, `drishx-client-api`, `drishx-prisma`.  
-7. Never add a free-edit `quantity` field in UI. Stock moves only via audited events (CLIENT-PLAN §5).
+7. Never add a free-edit `quantity` field in UI. Stock moves only via audited events (CLIENT-PLAN §5).  
+8. Do **not** port Cross Style B or triad editing into legacy `/inventory/stock-matrix` — redirect/replace later if needed.
 
 ---
 
@@ -48,7 +53,7 @@ LensFamily / Base / Material? / Index? / Coating? / Color? / Diameter? / Progres
 
 **Warehouse v1:** `warehouseCode = "MAIN"` (already on PO / receipt).
 
-**Lazy leaves:** Parent matrix renders every 0.25 cell covered by sibling variants (same `buildCatalogMatrix` coverage). Missing `LensProductPower` → display current `0`. Insert/update leaf on first adjustment, Confirm Receipt, or threshold/target save.
+**Lazy leaves:** Parent matrix renders every 0.25 cell covered by sibling variants (same `buildCatalogMatrix` coverage). Cross Style B: gap-fail cells stay on the sheet as `allowed: false` — no leaf, no triad edit. Missing `LensProductPower` on an allowed cell → display current `0`. Insert/update leaf on first adjustment, Confirm Receipt, or threshold/target save.
 
 **Labels:** Resolve `variant → product` for parent attrs; use `variant.skuCode` / `name` + SPH/CYL (+ variant.axis / addition / eye) on PO, power-wise, and adjustment screens.
 
@@ -64,7 +69,7 @@ LensFamily / Base / Material? / Index? / Coating? / Color? / Diameter? / Progres
 | Admin UI | `/inventory/attributes`, `/inventory/products-catalog`, `/new`, `/[id]`, `/variants/[id]` |
 | APIs | `/api/admin/catalog/attributes/*`, `/api/admin/catalog/power-ranges/*`, `/api/admin/catalog/lens-products/*` |
 | SKU / name | `app/lib/catalog/lens-product-sku.ts` |
-| Matrix shell | `app/lib/catalog/catalog-matrix.ts`, `CatalogMatrixPanel` — currently `_ / _ / _` placeholders |
+| Matrix shell | `app/lib/catalog/catalog-matrix.ts`, `CatalogMatrixPanel` — Current/Threshold/Target triad; Cross Style B (`allowed: false` → disabled ×); pass `editable` when rules API is live |
 | Client wrappers | `app/lib/admin-lens-catalog.ts` |
 
 ### 2.2 Procurement / stock (reuse behaviour, rebind identity)
@@ -76,7 +81,7 @@ LensFamily / Base / Material? / Index? / Coating? / Color? / Diameter? / Progres
 | Receipts | `app/api/procurement/receipts/**`, confirm route |
 | Services | `app/lib/admin-procurement.ts`, `procurement-requests.ts`, `procurement-rules.ts`, `procurement-documents.ts`, `procurement-lens.ts` |
 | Reorder UI | `app/(admin)/inventory/power-wise-stock/page.tsx` |
-| Stock matrix (legacy grouping) | `app/(admin)/inventory/stock-matrix/`, `app/lib/stock-matrix.ts` |
+| Stock matrix (legacy — **leave alone** this phase) | `app/(admin)/inventory/stock-matrix/`, `app/lib/stock-matrix.ts` — not SoT; later redirect to catalog parent |
 | Stock overview | `app/(admin)/inventory/stock-overview/` |
 | Requests queue | `app/(admin)/procurement/requests/` |
 | Order shortage queue | `app/(admin)/orders/procurement/` |
@@ -203,9 +208,9 @@ Reorder-check route today: `app/api/inventory/reorder-check/route.ts`.
 
 | Screen | Action |
 |--------|--------|
-| `/inventory/products-catalog/[id]` | Replace `_/_/_` with live matrix from GET matrix; edit threshold/target; no current edit; keep family sheet layout |
+| `/inventory/products-catalog/[id]` | Wire live Current/Threshold/Target onto existing `CatalogMatrixPanel` (`editable`); no current free-edit; keep family sheets + Cross Style B |
 | `/inventory/products-catalog/variants/[id]` | May show same live matrix (sibling context) with current variant highlighted — optional polish |
-| `/inventory/stock-matrix` | Prefer redirect/deep-link to catalog parent detail **or** rebuild list as `LensProduct` cards → same matrix |
+| `/inventory/stock-matrix` | **Out of scope to extend** — later redirect/deep-link to catalog parent detail (same matrix). Do not retrofit Cross Style B here now |
 | `/inventory/power-wise-stock` | List `LensProductPower`; filters by parent attrs + variant SKU; Run reorder against new rules |
 | `/inventory/stock-overview` | Drive from catalog leaves |
 | **New** `/inventory/stock-adjustments` | Form per CLIENT-PLAN + history |
@@ -275,10 +280,11 @@ else:
 ### S1 — Live matrix on `LensProduct` parent
 
 - Add `LensProductPower` migration (`variantId` + `sph` + `cyl`)  
-- GET matrix + PATCH rules (upsert leaf)  
-- Wire parent detail UI (`CatalogMatrixPanel` live values)  
+- GET matrix + PATCH rules (upsert leaf; reject `allowed: false` / cross gap-fail cells)  
+- Wire parent detail UI (`CatalogMatrixPanel` live values + `editable`) — shell + Cross Style B already exist  
+- Do **not** change legacy `/inventory/stock-matrix` in S1  
 
-**Done when:** Admin opens a catalog parent and sees real C/T/Target on family sheets; threshold/target save creates/updates leaf.
+**Done when:** Admin opens a catalog parent and sees real C/T/Target on family sheets; threshold/target save creates/updates leaf; disabled cross cells stay non-editable.
 
 ### S2 — Stock Adjustment + movements + guards
 

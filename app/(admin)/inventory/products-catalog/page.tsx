@@ -35,8 +35,6 @@ import {
   type LensProduct,
   type LensProductVariant,
 } from "@/app/lib/admin-lens-catalog";
-
-type CatalogListView = "flat" | "grid";
 import { formatPowerRangeSpan } from "@/app/lib/catalog/catalog-power-select-options";
 import {
   buildLensProductFlatGroupName,
@@ -49,8 +47,11 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-const GROUP_SIZE = 10;
-const LIST_FETCH_LIMIT = 500;
+type CatalogListView = "flat" | "grid";
+
+const FLAT_GROUP_SIZE = 10;
+const FLAT_FETCH_LIMIT = 500;
+const GRID_PAGE_SIZE = 12;
 
 const labelClass =
   "text-[11px] font-bold uppercase tracking-wider text-(--brand-text-muted)";
@@ -67,6 +68,10 @@ function isVariant(
   row: LensProduct | LensProductVariant
 ): row is LensProductVariant {
   return "skuCode" in row && "productId" in row;
+}
+
+function isProduct(row: LensProduct | LensProductVariant): row is LensProduct {
+  return "variantCount" in row && "variants" in row && !("skuCode" in row);
 }
 
 type AxisSubgroup = {
@@ -139,10 +144,9 @@ function flatLeafLabel(v: LensProductVariant): string {
 }
 
 /** Catalog list only: SPH/CYL min–max span under compact name (+ tooltip). */
-function flatPowerBoundsLabel(v: Pick<
-  LensProductVariant,
-  "sphMin" | "sphMax" | "cylMin" | "cylMax"
->): string {
+function flatPowerBoundsLabel(
+  v: Pick<LensProductVariant, "sphMin" | "sphMax" | "cylMin" | "cylMax">
+): string {
   return `${formatPowerRangeSpan(v.sphMin, v.sphMax)} / ${formatPowerRangeSpan(v.cylMin, v.cylMax)}`;
 }
 
@@ -151,8 +155,7 @@ function flatParentGroupKey(v: LensProductVariant): string {
   return `${v.productId}::${v.powerRangeId}`;
 }
 
-function attrChipsFromVariant(v: LensProductVariant): string[] {
-  const p = v.product;
+function attrChipsFromProduct(p: LensProduct): string[] {
   return [
     p.family.code,
     p.base.code,
@@ -163,6 +166,26 @@ function attrChipsFromVariant(v: LensProductVariant): string[] {
     p.diameter?.code,
     p.progressiveType?.code,
   ].flatMap((x) => (x ? [x] : []));
+}
+
+/** Unique power ranges on a parent — compact label + Flat-style span subtitle. */
+function uniqueRangesFromParent(p: LensProduct): Array<{
+  key: string;
+  label: string;
+  boundsLabel: string;
+}> {
+  const seen = new Set<string>();
+  const out: Array<{ key: string; label: string; boundsLabel: string }> = [];
+  for (const v of p.variants) {
+    if (seen.has(v.powerRangeId)) continue;
+    seen.add(v.powerRangeId);
+    out.push({
+      key: v.powerRangeId,
+      label: v.rangeLabel || v.powerRange?.label || "—",
+      boundsLabel: flatPowerBoundsLabel(v),
+    });
+  }
+  return out;
 }
 
 export default function ProductsCatalogPage() {
@@ -182,15 +205,18 @@ export default function ProductsCatalogPage() {
   const [bases, setBases] = useState<LensAttribute[]>([]);
   const [materials, setMaterials] = useState<LensAttribute[]>([]);
   const [coatings, setCoatings] = useState<LensAttribute[]>([]);
-  /** Flat + Grid: same groups → axis → SKUs */
+  /** Flat only: name groups → axis → SKUs */
   const [expandedNameGroups, setExpandedNameGroups] = useState<Set<string>>(
     () => new Set()
   );
   const [expandedAxisGroups, setExpandedAxisGroups] = useState<Set<string>>(
     () => new Set()
   );
-  const [groupPage, setGroupPage] = useState(1);
+  const [page, setPage] = useState(1);
   const [flatVariants, setFlatVariants] = useState<LensProductVariant[]>([]);
+  /** Grid: one card per catalog parent */
+  const [parents, setParents] = useState<LensProduct[]>([]);
+  const [gridTotal, setGridTotal] = useState(0);
 
   useEffect(() => {
     void (async () => {
@@ -214,41 +240,59 @@ export default function ProductsCatalogPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    const common = {
+      q: q || undefined,
+      familyId: familyId || undefined,
+      baseId: baseId || undefined,
+      materialId: materialId || undefined,
+      coatingId: coatingId || undefined,
+      isActive: activeFilter === "all" ? null : activeFilter === "true",
+    };
     try {
-      const res = await fetchLensProducts({
-        view: "flat",
-        q: q || undefined,
-        familyId: familyId || undefined,
-        baseId: baseId || undefined,
-        materialId: materialId || undefined,
-        coatingId: coatingId || undefined,
-        isActive:
-          activeFilter === "all" ? null : activeFilter === "true",
-        page: 1,
-        limit: LIST_FETCH_LIMIT,
-      });
-      setFlatVariants(res.items.filter(isVariant));
+      if (listView === "grid") {
+        const res = await fetchLensProducts({
+          ...common,
+          view: "grouped",
+          page,
+          limit: GRID_PAGE_SIZE,
+        });
+        setParents(res.items.filter(isProduct));
+        setGridTotal(res.total ?? res.items.length);
+        setFlatVariants([]);
+      } else {
+        const res = await fetchLensProducts({
+          ...common,
+          view: "flat",
+          page: 1,
+          limit: FLAT_FETCH_LIMIT,
+        });
+        setFlatVariants(res.items.filter(isVariant));
+        setParents([]);
+        setGridTotal(0);
+      }
     } catch (err) {
       setError(errorMessage(err, "Failed to load products."));
       setFlatVariants([]);
+      setParents([]);
+      setGridTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [q, familyId, baseId, materialId, coatingId, activeFilter]);
+  }, [q, familyId, baseId, materialId, coatingId, activeFilter, listView, page]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch list on filter change
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch list on filter/view change
     void load();
   }, [load]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset grouping on filter/view change
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset expand on filter change
     setExpandedNameGroups(new Set());
     setExpandedAxisGroups(new Set());
-    setGroupPage(1);
   }, [listView, q, familyId, baseId, materialId, coatingId, activeFilter]);
 
   function applySearch() {
+    setPage(1);
     setQ(qDraft.trim());
   }
 
@@ -280,9 +324,12 @@ export default function ProductsCatalogPage() {
       .toSorted((a, b) => a.label.localeCompare(b.label));
   }, [flatVariants]);
 
-  const totalGroups = parentGroups.length;
-  const groupStart = (groupPage - 1) * GROUP_SIZE;
-  const pageGroups = parentGroups.slice(groupStart, groupStart + GROUP_SIZE);
+  const totalFlatGroups = parentGroups.length;
+  const flatGroupPages = Math.max(1, Math.ceil(totalFlatGroups / FLAT_GROUP_SIZE));
+  const flatStart = (page - 1) * FLAT_GROUP_SIZE;
+  const pageGroups = parentGroups.slice(flatStart, flatStart + FLAT_GROUP_SIZE);
+
+  const gridPages = Math.max(1, Math.ceil(gridTotal / GRID_PAGE_SIZE));
 
   type FlatRow =
     | {
@@ -349,15 +396,27 @@ export default function ProductsCatalogPage() {
     }
   }
 
+  const empty =
+    listView === "flat" ? flatVariants.length === 0 : parents.length === 0;
+  const showPager =
+    listView === "flat" ? totalFlatGroups > 0 : gridTotal > 0;
+  const pageLabel =
+    listView === "flat"
+      ? `Page ${Math.min(page, flatGroupPages)} of ${flatGroupPages} groups`
+      : `Page ${Math.min(page, gridPages)} of ${gridPages} parents`;
+  const canPrev = page > 1;
+  const canNext =
+    listView === "flat" ? page < flatGroupPages : page < gridPages;
+
   return (
     <AdminPage
       title="Products & catalog"
-      subtitle="Flat table or Grid cards — same groups (name + power → axis → SKUs)."
+      subtitle="Flat: SKU drill-down. Grid: parent card list → open matrix."
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="flex min-w-[220px] flex-1 flex-wrap items-end gap-2">
-            <label className="flex min-w-[200px] flex-1 flex-col gap-1">
+          <div className="flex min-w-55 flex-1 flex-wrap items-end gap-2">
+            <label className="flex min-w-50 flex-1 flex-col gap-1">
               <span className={labelClass}>Search</span>
               <div className="flex h-10 items-center gap-2">
                 <Input
@@ -385,7 +444,7 @@ export default function ProductsCatalogPage() {
                 value={familyId}
                 onValueChange={(v) => {
                   setFamilyId(v);
-                  setGroupPage(1);
+                  setPage(1);
                 }}
                 options={[
                   { value: "", label: "All" },
@@ -402,7 +461,7 @@ export default function ProductsCatalogPage() {
                 value={baseId}
                 onValueChange={(v) => {
                   setBaseId(v);
-                  setGroupPage(1);
+                  setPage(1);
                 }}
                 options={[
                   { value: "", label: "All" },
@@ -419,7 +478,7 @@ export default function ProductsCatalogPage() {
                 value={materialId}
                 onValueChange={(v) => {
                   setMaterialId(v);
-                  setGroupPage(1);
+                  setPage(1);
                 }}
                 options={[
                   { value: "", label: "All" },
@@ -436,7 +495,7 @@ export default function ProductsCatalogPage() {
                 value={coatingId}
                 onValueChange={(v) => {
                   setCoatingId(v);
-                  setGroupPage(1);
+                  setPage(1);
                 }}
                 options={[
                   { value: "", label: "All" },
@@ -453,7 +512,7 @@ export default function ProductsCatalogPage() {
                 value={activeFilter}
                 onValueChange={(v) => {
                   setActiveFilter(v as "all" | "true" | "false");
-                  setGroupPage(1);
+                  setPage(1);
                 }}
                 options={[
                   { value: "all", label: "All" },
@@ -479,9 +538,7 @@ export default function ProductsCatalogPage() {
                 )}
                 onClick={() => {
                   setListView("flat");
-                  setGroupPage(1);
-                  setExpandedNameGroups(new Set());
-                  setExpandedAxisGroups(new Set());
+                  setPage(1);
                 }}
               >
                 <LayoutList className="inline size-4" /> Flat
@@ -496,9 +553,7 @@ export default function ProductsCatalogPage() {
                 )}
                 onClick={() => {
                   setListView("grid");
-                  setGroupPage(1);
-                  setExpandedNameGroups(new Set());
-                  setExpandedAxisGroups(new Set());
+                  setPage(1);
                 }}
               >
                 <LayoutGrid className="inline size-4" /> Grid
@@ -520,7 +575,7 @@ export default function ProductsCatalogPage() {
 
         {loading ? (
           <TableSkeleton rows={8} />
-        ) : flatVariants.length === 0 ? (
+        ) : empty ? (
           <div className="rounded-2xl border border-dashed border-(--brand-card-border) px-6 py-16 text-center">
             <p className="text-sm font-bold text-(--brand-text)">
               No catalog products yet
@@ -571,9 +626,7 @@ export default function ProductsCatalogPage() {
                                   setExpandedAxisGroups((axes) => {
                                     const pruned = new Set(axes);
                                     for (const k of axes) {
-                                      if (
-                                        k.startsWith(`${row.groupKey}::`)
-                                      ) {
+                                      if (k.startsWith(`${row.groupKey}::`)) {
                                         pruned.delete(k);
                                       }
                                     }
@@ -596,116 +649,33 @@ export default function ProductsCatalogPage() {
                         <TableCell>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <div className="inline-flex max-w-full flex-col items-start gap-0.5 text-left">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="font-semibold text-(--brand-text)">
-                                    {row.label}
-                                  </span>
-                                  <Badge
-                                    variant="secondary"
-                                    className="text-[10px]"
-                                  >
-                                    {row.axisCount}{" "}
-                                    {row.axisCount === 1 ? "axis" : "axes"} ·{" "}
-                                    {row.variantCount} SKU
-                                    {row.variantCount === 1 ? "" : "s"}
-                                  </Badge>
+                              <div>
+                                <div className="font-semibold text-(--brand-text)">
+                                  {row.label}
                                 </div>
-                                <span className="text-[11px] text-(--brand-text-muted)">
+                                <div className="text-[11px] text-(--brand-text-muted)">
                                   {row.boundsLabel}
-                                </span>
+                                </div>
                               </div>
                             </TooltipTrigger>
                             <TooltipContent side="top">
                               {row.boundsLabel}
                             </TooltipContent>
                           </Tooltip>
-                        </TableCell>
-                        <TableCell className="text-sm text-(--brand-text-muted)">
-                          —
-                        </TableCell>
-                        <TableCell className="text-sm text-(--brand-text-muted)">
-                          {row.attributeSummary}
-                        </TableCell>
-                        <TableCell className="text-sm text-(--brand-text-muted)">
-                          {row.rangeLabel || "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={
-                              row.allActive
-                                ? "border-emerald-500/40 text-emerald-700"
-                                : row.anyActive
-                                  ? "border-amber-500/40 text-amber-700"
-                                  : "border-zinc-400/40 text-zinc-500"
-                            }
-                          >
-                            {row.allActive
-                              ? "Active"
-                              : row.anyActive
-                                ? "Mixed"
-                                : "Inactive"}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  }
-
-                  if (row.kind === "axis") {
-                    const key = axisExpandKey(row.groupKey, row.axisKey);
-                    const open = expandedAxisGroups.has(key);
-                    return (
-                      <TableRow
-                        key={`axis-${key}`}
-                        className="bg-(--brand-input-bg)/20"
-                      >
-                        <TableCell className="w-10 pr-0" />
-                        <TableCell className="pl-6">
-                          <div className="flex items-center gap-1 border-l-2 border-(--brand-card-border) pl-3">
-                            <button
-                              type="button"
-                              className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-(--brand-text-muted) hover:bg-(--brand-input-bg) hover:text-(--brand-text)"
-                              aria-expanded={open}
-                              aria-label={
-                                open ? "Collapse SKUs" : "Expand SKUs"
-                              }
-                              onClick={() => {
-                                setExpandedAxisGroups((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(key)) next.delete(key);
-                                  else next.add(key);
-                                  return next;
-                                });
-                              }}
-                            >
-                              {open ? (
-                                <ChevronDown className="size-4" />
-                              ) : (
-                                <ChevronRight className="size-4" />
-                              )}
-                            </button>
-                            <span className="font-medium text-(--brand-text)">
-                              {row.label}
-                            </span>
-                            <Badge
-                              variant="secondary"
-                              className="ml-1 text-[10px]"
-                            >
-                              {row.variantCount} SKU
-                              {row.variantCount === 1 ? "" : "s"}
-                            </Badge>
+                          <div className="mt-1 text-[11px] text-(--brand-text-muted)">
+                            {row.axisCount}{" "}
+                            {row.axisCount === 1 ? "axis" : "axes"} ·{" "}
+                            {row.variantCount} SKU
+                            {row.variantCount === 1 ? "" : "s"}
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm text-(--brand-text-muted)">
+                        <TableCell className="text-(--brand-text-muted)">
                           —
                         </TableCell>
-                        <TableCell className="text-sm text-(--brand-text-muted)">
-                          {row.rangeSummary}
+                        <TableCell className="max-w-55 truncate text-sm text-(--brand-text-muted)">
+                          {row.attributeSummary || "—"}
                         </TableCell>
-                        <TableCell className="text-sm text-(--brand-text-muted)">
-                          —
-                        </TableCell>
+                        <TableCell>{row.rangeLabel}</TableCell>
                         <TableCell>
                           <Badge
                             variant="outline"
@@ -727,41 +697,97 @@ export default function ProductsCatalogPage() {
                       </TableRow>
                     );
                   }
-
+                  if (row.kind === "axis") {
+                    const axKey = axisExpandKey(row.groupKey, row.axisKey);
+                    const open = expandedAxisGroups.has(axKey);
+                    return (
+                      <TableRow
+                        key={`axis-${axKey}`}
+                        className="bg-(--brand-input-bg)/20"
+                      >
+                        <TableCell className="w-10 pr-0 pl-6">
+                          <button
+                            type="button"
+                            className="inline-flex size-8 items-center justify-center rounded-lg text-(--brand-text-muted) hover:bg-(--brand-input-bg) hover:text-(--brand-text)"
+                            aria-expanded={open}
+                            aria-label={
+                              open ? "Collapse SKUs" : "Expand SKUs"
+                            }
+                            onClick={() => {
+                              setExpandedAxisGroups((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(axKey)) next.delete(axKey);
+                                else next.add(axKey);
+                                return next;
+                              });
+                            }}
+                          >
+                            {open ? (
+                              <ChevronDown className="size-4" />
+                            ) : (
+                              <ChevronRight className="size-4" />
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <span className="pl-2 font-medium text-(--brand-text)">
+                            {row.label}
+                          </span>
+                          <span className="ml-2 text-[11px] text-(--brand-text-muted)">
+                            {row.variantCount} SKU
+                            {row.variantCount === 1 ? "" : "s"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-(--brand-text-muted)">
+                          —
+                        </TableCell>
+                        <TableCell className="text-(--brand-text-muted)">
+                          —
+                        </TableCell>
+                        <TableCell>{row.rangeSummary}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              row.allActive
+                                ? "border-emerald-500/40 text-emerald-700"
+                                : row.anyActive
+                                  ? "border-amber-500/40 text-amber-700"
+                                  : "border-zinc-400/40 text-zinc-500"
+                            }
+                          >
+                            {row.allActive
+                              ? "Active"
+                              : row.anyActive
+                                ? "Mixed"
+                                : "Inactive"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
                   const v = row.variant;
                   return (
-                    <TableRow
-                      key={`variant-${v.id}`}
-                      className="bg-(--brand-input-bg)/35"
-                    >
-                      <TableCell />
-                      <TableCell className="pl-16">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Link
-                              href={`/inventory/products-catalog/variants/${v.id}`}
-                              className="inline-flex max-w-full flex-col items-start gap-0.5 text-left"
-                            >
-                              <span className="font-semibold text-(--brand-text) hover:underline">
-                                {flatLeafLabel(v)}
-                              </span>
-                              <span className="text-[11px] font-normal text-(--brand-text-muted)">
-                                {flatPowerBoundsLabel(v)}
-                              </span>
-                            </Link>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            {flatPowerBoundsLabel(v)}
-                          </TooltipContent>
-                        </Tooltip>
+                    <TableRow key={v.id}>
+                      <TableCell className="w-10" />
+                      <TableCell className="pl-12">
+                        <Link
+                          href={`/inventory/products-catalog/variants/${v.id}`}
+                          className="font-semibold text-(--brand-text) hover:underline"
+                        >
+                          {flatLeafLabel(v)}
+                        </Link>
+                        <div className="text-[11px] text-(--brand-text-muted)">
+                          {flatPowerBoundsLabel(v)}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <SkuChip sku={v.skuCode} />
                       </TableCell>
-                      <TableCell className="text-sm text-(--brand-text-muted)">
-                        {v.product.attributeSummary}
+                      <TableCell className="max-w-55 truncate text-sm text-(--brand-text-muted)">
+                        {v.product.attributeSummary || "—"}
                       </TableCell>
-                      <TableCell className="text-sm">{v.rangeLabel}</TableCell>
+                      <TableCell>{v.rangeLabel}</TableCell>
                       <TableCell>
                         <Badge
                           variant="outline"
@@ -781,196 +807,102 @@ export default function ProductsCatalogPage() {
             </Table>
           </AdminTable>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {pageGroups.map((g) => {
-              const open = expandedNameGroups.has(g.groupKey);
-              const sample = g.variants[0]!;
-              const chips = attrChipsFromVariant(sample);
-              const allActive = g.variants.every((v) => v.isActive);
-              const anyActive = g.variants.some((v) => v.isActive);
+          <div className="flex flex-col gap-3">
+            {parents.map((p) => {
+              const chips = attrChipsFromProduct(p);
+              const ranges = uniqueRangesFromParent(p);
               return (
-                <div
-                  key={g.groupKey}
-                  className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4 shadow-(--brand-card-shadow)"
+                <Link
+                  key={p.id}
+                  href={`/inventory/products-catalog/${p.id}`}
+                  className="block rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-4 shadow-(--brand-card-shadow) transition hover:border-(--brand-primary)/50 hover:shadow-md sm:px-5 sm:py-4"
                 >
-                  <button
-                    type="button"
-                    className="flex w-full items-start gap-2 text-left"
-                    aria-expanded={open}
-                    onClick={() => {
-                      setExpandedNameGroups((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(g.groupKey)) {
-                          next.delete(g.groupKey);
-                          setExpandedAxisGroups((axes) => {
-                            const pruned = new Set(axes);
-                            for (const k of axes) {
-                              if (k.startsWith(`${g.groupKey}::`)) {
-                                pruned.delete(k);
-                              }
-                            }
-                            return pruned;
-                          });
-                        } else {
-                          next.add(g.groupKey);
-                        }
-                        return next;
-                      });
-                    }}
-                  >
-                    <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-(--brand-text-muted)">
-                      {open ? (
-                        <ChevronDown className="size-4" />
-                      ) : (
-                        <ChevronRight className="size-4" />
-                      )}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="block">
-                            <span className="font-semibold text-(--brand-text)">
-                              {g.label}
-                            </span>
-                            <span className="mt-0.5 block text-[11px] text-(--brand-text-muted)">
-                              {g.boundsLabel}
-                            </span>
+                  <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-base font-extrabold tracking-tight text-(--brand-text)">
+                          {p.family.code}
+                          <span className="font-semibold text-(--brand-text-muted)">
+                            {" "}
+                            · {p.base.code}
                           </span>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          {g.boundsLabel}
-                        </TooltipContent>
-                      </Tooltip>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {chips.map((chip) => (
-                          <Badge
-                            key={chip}
-                            variant="secondary"
-                            className="text-[10px]"
-                          >
-                            {chip}
-                          </Badge>
-                        ))}
-                        <Badge variant="secondary" className="text-[10px]">
-                          {g.rangeLabel}
-                        </Badge>
-                        <Badge variant="secondary" className="text-[10px]">
-                          {g.axes.length}{" "}
-                          {g.axes.length === 1 ? "axis" : "axes"} ·{" "}
-                          {g.variants.length} SKU
-                          {g.variants.length === 1 ? "" : "s"}
-                        </Badge>
+                        </h3>
                         <Badge
                           variant="outline"
                           className={
-                            allActive
+                            p.isActive
                               ? "border-emerald-500/40 text-emerald-700"
-                              : anyActive
-                                ? "border-amber-500/40 text-amber-700"
-                                : "border-zinc-400/40 text-zinc-500"
+                              : "border-zinc-400/40 text-zinc-500"
                           }
                         >
-                          {allActive
-                            ? "Active"
-                            : anyActive
-                              ? "Mixed"
-                              : "Inactive"}
+                          {p.isActive ? "Active" : "Inactive"}
                         </Badge>
+                        <span className="text-sm font-bold text-(--brand-text-muted)">
+                          {p.variantCount} variant
+                          {p.variantCount === 1 ? "" : "s"}
+                          {ranges.length > 0
+                            ? ` · ${ranges.length} range${ranges.length === 1 ? "" : "s"}`
+                            : ""}
+                        </span>
                       </div>
-                    </span>
-                  </button>
-
-                  {open ? (
-                    <div className="mt-3 space-y-2 border-t border-(--brand-card-border) pt-3">
-                      {g.axes.map((ax) => {
-                        const axKey = axisExpandKey(g.groupKey, ax.key);
-                        const axOpen = expandedAxisGroups.has(axKey);
-                        return (
-                          <div key={axKey} className="rounded-xl bg-(--brand-input-bg)/30 p-2">
-                            <button
-                              type="button"
-                              className="flex w-full items-center gap-2 text-left"
-                              aria-expanded={axOpen}
-                              onClick={() => {
-                                setExpandedAxisGroups((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(axKey)) next.delete(axKey);
-                                  else next.add(axKey);
-                                  return next;
-                                });
-                              }}
-                            >
-                              {axOpen ? (
-                                <ChevronDown className="size-4 text-(--brand-text-muted)" />
-                              ) : (
-                                <ChevronRight className="size-4 text-(--brand-text-muted)" />
-                              )}
-                              <span className="font-medium text-(--brand-text)">
-                                {ax.label}
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="text-[10px]"
-                              >
-                                {ax.variants.length} SKU
-                                {ax.variants.length === 1 ? "" : "s"}
-                              </Badge>
-                            </button>
-                            {axOpen ? (
-                              <ul className="mt-2 space-y-2 pl-6">
-                                {ax.variants.map((v) => (
-                                  <li
-                                    key={v.id}
-                                    className="rounded-lg border border-(--brand-card-border)/60 bg-(--brand-card) px-3 py-2"
-                                  >
-                                    <Link
-                                      href={`/inventory/products-catalog/variants/${v.id}`}
-                                      className="font-semibold text-(--brand-text) hover:underline"
-                                    >
-                                      {flatLeafLabel(v)}
-                                    </Link>
-                                    <p className="mt-0.5 text-[11px] text-(--brand-text-muted)">
-                                      {flatPowerBoundsLabel(v)}
-                                    </p>
-                                    <div className="mt-1">
-                                      <SkuChip sku={v.skuCode} />
-                                    </div>
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                      <div className="pt-1">
-                        <Button asChild size="sm" variant="outline" className="h-8 rounded-lg">
-                          <Link
-                            href={`/inventory/products-catalog/${sample.productId}`}
-                          >
-                            Open parent
-                          </Link>
-                        </Button>
-                      </div>
+                      <p className="mt-0.5 text-sm text-(--brand-text-muted)">
+                        {p.attributeSummary || "Parent product"}
+                      </p>
                     </div>
-                  ) : null}
-                </div>
+                    <span className="inline-flex h-9 shrink-0 items-center rounded-xl border border-(--brand-card-border) bg-(--brand-input-bg)/40 px-3 text-sm font-bold text-(--brand-text)">
+                      Open parent →
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {chips.map((chip) => (
+                      <Badge
+                        key={chip}
+                        variant="secondary"
+                        className="text-[11px]"
+                      >
+                        {chip}
+                      </Badge>
+                    ))}
+                  </div>
+
+                  {ranges.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {ranges.map((r) => (
+                        <div
+                          key={r.key}
+                          className="min-w-38 rounded-xl border border-(--brand-card-border)/70 bg-(--brand-input-bg)/25 px-3 py-2"
+                        >
+                          <div className="text-sm font-semibold text-(--brand-text)">
+                            {r.label}
+                          </div>
+                          <div className="mt-0.5 text-[11px] leading-snug text-(--brand-text-muted)">
+                            {r.boundsLabel}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-(--brand-text-muted)">
+                      No power ranges yet
+                    </p>
+                  )}
+                </Link>
               );
             })}
           </div>
         )}
 
-        {!loading && totalGroups > 0 ? (
+        {!loading && showPager ? (
           <div className="flex items-center justify-between gap-3 text-sm text-(--brand-text-muted)">
-            <span>
-              Page {groupPage} of {Math.ceil(totalGroups / GROUP_SIZE)} groups
-            </span>
+            <span>{pageLabel}</span>
             <div className="flex gap-2">
               <Button
                 type="button"
                 variant="outline"
                 className="h-9 rounded-xl"
-                disabled={groupPage <= 1}
-                onClick={() => setGroupPage((p) => Math.max(1, p - 1))}
+                disabled={!canPrev}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
                 <ChevronLeft className="size-4" />
               </Button>
@@ -978,8 +910,8 @@ export default function ProductsCatalogPage() {
                 type="button"
                 variant="outline"
                 className="h-9 rounded-xl"
-                disabled={groupPage >= Math.ceil(totalGroups / GROUP_SIZE)}
-                onClick={() => setGroupPage((p) => p + 1)}
+                disabled={!canNext}
+                onClick={() => setPage((p) => p + 1)}
               >
                 <ChevronRight className="size-4" />
               </Button>

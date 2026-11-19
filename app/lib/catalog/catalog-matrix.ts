@@ -72,6 +72,12 @@ export type CatalogMatrixDataColumn = {
 
 export type CatalogMatrixCell = {
   present: boolean;
+  /**
+   * Optical combo allowed on this sheet. Cross Style B keeps the full
+   * +SPH/−CYL rectangle but sets `allowed: false` when the gap rule fails
+   * (`|CYL| − SPH ≥ 0.25`) — UI must not offer an editable triad there.
+   */
+  allowed: boolean;
   variantId: string | null;
   cellKey: CatalogMatrixCellKey;
 };
@@ -377,8 +383,22 @@ function groupAxisLabel(group: VariantGroup): string {
   return groupAxes(group).map((axis) => `${axis}°`).join(" / ");
 }
 
-function emptyCell(cellKey: CatalogMatrixCellKey): CatalogMatrixCell {
-  return { present: false, variantId: null, cellKey };
+function emptyCell(
+  cellKey: CatalogMatrixCellKey,
+  allowed = true
+): CatalogMatrixCell {
+  return { present: false, allowed, variantId: null, cellKey };
+}
+
+function coveredCell(
+  cellKey: CatalogMatrixCellKey,
+  variantId: string,
+  allowed = true
+): CatalogMatrixCell {
+  if (!allowed) {
+    return emptyCell(cellKey, false);
+  }
+  return { present: true, allowed: true, variantId, cellKey };
 }
 
 /** SV-style SPH rows × CYL columns. */
@@ -413,9 +433,15 @@ function buildSphCylSheet(
       const variant = group.variants.find((v) =>
         variantCovers(v, sph, cyl)
       );
+      // SV single sheet mixes compound + cross quadrants: in +SPH/−CYL,
+      // only valid cross combos may show an editable triad (Style B).
+      const allowed =
+        sph > POWER_EPS && cyl < -POWER_EPS
+          ? isAllowedCrossCombo(sph, cyl)
+          : true;
       cells[column.key] = variant
-        ? { present: true, variantId: variant.id, cellKey }
-        : emptyCell(cellKey);
+        ? coveredCell(cellKey, variant.id, allowed)
+        : emptyCell(cellKey, allowed);
     }
     return { key, stub: { sph: formatMatrixPower(sph) }, cells };
   });
@@ -464,7 +490,7 @@ function buildSphereSheet(
           variantMatchesColumn(v, column, withEye)
       );
       cells[column.key] = variant
-        ? { present: true, variantId: variant.id, cellKey }
+        ? coveredCell(cellKey, variant.id)
         : emptyCell(cellKey);
     }
     return { key, stub: { sph: formatMatrixPower(sph) }, cells };
@@ -524,7 +550,7 @@ function buildCylAxisSheet(
           variantMatchesColumn(v, column, withEye)
       );
       cells[column.key] = variant
-        ? { present: true, variantId: variant.id, cellKey }
+        ? coveredCell(cellKey, variant.id)
         : emptyCell(cellKey);
     }
     return {
@@ -576,20 +602,26 @@ function buildCompoundSheet(
   const dataColumns = buildAddColumns(group.variants, withEye);
 
   // CYL-major row order (outer CYL, inner SPH) per client matrix rule for KT/V2.
-  const points: Array<{ sph: number; cyl: number }> = [];
+  // Cross Style B: keep the full +SPH/−CYL rectangle; mark gap-fail cells
+  // allowed:false (no editable triad) instead of omitting them.
+  const points: Array<{ sph: number; cyl: number; allowed: boolean }> = [];
   for (const cyl of cylValues) {
     for (const sph of sphValues) {
       if (isPlano(sph) || isPlano(cyl)) continue;
       if (kind === "cross") {
-        if (!isAllowedCrossCombo(sph, cyl)) continue;
+        // Cross sheet = +SPH / −CYL candidates only (matches warehouse sketch).
+        if (sph <= POWER_EPS || cyl >= -POWER_EPS) continue;
+        points.push({ sph, cyl, allowed: isAllowedCrossCombo(sph, cyl) });
       } else {
         if (!isAllowedCompoundCombo(sph, cyl)) continue;
         if (isAllowedCrossCombo(sph, cyl)) continue;
+        points.push({ sph, cyl, allowed: true });
       }
-      points.push({ sph, cyl });
     }
   }
   if (points.length === 0) return null;
+  // Cross sheet with only disabled cells is still useful (shows the X diagonal).
+  if (kind === "compound" && !points.some((p) => p.allowed)) return null;
 
   const axes = groupAxes(group);
   const showAxis = axes.some((axis) => axis != null);
@@ -599,46 +631,53 @@ function buildCompoundSheet(
   ];
   if (showAxis) stubColumns.push({ key: "axis", label: "Axis" });
 
-  const rows: CatalogMatrixRow[] = axes.flatMap((axis) => points.map(({ sph, cyl }) => {
-    const key = `sph:${sph.toFixed(2)}|cyl:${cyl.toFixed(2)}|axis:${
-      axis ?? "none"
-    }`;
-    const cells: Record<string, CatalogMatrixCell> = {};
-    for (const column of dataColumns) {
-      const cellKey: CatalogMatrixCellKey = {
-        sph,
-        cyl,
-        add: column.add,
-        axis,
-        eye: withEye ? eyeValueFromLabel(column.eye ?? "—") : null,
+  const rows: CatalogMatrixRow[] = axes.flatMap((axis) =>
+    points.map(({ sph, cyl, allowed }) => {
+      const key = `sph:${sph.toFixed(2)}|cyl:${cyl.toFixed(2)}|axis:${
+        axis ?? "none"
+      }`;
+      const cells: Record<string, CatalogMatrixCell> = {};
+      for (const column of dataColumns) {
+        const cellKey: CatalogMatrixCellKey = {
+          sph,
+          cyl,
+          add: column.add,
+          axis,
+          eye: withEye ? eyeValueFromLabel(column.eye ?? "—") : null,
+        };
+        const variant =
+          allowed
+            ? group.variants.find(
+                (v) =>
+                  v.axis === axis &&
+                  variantCovers(v, sph, cyl) &&
+                  variantMatchesColumn(v, column, withEye)
+              )
+            : undefined;
+        cells[column.key] = variant
+          ? coveredCell(cellKey, variant.id, allowed)
+          : emptyCell(cellKey, allowed);
+      }
+      return {
+        key,
+        stub: {
+          sph: formatMatrixPower(sph),
+          cyl: formatMatrixPower(cyl),
+          ...(showAxis
+            ? { axis: axis == null ? "—" : String(axis) }
+            : {}),
+        },
+        cells,
       };
-      const variant = group.variants.find(
-        (v) =>
-          v.axis === axis && variantCovers(v, sph, cyl) &&
-          variantMatchesColumn(v, column, withEye)
-      );
-      cells[column.key] = variant
-        ? { present: true, variantId: variant.id, cellKey }
-        : emptyCell(cellKey);
-    }
-    return {
-      key,
-      stub: {
-        sph: formatMatrixPower(sph),
-        cyl: formatMatrixPower(cyl),
-        ...(showAxis
-          ? { axis: axis == null ? "—" : String(axis) }
-          : {}),
-      },
-      cells,
-    };
-  }));
+    })
+  );
 
   const cells: Record<string, Record<string, CatalogMatrixCell>> = {};
   for (const row of rows) cells[row.key] = row.cells;
 
   const label = kind === "cross" ? "Cross" : "Compound";
-  const sign = kind === "cross" ? "" : ` ${signLabel(points)}`;
+  const sign =
+    kind === "cross" ? "" : ` ${signLabel(points.map(({ sph, cyl }) => ({ sph, cyl })))}`;
   const title = showAxis
     ? `${familyLabel ?? label} · ${label}${sign} · Axis ${groupAxisLabel(group)}`
     : `${familyLabel ?? label} · ${label}${sign}`;
