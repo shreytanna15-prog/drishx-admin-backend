@@ -174,7 +174,8 @@ export function classifyVariantPowerShape(
 ): CatalogMatrixPowerShape {
   const sphActive = bandHasNonPlano(variant.sphMin, variant.sphMax);
   const cylActive = bandHasNonPlano(variant.cylMin, variant.cylMax);
-  if (sphActive && !cylActive) return "sphere";
+  // Pure sphere, or plano/plano (0.00/0.00) — compound sheets skip plano cells.
+  if (!cylActive) return "sphere";
   if (!sphActive && cylActive) return "cyl-axis";
   return "compound";
 }

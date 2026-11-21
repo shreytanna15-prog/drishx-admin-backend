@@ -1,39 +1,29 @@
 /**
  * RC-03 admin power-range pickers (SPH/CYL bounds).
  *
- * Option universe −40 … +8 (same ordering style as mobile power selects):
- *  - −40 → −16 : step 0.5
- *  - after −16 → +4 : step 0.25 (−15.75 …)
- *  - after +4 → +8 : step 0.5 (+4.5 …)
+ * SPH: −40 … +30
+ * CYL: −8 … +8
+ * Create/edit form step: 0.25 or 0.5 (admin picks step; options regenerate).
  *
  * Pure module — safe for client and server (no prisma / React).
  */
 
-export const POWER_OPTION_MIN = -40;
-export const POWER_OPTION_MAX = 8;
+export const SPH_OPTION_MIN = -40;
+export const SPH_OPTION_MAX = 30;
+export const CYL_OPTION_MIN = -8;
+export const CYL_OPTION_MAX = 8;
+
+/** @deprecated Prefer SPH_OPTION_MIN / CYL_OPTION_MIN. */
+export const POWER_OPTION_MIN = SPH_OPTION_MIN;
+/** @deprecated Prefer SPH_OPTION_MAX. */
+export const POWER_OPTION_MAX = SPH_OPTION_MAX;
+
+export const POWER_STEPS = [0.25, 0.5] as const;
+export type PowerStep = (typeof POWER_STEPS)[number];
+export type PowerAxis = "sph" | "cyl";
 
 /** Work in quarter-diopter integers to avoid float drift. */
 const Q = 4;
-
-function buildPowerSelectValues(): number[] {
-  const out: number[] = [];
-  // −40 … −16 step 0.5  (in quarters: -160 … -64 step 2)
-  for (let q = POWER_OPTION_MIN * Q; q <= -16 * Q; q += 2) out.push(q / Q);
-  // −15.75 … +4 step 0.25 (in quarters: -63 … 16 step 1)
-  for (let q = -16 * Q + 1; q <= 4 * Q; q += 1) out.push(q / Q);
-  // +4.5 … +8 step 0.5 (in quarters: 18 … 32 step 2)
-  for (let q = 4 * Q + 2; q <= POWER_OPTION_MAX * Q; q += 2) out.push(q / Q);
-  return out;
-}
-
-/** Ascending numeric values allowed for power-range bounds. */
-export const POWER_SELECT_VALUES: readonly number[] = Object.freeze(
-  buildPowerSelectValues()
-);
-
-const POWER_SELECT_SET: ReadonlySet<number> = new Set(
-  POWER_SELECT_VALUES.map((v) => normalizePowerValue(v))
-);
 
 /** Round to 2 decimals and normalize −0 → 0. */
 export function normalizePowerValue(value: number): number {
@@ -41,10 +31,46 @@ export function normalizePowerValue(value: number): number {
   return Object.is(n, -0) ? 0 : n;
 }
 
-/** True when the value is on the allowed −40…+8 stepped grid. */
-export function isAllowedPowerValue(value: number): boolean {
+function axisBounds(axis: PowerAxis): { min: number; max: number } {
+  return axis === "cyl"
+    ? { min: CYL_OPTION_MIN, max: CYL_OPTION_MAX }
+    : { min: SPH_OPTION_MIN, max: SPH_OPTION_MAX };
+}
+
+/** Inclusive stepped values from min→max at the given step. */
+export function buildSteppedPowerValues(
+  min: number,
+  max: number,
+  step: PowerStep
+): number[] {
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  const stepQ = Math.round(step * Q);
+  if (stepQ <= 0) return [];
+  const startQ = Math.round(lo * Q);
+  const endQ = Math.round(hi * Q);
+  const out: number[] = [];
+  for (let q = startQ; q <= endQ; q += stepQ) {
+    out.push(normalizePowerValue(q / Q));
+  }
+  return out;
+}
+
+export function isAllowedPowerStep(step: number): step is PowerStep {
+  return POWER_STEPS.some((s) => Math.abs(s - step) < 1e-9);
+}
+
+/** True when value sits on the 0.25 grid inside the axis range. */
+export function isAllowedPowerValue(
+  value: number,
+  axis: PowerAxis = "sph"
+): boolean {
   if (!Number.isFinite(value)) return false;
-  return POWER_SELECT_SET.has(normalizePowerValue(value));
+  const v = normalizePowerValue(value);
+  const { min, max } = axisBounds(axis);
+  if (v < min - 1e-9 || v > max + 1e-9) return false;
+  const q = Math.round(v * Q);
+  return Math.abs(q / Q - v) < 1e-9;
 }
 
 /** `-6` → `-6.00`, `2` → `+2.00`, `0` → `0.00`. */
@@ -56,13 +82,27 @@ export function formatPowerLabel(value: number): string {
 
 export type PowerSelectOption = { value: string; label: string };
 
-/** Select options (string values for `<select>`), ascending. */
-export function getPowerSelectOptions(): PowerSelectOption[] {
-  return POWER_SELECT_VALUES.map((v) => ({
+/**
+ * Select options for SPH or CYL at the chosen step.
+ * Defaults: SPH, step 0.25 (widest catalog list).
+ */
+export function getPowerSelectOptions(opts?: {
+  axis?: PowerAxis;
+  step?: PowerStep;
+}): PowerSelectOption[] {
+  const axis = opts?.axis ?? "sph";
+  const step = opts?.step ?? 0.25;
+  const { min, max } = axisBounds(axis);
+  return buildSteppedPowerValues(min, max, step).map((v) => ({
     value: String(normalizePowerValue(v)),
     label: formatPowerLabel(v),
   }));
 }
+
+/** Full SPH list at 0.25 — kept for older call sites that expect a flat array. */
+export const POWER_SELECT_VALUES: readonly number[] = Object.freeze(
+  buildSteppedPowerValues(SPH_OPTION_MIN, SPH_OPTION_MAX, 0.25)
+);
 
 /**
  * Bound with larger absolute value (sign preserved).
@@ -119,20 +159,41 @@ export type PowerRangeBounds = {
 
 /**
  * Returns an error message when bounds are invalid, otherwise `null`.
- * Bounds must be on the stepped grid. Field order is not compared mathematically
+ * SPH −40…+30, CYL −8…+8, both on the 0.25 grid. Field order is not compared
  * (admin may enter 0.00 then −6.00).
  */
 export function validatePowerRangeBounds(b: PowerRangeBounds): string | null {
-  const entries: [string, number][] = [
+  const sphEntries: [string, number][] = [
     ["sphMin", b.sphMin],
     ["sphMax", b.sphMax],
+  ];
+  for (const [label, value] of sphEntries) {
+    if (!isAllowedPowerValue(value, "sph")) {
+      return `${label} must be a power between ${SPH_OPTION_MIN} and +${SPH_OPTION_MAX} on a 0.25 step.`;
+    }
+  }
+  const cylEntries: [string, number][] = [
     ["cylMin", b.cylMin],
     ["cylMax", b.cylMax],
   ];
-  for (const [label, value] of entries) {
-    if (!isAllowedPowerValue(value)) {
-      return `${label} must be a power between ${POWER_OPTION_MIN} and +${POWER_OPTION_MAX} on the allowed step grid.`;
+  for (const [label, value] of cylEntries) {
+    if (!isAllowedPowerValue(value, "cyl")) {
+      return `${label} must be a power between ${CYL_OPTION_MIN} and +${CYL_OPTION_MAX} on a 0.25 step.`;
     }
   }
   return null;
+}
+
+/** Snap a stored bound onto the selected step grid (nearest, clamped to axis). */
+export function snapPowerToStep(
+  value: number,
+  axis: PowerAxis,
+  step: PowerStep
+): number {
+  const { min, max } = axisBounds(axis);
+  const v = normalizePowerValue(value);
+  const snapped = normalizePowerValue(Math.round(v / step) * step);
+  if (snapped < min) return min;
+  if (snapped > max) return max;
+  return snapped;
 }

@@ -55,6 +55,24 @@ async function ensureBaseMaterialCompat(baseId: string, materialId: string) {
   }
 }
 
+/** Bases that must carry a coating on the parent (client rule: BRC). */
+export function baseRequiresCoating(baseCode: string | null | undefined): boolean {
+  return (baseCode ?? "").trim().toUpperCase() === "BRC";
+}
+
+function assertCoatingForBase(
+  baseCode: string,
+  coatingId: string | null
+): void {
+  if (baseRequiresCoating(baseCode) && !coatingId) {
+    throw new LensProductServiceError(
+      "Coating is required when base is BRC.",
+      400,
+      "COATING_REQUIRED"
+    );
+  }
+}
+
 const parentInclude = {
   family: true,
   base: true,
@@ -834,6 +852,7 @@ async function resolveVariantExpansion(input: VariantExpansionInput) {
   const additionIds = uniqueIds(input.additionIds);
 
   const { family, codeParts } = await loadParentAttrs(ids);
+  assertCoatingForBase(codeParts.baseCode, ids.coatingId);
   assertFamilyVariantInputs(family, axisIds, additionIds);
 
   const [ranges, axes, additions] = await Promise.all([
@@ -1415,6 +1434,192 @@ export async function listLensProducts(params: {
     limit,
     hasMore: page * limit < total,
   };
+}
+
+export type UpdateLensProductParentInput = {
+  productId: string;
+  /** Set or clear coating. Required when base is BRC. */
+  coatingId: string | null;
+  actorUserId: string;
+};
+
+async function assertParentAttrsEditable(productId: string) {
+  const variants = await prisma.lensProductVariant.findMany({
+    where: { productId },
+    select: { skuCode: true },
+  });
+  const skus = variants.map((v) => v.skuCode).filter(Boolean);
+  if (skus.length === 0) return;
+
+  const [invoiceHit, purchaseHit] = await Promise.all([
+    prisma.invoiceLine.findFirst({
+      where: { sku: { in: skus } },
+      select: { id: true },
+    }),
+    prisma.purchaseBillLine.findFirst({
+      where: { sku: { in: skus } },
+      select: { id: true },
+    }),
+  ]);
+
+  if (invoiceHit || purchaseHit) {
+    throw new LensProductServiceError(
+      "Parent attributes are locked because variants appear on invoices or purchase bills. Create a new product instead.",
+      409,
+      "ATTR_LOCKED"
+    );
+  }
+}
+
+/**
+ * Update parent coating (identity). Regenerates baseCode + every variant SKU/name.
+ * Locked once any sibling SKU appears on an invoice or purchase bill.
+ */
+export async function updateLensProductParent(
+  input: UpdateLensProductParentInput
+) {
+  const parent = await prisma.lensProduct.findUnique({
+    where: { id: input.productId },
+    include: parentInclude,
+  });
+  if (!parent) {
+    throw new LensProductServiceError("Product not found.", 404, "NOT_FOUND");
+  }
+
+  await assertParentAttrsEditable(parent.id);
+
+  const nextCoatingId = normalizeOptionalId(input.coatingId);
+  assertCoatingForBase(parent.base.code, nextCoatingId);
+
+  if ((parent.coatingId ?? null) === nextCoatingId) {
+    return serializeLensProduct(parent);
+  }
+
+  const ids: ParentAttrs = {
+    familyId: parent.familyId,
+    baseId: parent.baseId,
+    materialId: parent.materialId,
+    indexId: parent.indexId,
+    colorId: parent.colorId,
+    coatingId: nextCoatingId,
+    diameterId: parent.diameterId,
+    progressiveTypeId: parent.progressiveTypeId,
+  };
+
+  const conflict = await findParentByAttrs(ids);
+  if (conflict && conflict.id !== parent.id) {
+    throw new LensProductServiceError(
+      "A parent with these attributes already exists.",
+      409,
+      "DUPLICATE_PARENT"
+    );
+  }
+
+  const { codeParts } = await loadParentAttrs(ids);
+  const baseCode = buildLensProductBaseCode({
+    familyCode: codeParts.familyCode,
+    baseCode: codeParts.baseCode,
+    materialCode: codeParts.materialCode,
+    indexCode: codeParts.indexCode,
+    colorCode: codeParts.colorCode,
+    coatingCode: codeParts.coatingCode,
+    progressiveTypeCode: codeParts.progressiveTypeCode,
+    diameterCode: codeParts.diameterCode,
+  });
+
+  const variantUpdates = parent.variants.map((v) => {
+    const bounds = {
+      sphMin: Number(v.sphMin),
+      sphMax: Number(v.sphMax),
+      cylMin: Number(v.cylMin),
+      cylMax: Number(v.cylMax),
+    };
+    const eyeToken =
+      v.eye === "LEFT" || v.eye === "RIGHT"
+        ? (v.eye as "LEFT" | "RIGHT")
+        : null;
+    const skuCode = buildLensProductSkuCode({
+      ...codeParts,
+      additionCode: v.addition?.code ?? null,
+      eye: eyeToken,
+      axisValue: v.axis,
+      ...bounds,
+    });
+    const name = buildLensProductName({
+      familyCode: codeParts.familyCode,
+      baseCode: codeParts.baseCode,
+      materialCode: codeParts.materialCode,
+      indexCode: codeParts.indexCode,
+      colorLabel: codeParts.colorLabel ?? codeParts.colorCode ?? null,
+      coatingLabel: codeParts.coatingLabel,
+      axisValue: v.axis,
+      ...bounds,
+    });
+    return { id: v.id, skuCode, name, previousSku: v.skuCode };
+  });
+
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.lensProduct.update({
+          where: { id: parent.id },
+          data: {
+            coatingId: nextCoatingId,
+            baseCode,
+          },
+        });
+        for (const u of variantUpdates) {
+          await tx.lensProductVariant.update({
+            where: { id: u.id },
+            data: { skuCode: u.skuCode, name: u.name },
+          });
+        }
+        await recordAuditEvent(tx, {
+          action: AuditAction.SETTINGS_UPDATED,
+          module: AuditModule.INVENTORY,
+          entityType: "LensProduct",
+          entityId: parent.id,
+          actor: {
+            actorType: "HUMAN",
+            actorUserId: input.actorUserId,
+            actorName: null,
+          },
+          context: {
+            event: "LENS_PRODUCT_PARENT_UPDATED",
+            field: "coatingId",
+            previousCoatingId: parent.coatingId,
+            coatingId: nextCoatingId,
+            baseCode,
+            variantSkuChanges: variantUpdates.map((u) => ({
+              id: u.id,
+              from: u.previousSku,
+              to: u.skuCode,
+            })),
+          },
+          activityMessage: `Lens product coating updated: ${baseCode}`,
+        });
+      },
+      { maxWait: 10_000, timeout: 30_000 }
+    );
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      throw new LensProductServiceError(
+        "SKU or parent code collision while updating coating.",
+        409,
+        "SKU_COLLISION"
+      );
+    }
+    throw err;
+  }
+
+  const fresh = await prisma.lensProduct.findUniqueOrThrow({
+    where: { id: parent.id },
+    include: parentInclude,
+  });
+  return serializeLensProduct(fresh);
 }
 
 export type UpdateLensProductVariantInput = {

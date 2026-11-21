@@ -17,13 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  getPowerSelectOptions,
-  type LensPowerRange,
-} from "@/app/lib/admin-lens-catalog";
+import { type LensPowerRange } from "@/app/lib/admin-lens-catalog";
 import {
   formatPowerRangeSpan,
+  getPowerSelectOptions,
+  snapPowerToStep,
   validatePowerRangeBounds,
+  type PowerStep,
 } from "@/app/lib/catalog/catalog-power-select-options";
 import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
 import { useCreatePowerRange } from "@/app/lib/modules/lens-catalog/mutation/use-create-power-range";
@@ -42,6 +42,7 @@ const errorBannerClass =
   "rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200";
 
 type FormState = {
+  step: PowerStep;
   sphMin: string;
   sphMax: string;
   cylMin: string;
@@ -51,6 +52,7 @@ type FormState = {
 
 /** Open create at 0 so both SPH/CYL lists start there; scroll up/down for rest. */
 const EMPTY_FORM: FormState = {
+  step: 0.25,
   sphMin: "0",
   sphMax: "0",
   cylMin: "0",
@@ -58,7 +60,11 @@ const EMPTY_FORM: FormState = {
   sortOrder: "0",
 };
 
-const POWER_OPTIONS = getPowerSelectOptions();
+const STEP_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "0.25", label: "0.25" },
+  { value: "0.50", label: "0.50" },
+];
+
 /** ~8 visible rows (item ~2.25rem); fixed height, scroll for the rest. */
 const POWER_SELECT_CONTENT_CLASS = "max-h-[18rem]";
 
@@ -66,10 +72,12 @@ function BoundSelect({
   label,
   value,
   onChange,
+  options,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
 }) {
   return (
     <label className="space-y-1.5">
@@ -77,10 +85,7 @@ function BoundSelect({
       <AdminSelect
         value={value}
         onValueChange={onChange}
-        options={POWER_OPTIONS.map((o) => ({
-          value: o.value,
-          label: o.label,
-        }))}
+        options={options}
         placeholder="0.00"
         size="sm"
         triggerClassName={selectClass}
@@ -88,6 +93,12 @@ function BoundSelect({
       />
     </label>
   );
+}
+
+function inferStepFromBounds(row: LensPowerRange): PowerStep {
+  const vals = [row.sphMin, row.sphMax, row.cylMin, row.cylMax];
+  const needsQuarter = vals.some((v) => Math.abs(Math.round(v * 4) % 2) === 1);
+  return needsQuarter ? 0.25 : 0.5;
 }
 
 function isActiveToggle(vars: UpdatePowerRangeVariables) {
@@ -154,6 +165,14 @@ export function PowerRangeTab({
   const formBusy = createMutation.pending || updateMutation.pending;
 
   const bounds = useMemo(() => parseBounds(form), [form]);
+  const sphOptions = useMemo(
+    () => getPowerSelectOptions({ axis: "sph", step: form.step }),
+    [form.step]
+  );
+  const cylOptions = useMemo(
+    () => getPowerSelectOptions({ axis: "cyl", step: form.step }),
+    [form.step]
+  );
   const preview = useMemo(() => {
     if (!bounds) return null;
     if (validatePowerRangeBounds(bounds)) return null;
@@ -162,6 +181,17 @@ export function PowerRangeTab({
       cyl: formatPowerRangeSpan(bounds.cylMin, bounds.cylMax),
     };
   }, [bounds]);
+
+  function applyStep(nextStep: PowerStep) {
+    setForm((f) => ({
+      ...f,
+      step: nextStep,
+      sphMin: String(snapPowerToStep(Number(f.sphMin) || 0, "sph", nextStep)),
+      sphMax: String(snapPowerToStep(Number(f.sphMax) || 0, "sph", nextStep)),
+      cylMin: String(snapPowerToStep(Number(f.cylMin) || 0, "cyl", nextStep)),
+      cylMax: String(snapPowerToStep(Number(f.cylMax) || 0, "cyl", nextStep)),
+    }));
+  }
 
   function openCreate() {
     setEditing(null);
@@ -173,6 +203,7 @@ export function PowerRangeTab({
   function openEdit(row: LensPowerRange) {
     setEditing(row);
     setForm({
+      step: inferStepFromBounds(row),
       sphMin: String(row.sphMin),
       sphMax: String(row.sphMax),
       cylMin: String(row.cylMin),
@@ -236,7 +267,7 @@ export function PowerRangeTab({
         onOpenChange={onShowFormChange}
         size="md"
         title={editing ? "Edit Power range" : "Add Power range"}
-        description="Pick SPH and CYL bounds from the stepped lists (−40 … +8). The label is generated from SPH, e.g. -6.00/+2.00."
+        description="SPH −40…+30 · CYL −8…+8. Pick a step, then bounds. Label is generated from SPH, e.g. -6.00 to +2.00."
       >
         <div className="flex flex-col gap-4">
           {formError ? (
@@ -245,25 +276,42 @@ export function PowerRangeTab({
             </div>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1.5 sm:col-span-2">
+              <span className={labelClass}>Step</span>
+              <AdminSelect
+                value={form.step === 0.5 ? "0.50" : "0.25"}
+                onValueChange={(v) =>
+                  applyStep(v === "0.50" ? 0.5 : 0.25)
+                }
+                options={STEP_OPTIONS}
+                placeholder="0.25"
+                size="sm"
+                triggerClassName={selectClass}
+              />
+            </label>
             <BoundSelect
               label="SPH min"
               value={form.sphMin}
               onChange={(v) => setForm((f) => ({ ...f, sphMin: v }))}
+              options={sphOptions}
             />
             <BoundSelect
               label="SPH max"
               value={form.sphMax}
               onChange={(v) => setForm((f) => ({ ...f, sphMax: v }))}
+              options={sphOptions}
             />
             <BoundSelect
               label="CYL min"
               value={form.cylMin}
               onChange={(v) => setForm((f) => ({ ...f, cylMin: v }))}
+              options={cylOptions}
             />
             <BoundSelect
               label="CYL max"
               value={form.cylMax}
               onChange={(v) => setForm((f) => ({ ...f, cylMax: v }))}
+              options={cylOptions}
             />
             <label className="space-y-1.5">
               <span className={labelClass}>Sort order</span>
@@ -283,6 +331,9 @@ export function PowerRangeTab({
                     <span className="font-mono font-bold">{preview.label}</span>
                     <span className="font-mono font-bold text-(--brand-text-muted)">
                       {preview.cyl}
+                    </span>
+                    <span className="text-xs text-(--brand-text-muted)">
+                      Step {form.step === 0.5 ? "0.50" : "0.25"}
                     </span>
                   </>
                 ) : (

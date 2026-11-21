@@ -4,6 +4,7 @@ import {
   addLensProductVariants,
   getLensProduct,
   LensProductServiceError,
+  updateLensProductParent,
 } from "../../../../../lib/catalog/lens-product-service";
 
 function requireAdmin(req: NextRequest) {
@@ -34,6 +35,42 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       );
     }
     console.error("GET /api/admin/catalog/lens-products/:id", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
+
+// PATCH /api/admin/catalog/lens-products/:id  — update parent attrs (coating)
+export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const auth = requireAdmin(req);
+  if (auth.error) return auth.error;
+
+  try {
+    const { id } = await ctx.params;
+    const body = await req.json();
+    if (!("coatingId" in (body ?? {}))) {
+      return NextResponse.json(
+        { error: "coatingId is required.", code: "VALIDATION" },
+        { status: 400 }
+      );
+    }
+    const coatingId =
+      body.coatingId == null || String(body.coatingId).trim() === ""
+        ? null
+        : String(body.coatingId).trim();
+    const product = await updateLensProductParent({
+      productId: id,
+      coatingId,
+      actorUserId: auth.session.userId,
+    });
+    return NextResponse.json({ product });
+  } catch (error) {
+    if (error instanceof LensProductServiceError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code, details: error.details },
+        { status: error.status }
+      );
+    }
+    console.error("PATCH /api/admin/catalog/lens-products/:id", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

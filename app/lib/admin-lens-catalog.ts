@@ -338,6 +338,16 @@ export function addLensProductVariantsRequest(
   );
 }
 
+export function updateLensProductParentRequest(
+  productId: string,
+  body: { coatingId: string | null }
+) {
+  return adminFetch<{ product: LensProduct }>(
+    `/api/admin/catalog/lens-products/${productId}`,
+    { method: "PATCH", body: JSON.stringify(body) }
+  );
+}
+
 export function updateLensProductVariantRequest(
   id: string,
   body: Record<string, unknown>

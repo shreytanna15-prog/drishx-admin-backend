@@ -191,6 +191,12 @@ export default function NewLensProductPage() {
     () => families.find((f) => f.id === familyId) ?? null,
     [families, familyId]
   );
+  const selectedBase = useMemo(
+    () => bases.find((b) => b.id === baseId) ?? null,
+    [bases, baseId]
+  );
+  const coatingRequired =
+    (selectedBase?.code ?? "").trim().toUpperCase() === "BRC";
 
   const supportsAxis = Boolean(selectedFamily?.supportsAxis);
   const supportsAdd = Boolean(selectedFamily?.supportsAdd);
@@ -287,6 +293,10 @@ export default function NewLensProductPage() {
       setError("Family and base are required.");
       return;
     }
+    if (coatingRequired && !coatingId) {
+      setError("Coating is required when base is BRC.");
+      return;
+    }
     if (powerRangeIds.length === 0) {
       setError("Select at least one power range.");
       return;
@@ -370,11 +380,18 @@ export default function NewLensProductPage() {
           />
           <CatalogSelectField
             label="Coating"
+            required={coatingRequired}
             value={coatingId}
             onValueChange={setCoatingId}
-            options={toOptions(coatings, "None (optional)")}
+            options={toOptions(
+              coatings,
+              coatingRequired ? undefined : "None (optional)"
+            )}
             disabled={attrsLoading}
-            placeholder="Optional"
+            placeholder={coatingRequired ? "Select coating…" : "Optional"}
+            hint={
+              coatingRequired ? "Required for BRC base." : undefined
+            }
           />
           <CatalogSelectField
             label="Color"

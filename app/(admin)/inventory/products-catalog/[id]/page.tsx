@@ -10,6 +10,7 @@ import { AdminTable } from "@/components/admin-table";
 import {
   AdditionMultiSelect,
   AxisMultiSelect,
+  CatalogSelectField,
   PowerRangeMultiSelect,
   catalogLabelClass,
 } from "@/components/catalog/catalog-field";
@@ -31,9 +32,11 @@ import {
   addLensProductVariantsRequest,
   fetchLensAttributes,
   fetchLensProduct,
+  updateLensProductParentRequest,
   type LensAttribute,
   type LensProduct,
 } from "@/app/lib/admin-lens-catalog";
+import type { AdminSelectOption } from "@/components/admin-select";
 import { useGetPowerRanges } from "@/app/lib/modules/lens-catalog/query/use-get-power-ranges";
 import {
   formatPowerRangeCompact,
@@ -91,6 +94,11 @@ export default function LensProductParentDetailPage() {
   const [addPurchasePrice, setAddPurchasePrice] = useState("");
   const [addSellingPrice, setAddSellingPrice] = useState("");
   const [addBusy, setAddBusy] = useState(false);
+  const [coatings, setCoatings] = useState<LensAttribute[]>([]);
+  const [editingCoating, setEditingCoating] = useState(false);
+  const [coatingDraft, setCoatingDraft] = useState("");
+  const [coatingBusy, setCoatingBusy] = useState(false);
+  const [coatingError, setCoatingError] = useState("");
 
   const { data: powerRangeData } = useGetPowerRanges({ activeOnly: true });
   const powerRanges = useMemo(
@@ -117,6 +125,17 @@ export default function LensProductParentDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- load on mount
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const coat = await fetchLensAttributes("coating", { activeOnly: true });
+        setCoatings(coat.items);
+      } catch {
+        setCoatings([]);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -152,6 +171,45 @@ export default function LensProductParentDetailPage() {
   }, [addIds, powerRanges]);
 
   const showAddAxisMulti = supportsAxis && addRangesAllowAxis;
+  const coatingRequired =
+    (product?.base.code ?? "").trim().toUpperCase() === "BRC";
+
+  const coatingOptions: AdminSelectOption[] = useMemo(() => {
+    const opts = coatings.map((c) => ({
+      value: c.id,
+      label: `${c.code} — ${c.name}`,
+    }));
+    return coatingRequired
+      ? opts
+      : [{ value: "", label: "None (optional)" }, ...opts];
+  }, [coatings, coatingRequired]);
+
+  function startEditCoating() {
+    setCoatingError("");
+    setCoatingDraft(product?.coatingId ?? "");
+    setEditingCoating(true);
+  }
+
+  async function saveCoating() {
+    if (!product) return;
+    if (coatingRequired && !coatingDraft) {
+      setCoatingError("Coating is required when base is BRC.");
+      return;
+    }
+    setCoatingBusy(true);
+    setCoatingError("");
+    try {
+      const res = await updateLensProductParentRequest(product.id, {
+        coatingId: coatingDraft.trim() ? coatingDraft : null,
+      });
+      setProduct(res.product);
+      setEditingCoating(false);
+    } catch (err) {
+      setCoatingError(errorMessage(err, "Failed to update coating."));
+    } finally {
+      setCoatingBusy(false);
+    }
+  }
 
   async function addRanges() {
     if (!product || addIds.length === 0) return;
@@ -229,49 +287,119 @@ export default function LensProductParentDetailPage() {
       {error ? <div className={`${errorBannerClass} mb-4`}>{error}</div> : null}
 
       <section className="mb-6 rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
-        <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
-          Attributes
-        </h2>
-        <dl className="grid gap-2 text-sm sm:grid-cols-2">
-          <div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+            Attributes
+          </h2>
+          {!editingCoating ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 rounded-lg"
+              onClick={startEditCoating}
+            >
+              Edit coating
+            </Button>
+          ) : null}
+        </div>
+        {coatingError ? (
+          <div className={`${errorBannerClass} mb-3`}>{coatingError}</div>
+        ) : null}
+        {editingCoating ? (
+          <div className="mb-5 space-y-3 rounded-xl border border-(--brand-card-border) bg-(--brand-input-bg)/30 p-4">
+            <CatalogSelectField
+              className="w-full max-w-md"
+              label="Coating"
+              required={coatingRequired}
+              value={coatingDraft}
+              onValueChange={setCoatingDraft}
+              options={coatingOptions}
+              placeholder={
+                coatingRequired ? "Select coating…" : "Optional"
+              }
+              hint={
+                coatingRequired
+                  ? "Required for BRC. Saving regenerates SKUs and names."
+                  : "Saving regenerates SKUs and names."
+              }
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                className="h-10 min-w-24 rounded-xl"
+                disabled={coatingBusy}
+                onClick={() => void saveCoating()}
+              >
+                {coatingBusy ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  "Save"
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 min-w-24 rounded-xl"
+                disabled={coatingBusy}
+                onClick={() => {
+                  setEditingCoating(false);
+                  setCoatingError("");
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        <dl className="grid grid-cols-1 gap-x-10 gap-y-3 text-sm sm:grid-cols-2">
+          <div className="min-w-0">
             <dt className="text-(--brand-label)">Family</dt>
-            <dd className="font-semibold">{product.family.code}</dd>
+            <dd className="mt-0.5 font-semibold">{product.family.code}</dd>
           </div>
-          <div>
+          <div className="min-w-0">
             <dt className="text-(--brand-label)">Base</dt>
-            <dd className="font-semibold">{product.base.code}</dd>
+            <dd className="mt-0.5 font-semibold">{product.base.code}</dd>
           </div>
-          <div>
+          <div className="min-w-0">
             <dt className="text-(--brand-label)">Material</dt>
-            <dd className="font-semibold">{product.material?.code ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-(--brand-label)">Index</dt>
-            <dd className="font-semibold">{product.index?.code ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-(--brand-label)">Coating</dt>
-            <dd className="font-semibold">
-              {product.coating?.name || product.coating?.code || "—"}
+            <dd className="mt-0.5 font-semibold">
+              {product.material?.code ?? "—"}
             </dd>
           </div>
-          <div>
+          <div className="min-w-0">
+            <dt className="text-(--brand-label)">Index</dt>
+            <dd className="mt-0.5 font-semibold">
+              {product.index?.code ?? "—"}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-(--brand-label)">Coating</dt>
+            <dd className="mt-0.5 font-semibold">
+              {product.coating?.name || product.coating?.code || "—"}
+            </dd>
+            {coatingRequired && !product.coatingId ? (
+              <p className="mt-1 text-xs text-amber-500 dark:text-amber-400">
+                Required for BRC
+              </p>
+            ) : null}
+          </div>
+          <div className="min-w-0">
             <dt className="text-(--brand-label)">Color</dt>
-            <dd className="font-semibold">
+            <dd className="mt-0.5 font-semibold">
               {product.color?.name || product.color?.code || "—"}
             </dd>
           </div>
-          <div>
+          <div className="min-w-0">
             <dt className="text-(--brand-label)">Diameter</dt>
-            <dd className="font-semibold">
+            <dd className="mt-0.5 font-semibold">
               {product.diameter?.name || product.diameter?.code || "—"}
             </dd>
           </div>
           {product.family.supportsProgressiveType ||
           product.progressiveType ? (
-            <div>
+            <div className="min-w-0">
               <dt className="text-(--brand-label)">Progressive type</dt>
-              <dd className="font-semibold">
+              <dd className="mt-0.5 font-semibold">
                 {product.progressiveType?.name ||
                   product.progressiveType?.code ||
                   "—"}
