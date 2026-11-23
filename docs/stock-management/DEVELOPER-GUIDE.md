@@ -204,19 +204,32 @@ Reorder-check route today: `app/api/inventory/reorder-check/route.ts`.
 
 ---
 
-## 5. Admin UI changes
+## 5. Admin UI changes & Navigation Structure
 
-| Screen | Action |
-|--------|--------|
-| `/inventory/products-catalog/[id]` | Wire live Current/Threshold/Target onto existing `CatalogMatrixPanel` (`editable`); no current free-edit; keep family sheets + Cross Style B |
-| `/inventory/products-catalog/variants/[id]` | May show same live matrix (sibling context) with current variant highlighted — optional polish |
-| `/inventory/stock-matrix` | **Out of scope to extend** — later redirect/deep-link to catalog parent detail (same matrix). Do not retrofit Cross Style B here now |
-| `/inventory/power-wise-stock` | List `LensProductPower`; filters by parent attrs + variant SKU; Run reorder against new rules |
-| `/inventory/stock-overview` | Drive from catalog leaves |
-| **New** `/inventory/stock-adjustments` | Form per CLIENT-PLAN + history |
-| **New** `/inventory/stock-transactions` | Ledger table |
-| PO create / receive | Picker: parent → variant → SPH/CYL (or matrix pick); labels = variant SKU + power + axis/ADD/eye |
-| Sidebar | Group Stock Management entries; keep POs under Procurement |
+Consolidate into a dedicated **Stock & Procurement** section in the admin sidebar:
+
+| Screen | Target Route | Action & Specifications |
+|--------|--------------|-------------------------|
+| **Stock Overview** | `/inventory/stock-overview` | **Product Card Browser**: Displays product cards (catalog parent level) with stock figures (on-hand, available, active shortages). Clicking a card navigates directly to that product's full **2D Excel matrix** (`/inventory/products-catalog/[id]`). |
+| **Power-wise Inventory** | `/inventory/power-wise-stock` | Searchable flat table listing all valid power leaves (SPH/CYL) for all catalog products (including 0-stock unstocked leaves). Row-level threshold/target editing + Run Reorder. |
+| **Stock Dashboard / Audit** | `/inventory/stock-dashboard` (or overview KPI mode) | High-level summary KPI cards (total on-hand, reserved, blocked) and top shortage alerts. |
+| **Stock Adjustments** | `/inventory/stock-adjustments` | Controlled ± adjustment with mandatory reason codes, negative available guard, and audit trail. |
+| **Stock Checks** | `/inventory/stock-checks` | Session-based physical counting with count freeze and blind employee submission. |
+| **Stock Transactions** | `/inventory/stock-transactions` | Immutable audit ledger of all stock movements. |
+| **Procurement Cart / Queue** | `/procurement/requests` (Cart Mode) | **Admin Purchase Cart**: Consolidates shortages from reorder runs, customer order backorders, and manual power picks across multiple products into supplier-grouped PO creation. |
+| **Purchase Orders** | `/procurement/purchase-orders` | Multi-product PO workflow (Draft → Approve → Sent → Receive with Excel reconciliation → Confirm Receipt). |
+| **Suppliers** | `/procurement/suppliers` | Vendor management and terms. |
+
+### 5.1 Power Matrix Integration (2D Excel Grid)
+- **Hub**: `/inventory/products-catalog/[id]` (also accessible when clicking any product card in Stock Overview).
+- **Behavior**: Renders `CatalogMatrixPanel` with live `Current / Threshold / Target` triad per cell.
+- **Unstocked Leaves**: Any valid cell with no database row must display `Current: 0` (never omitted from the grid).
+- **Bulk / Multi-cell Reordering**: Admin can pick multiple powers or entire bands directly on the sheet to send into the Procurement Cart.
+
+### 5.2 Procurement Cart Flow (Multi-Product Orders)
+- Instead of single-product PO creation, the Admin uses the **Procurement Cart / Shortage Queue** (`/procurement/requests`).
+- Collects power shortages from multiple products simultaneously (e.g. 15 Single Vision powers + 8 Blue Cut powers + 4 Progressive powers).
+- Groups lines by **Supplier** $\rightarrow$ generates a single comprehensive PO containing all selected products and powers.
 
 **UI styles:** Match existing admin inventory / catalog patterns (`AdminPage`, brand card borders, `AdminSelect`, matrix panel). Do not invent a separate visual system.
 

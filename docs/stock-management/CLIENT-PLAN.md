@@ -135,24 +135,53 @@ The variant already carries axis, ADD, eye, and the power range. Pinning **varia
 
 
 
-## 4. Stock Management modules
+## 4. Stock Management & Procurement modules
 
+The modules are organized under a dedicated **Stock & Procurement** section in the admin panel:
 
-| #   | Module                     | What Admin / staff does                                         |
-| --- | -------------------------- | --------------------------------------------------------------- |
-| 1   | **Stock Overview**         | Physical, reserved, available, blocked, shortages               |
-| 2   | **Power-wise Inventory**   | Search every stock leaf; open parent matrix                     |
-| 3   | **Stock Transactions**     | Ledger: receipts, sales, returns, adjustments, discrepancy      |
-| 4   | **Purchase Receipts**      | Receive against POs; accept / reject short / extra              |
-| 5   | **Stock Adjustments**      | Corrections, damage, loss, opening balances, bulk (provisioned) |
-| 5b  | **Stock Check**            | Physical count sessions (Employee count → Admin approve)        |
-| 6   | **Returns & Replacements** | Existing ops; stock effects use same leaf identity              |
-| 7   | **Stock Transfers**        | Later — multi-location                                          |
-| 8   | **Reorder Rules**          | Min / target; Run reorder; consolidated queue                   |
-| 9   | **Stock Reports**          | Movement, shortages, discrepancies                              |
+| #   | Module                     | What Admin / staff does                                                                                             |
+| --- | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Stock Overview**         | **Product Card Browser**: Cards with live stock metrics (on-hand, available, shortages). Clicking opens that product's full **2D Excel matrix**. |
+| 2   | **Power-wise Inventory**   | Searchable flat table for every power leaf (SPH/CYL) across all products, including items with 0 stock.             |
+| 3   | **Stock Dashboard / Audit**| KPI dashboard (total physical on-hand, reserved, blocked, top shortage alerts).                                     |
+| 4   | **Stock Adjustments**      | Controlled ± corrections (damaged, lost, physical mismatch) with mandatory audit reasons.                           |
+| 5   | **Stock Checks**           | Physical count sessions with count freeze & blind employee counting.                                                |
+| 6   | **Stock Transactions**     | Comprehensive ledger of all movements (receipt, pack, adjustment, reserve, return).                                 |
+| 7   | **Procurement Cart / Queue**| **Admin Purchase Cart**: Consolidates shortages and manual power picks across multiple products into supplier draft POs. |
+| 8   | **Purchase Orders**        | Vendor PO lifecycle (Create → Approve → Sent → Receive → Confirm Receipt).                                          |
+| 9   | **Suppliers**              | Supplier management, payment terms, and vendor catalog contacts.                                                    |
+| 10  | **Stock Reports**          | Movement, shortages, and aging reports.                                                                             |
 
+---
 
-Procurement **Purchase Orders** sit beside these.
+### 4.1 Stock Overview: Product Cards & 2D Matrix Entry
+
+Rather than an isolated grid tool or a plain table, **Stock Overview** serves as the operational stock catalog:
+1. **Product Cards**:
+   - Each card represents a catalog parent (e.g. *Single Vision 1.56 Blue Cut*).
+   - Prominently displays real-time stock metrics: **Total On Hand**, **Total Available**, **Reserved**, and **Active Shortages** count.
+2. **One-Click Matrix Drilldown**:
+   - Clicking any product card opens the **Live Power Matrix** (Excel view) for that specific product family.
+   - Every single cell in the grid displays the **3 values**: **Current / Threshold / Target**.
+   - If a cell has never been stocked or adjusted, it displays `Current: 0` (never omitted from the sheet).
+   - Admin can view, edit Threshold/Target rules across powers, or trigger replenishment directly from the matrix.
+
+### 4.2 Procurement Cart: Multi-Product Purchase Creation
+
+Admins do not order one product at a time. A real supplier purchase order involves multiple products, variants, and dozens of power combinations simultaneously.
+
+1. **Procurement Cart / Shortage Queue**:
+   - Acts as an **internal purchase cart** for the warehouse manager.
+   - Collects needs from:
+     - Automated **Reorder Runs** (where available $\le$ threshold).
+     - Order-fulfillment shortages (customer ordered powers not in stock).
+     - **Manual Matrix Picking**: Admin browsing a product matrix can add specific powers directly into the Procurement Cart.
+2. **Consolidation by Supplier**:
+   - Items in the cart are grouped by **Supplier**.
+   - Admin selects a supplier and generates **one consolidated Purchase Order** containing diverse products (e.g. 15 powers of Single Vision + 8 powers of Blue Cut + 4 powers of Kryptok).
+3. **Execution**:
+   - Converted into a single PO document with multi-line power items.
+   - Sends PO (Excel/PDF) $\rightarrow$ Locks powers as **Incoming** $\rightarrow$ Receives delivery with side-by-side reconciliation $\rightarrow$ Confirms accepted stock directly into each product's matrix cells.
 
 ---
 

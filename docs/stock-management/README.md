@@ -12,8 +12,7 @@ Earlier PO task tracker: [`../remaining-work.md`](../remaining-work.md) → RW-0
 | [CLIENT-FOLLOW-ONS.md](./CLIENT-FOLLOW-ONS.md) | Client + product | Agreed points for **Orders / Returns / Finance** — after stock |
 | [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md) | Engineers | What exists today, what to build/change, schema, APIs, phases |
 
-**What we build on (locked):** the **new** Products & catalog — parent → variants → same family matrix → stock cell (this variant + this SPH + this CYL). Stock does **not** invent a second matrix; it makes the **same** catalog matrix show live **Current / Threshold / Target**, with invalid **cross power** cells disabled.
-
-**How stock moves:** receipt, adjustment / stock check, reserve / release, pack deduct, return / reversal — always audited. No free-edit quantity.
-
-**Out of scope for this phase:** redesigning older separate stock-grid screens; new work stays on the catalog parent matrix.
+**What we build on (locked):**
+1. **Products & Catalog Parent as the Stock Hub**: The **Stock Overview** presents catalog product cards with live stock indicators. Clicking any card opens that product's full **2D Excel power matrix** with live **Current / Threshold / Target** on every cell (missing stock displays `0`).
+2. **Admin Procurement Cart**: Collects power shortages across multiple products simultaneously into an internal purchase cart, grouped by supplier to generate combined, multi-product Purchase Orders.
+3. **How stock moves:** receipt, adjustment / stock check, reserve / release, pack deduct, return / reversal — always audited. No free-edit quantity.
