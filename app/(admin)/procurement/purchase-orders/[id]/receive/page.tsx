@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2, Plus } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { AdminConfirmDialog } from "@/components/admin-confirm-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -291,7 +291,7 @@ export default function ReceiveGoodsPage() {
             <h3 className="mb-2 text-sm font-semibold text-(--brand-text)">
               Bill line summaries (range-wise)
             </h3>
-            <div className="mb-3 grid gap-2 sm:grid-cols-4">
+            <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-[repeat(3,minmax(0,1fr))_auto]">
               <Input
                 placeholder="Product"
                 value={billProduct}
@@ -309,7 +309,12 @@ export default function ReceiveGoodsPage() {
                 value={billQty}
                 onChange={(e) => setBillQty(e.target.value)}
               />
-              <Button type="button" variant="outline" onClick={addBillRow}>
+              <Button
+                type="button"
+                onClick={addBillRow}
+                className="h-8 w-fit justify-self-start px-4"
+              >
+                <Plus className="size-4" />
                 Add bill row
               </Button>
             </div>
