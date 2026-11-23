@@ -17,6 +17,7 @@ import {
 } from "./audit";
 import { readLensRow, type DbClient } from "./procurement-lens";
 import { receiveStockLine } from "./stock-intake";
+import { receiveCatalogStockLine } from "./catalog/catalog-stock-receive";
 import { getFinancialYear } from "./finance/financial-year";
 import { isReceivablePoStatus, openPoLineOutstanding } from "./purchase-order-math";
 import {
@@ -30,7 +31,7 @@ import {
   type BillRangeInput,
   type CloseOutstandingReason,
 } from "./purchase-order-receive-math";
-import { parseReceiveExcelBuffer, type ParsedExcelDelivery } from "./purchase-order-excel";
+import { parseReceiveExcelBuffer } from "./purchase-order-excel";
 import {
   displayDocumentName,
   persistDocumentsThenRecord,
@@ -147,9 +148,14 @@ export async function listGoodsReceiptsForPo(purchaseOrderId: string) {
   });
 }
 
-function aggregateExcelByRange(rows: ParsedExcelDelivery[]) {
+function aggregateExcelByRange(rows: Array<{
+  productLabel: string | null;
+  lensType: string | null;
+  rangeLabel: string | null;
+  deliveredQuantity: number;
+}>) {
   return rows.map((r) => ({
-    productLabel: r.productLabel || r.lensType,
+    productLabel: r.productLabel || r.lensType || "Catalog lens",
     rangeLabel: r.rangeLabel,
     quantity: r.deliveredQuantity,
   }));
@@ -312,6 +318,10 @@ export async function createGoodsReceiptWithDocuments(input: {
             id: l.id,
             lensType: l.lensType,
             lensId: l.lensId,
+            lensProductPowerId: l.lensProductPowerId,
+            lensProductVariantId: l.lensProductVariantId,
+            sph: l.sph == null ? null : Number(l.sph),
+            cyl: l.cyl == null ? null : Number(l.cyl),
             poQuantity: l.poQuantity,
             receivedQuantity: l.receivedQuantity,
             cancelledQuantity: l.cancelledQuantity,
@@ -324,7 +334,7 @@ export async function createGoodsReceiptWithDocuments(input: {
         });
         const rangeRows = reconcileBillRanges({
           billRows: input.billSummaries ?? [],
-          excelByRange: aggregateExcelByRange(parsed.rows),
+          excelByRange: aggregateExcelByRange(lines),
         });
 
         return tx.goodsReceipt.create({
@@ -351,6 +361,16 @@ export async function createGoodsReceiptWithDocuments(input: {
                 purchaseOrderLineId: line.purchaseOrderLineId,
                 lensType: (line.lensType as LensType | null) ?? null,
                 lensId: line.lensId,
+                lensProductVariantId: line.lensProductVariantId,
+                lensProductPowerId: line.lensProductPowerId,
+                sph:
+                  line.sph != null
+                    ? new Prisma.Decimal(Number(line.sph).toFixed(2))
+                    : null,
+                cyl:
+                  line.cyl != null
+                    ? new Prisma.Decimal(Number(line.cyl).toFixed(2))
+                    : null,
                 productLabel: line.productLabel,
                 rangeLabel: line.rangeLabel,
                 powerLabel: line.powerLabel,
@@ -671,43 +691,89 @@ export async function confirmGoodsReceipt(input: {
 
         for (const line of acceptedLines) {
           const poLine = poLineById.get(line.purchaseOrderLineId!);
-          if (!poLine || !line.lensType || !line.lensId) {
+          if (!poLine) {
             throw new GoodsReceiptError("PO line missing for receipt line.", 409, "INVALID_LINE");
+          }
+          const powerId = line.lensProductPowerId ?? poLine.lensProductPowerId;
+          const hasLegacy = Boolean(line.lensType && line.lensId);
+          if (!powerId && !hasLegacy) {
+            throw new GoodsReceiptError(
+              "Receipt line has neither catalog leaf nor legacy lens identity.",
+              409,
+              "INVALID_LINE"
+            );
           }
           const outstanding = openPoLineOutstanding(poLine);
           if (line.acceptedQuantity > outstanding) {
             throw new GoodsReceiptError(
-              `Accepted ${line.acceptedQuantity} exceeds outstanding ${outstanding} for ${line.powerLabel ?? line.lensId}.`,
+              `Accepted ${line.acceptedQuantity} exceeds outstanding ${outstanding} for ${line.powerLabel ?? line.lensId ?? powerId}.`,
               409,
               "ACCEPT_EXCEEDS_OUTSTANDING"
             );
           }
 
-          const lensRow = await readLensRow(tx, line.lensType, line.lensId);
-          if (!lensRow) {
-            throw new GoodsReceiptError(`Lens ${line.lensType}/${line.lensId} not found.`, 400, "LENS_NOT_FOUND");
-          }
-          const sellingPrice = Number(lensRow.price);
-          if (!(sellingPrice > 0)) {
-            throw new GoodsReceiptError(
-              `${line.productLabel ?? "Lens"} ${line.powerLabel ?? ""} has no selling price; set it before receiving.`,
-              400,
-              "LENS_PRICE_MISSING"
-            );
-          }
+          if (powerId) {
+            // Catalog leaf is the source of truth for S3+ posts (no dual-write by default).
+            const variant = poLine.lensProductVariantId
+              ? await tx.lensProductVariant.findUnique({
+                  where: { id: poLine.lensProductVariantId },
+                  select: { sellingPrice: true },
+                })
+              : await tx.lensProductPower.findUnique({
+                  where: { id: powerId },
+                  select: {
+                    lensProductVariant: { select: { sellingPrice: true } },
+                  },
+                }).then((p) => p?.lensProductVariant ?? null);
 
-          await receiveStockLine({
-            lensType: line.lensType,
-            lensId: line.lensId,
-            quantityAdded: line.acceptedQuantity,
-            // Update cost only when the PO carries a rate; otherwise keep it.
-            costPrice: poLine.rate != null ? Math.max(0, Number(poLine.rate)) : null,
-            sellingPrice,
-            actorUserId,
-            referenceId: receipt.publicId,
-            settleProcurementRequests: false,
-            client: tx,
-          });
+            const sellingPrice = variant ? Number(variant.sellingPrice) : 0;
+            if (!(sellingPrice > 0)) {
+              throw new GoodsReceiptError(
+                `${line.productLabel ?? "Lens"} ${line.powerLabel ?? ""} has no selling price; set it on the catalog variant before receiving.`,
+                400,
+                "LENS_PRICE_MISSING"
+              );
+            }
+
+            await receiveCatalogStockLine({
+              lensProductPowerId: powerId,
+              quantityAdded: line.acceptedQuantity,
+              costPrice: poLine.rate != null ? Math.max(0, Number(poLine.rate)) : null,
+              actorUserId,
+              referenceId: receipt.publicId,
+              dualWriteLegacy: false,
+              client: tx,
+            });
+          } else if (line.lensType && line.lensId) {
+            const lensRow = await readLensRow(tx, line.lensType, line.lensId);
+            if (!lensRow) {
+              throw new GoodsReceiptError(
+                `Lens ${line.lensType}/${line.lensId} not found.`,
+                400,
+                "LENS_NOT_FOUND"
+              );
+            }
+            const sellingPrice = Number(lensRow.price);
+            if (!(sellingPrice > 0)) {
+              throw new GoodsReceiptError(
+                `${line.productLabel ?? "Lens"} ${line.powerLabel ?? ""} has no selling price; set it before receiving.`,
+                400,
+                "LENS_PRICE_MISSING"
+              );
+            }
+
+            await receiveStockLine({
+              lensType: line.lensType,
+              lensId: line.lensId,
+              quantityAdded: line.acceptedQuantity,
+              costPrice: poLine.rate != null ? Math.max(0, Number(poLine.rate)) : null,
+              sellingPrice,
+              actorUserId,
+              referenceId: receipt.publicId,
+              settleProcurementRequests: false,
+              client: tx,
+            });
+          }
 
           await tx.purchaseOrderLine.update({
             where: { id: poLine.id },
@@ -1008,6 +1074,10 @@ export function serializeGoodsReceipt(receipt: GoodsReceiptDetail) {
       purchaseOrderLineId: l.purchaseOrderLineId,
       lensType: l.lensType,
       lensId: l.lensId,
+      lensProductVariantId: l.lensProductVariantId,
+      lensProductPowerId: l.lensProductPowerId,
+      sph: l.sph == null ? null : Number(l.sph),
+      cyl: l.cyl == null ? null : Number(l.cyl),
       productLabel: l.productLabel,
       rangeLabel: l.rangeLabel,
       powerLabel: l.powerLabel,

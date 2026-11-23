@@ -358,6 +358,59 @@ export function updateLensProductVariantRequest(
   );
 }
 
+export type CatalogStockLeaf = {
+  id: string;
+  variantId: string;
+  sph: number;
+  cyl: number;
+  current: number;
+  blockedQty: number;
+  minStock: number;
+  targetStock: number;
+  updatedAt: string;
+};
+
+export type CatalogMatrixStockResponse = {
+  productId: string;
+  family: LensFamilyRef & { name: string };
+  variants: Array<{
+    id: string;
+    sphMin: number;
+    sphMax: number;
+    cylMin: number;
+    cylMax: number;
+    axis: number | null;
+    eye: string | null;
+    addition: { value: number | null } | null;
+    addMin: number | null;
+  }>;
+  leaves: Record<string, CatalogStockLeaf>;
+};
+
+/** GET live Current / Threshold / Target for a catalog parent matrix. */
+export function fetchLensProductMatrixStock(productId: string) {
+  return adminFetch<CatalogMatrixStockResponse>(
+    `/api/admin/catalog/lens-products/${productId}/matrix`
+  );
+}
+
+/** PATCH threshold/target — upserts LensProductPower leaves (never changes quantity). */
+export function saveLensProductMatrixRulesRequest(
+  productId: string,
+  edits: Array<{
+    variantId: string;
+    sph: number;
+    cyl: number;
+    minStock: number;
+    targetStock: number;
+  }>
+) {
+  return adminFetch<{ leaves: CatalogStockLeaf[]; updated: number }>(
+    `/api/admin/catalog/lens-products/${productId}/matrix/rules`,
+    { method: "PATCH", body: JSON.stringify({ edits }) }
+  );
+}
+
 export { steppedRange as steppedPowerRange } from "./catalog/lens-product-range";
 export {
   formatCylSummary,

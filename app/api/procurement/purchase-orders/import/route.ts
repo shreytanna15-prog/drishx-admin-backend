@@ -23,7 +23,9 @@ export async function GET(req: NextRequest) {
     const queue = await listOpenProcurementQueue();
     const byPower = new Map<string, { lensType: string; lensId: string; product: string | null; power: string | null; required: number }>();
     for (const item of queue) {
-      if (item.openPurchaseOrder) continue;
+      // This legacy template has lensType/lensId columns only. Catalog-only
+      // requests remain selectable from the reorder queue in the PO wizard.
+      if (item.openPurchaseOrder || !item.lensType || !item.lensId) continue;
       const key = powerKey(item.lensType, item.lensId);
       const existing = byPower.get(key);
       if (existing) existing.required += item.unallocatedQuantity;
@@ -85,7 +87,11 @@ export async function POST(req: NextRequest) {
       where: { OR: parsed.rows.map((r) => ({ lensType: r.lensType, lensId: r.lensId })) },
       include: { purchaseOrder: { select: { publicId: true } } },
     });
-    const lockByPower = new Map(locks.map((l) => [powerKey(l.lensType, l.lensId), l.purchaseOrder.publicId]));
+    const lockByPower = new Map(
+      locks.flatMap((l) => l.lensType && l.lensId
+        ? [[powerKey(l.lensType, l.lensId), l.purchaseOrder.publicId] as const]
+        : [])
+    );
 
     const lines = [];
     for (const row of parsed.rows) {

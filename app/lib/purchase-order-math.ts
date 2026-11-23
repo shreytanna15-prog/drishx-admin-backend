@@ -2,6 +2,11 @@
  * Pure Purchase Order math (RW-08 Phase A) — no database access.
  */
 
+import {
+  findDuplicatePoIdentitiesInDraft,
+  type PoLineIdentityInput,
+} from "./catalog/catalog-po-identity-core";
+
 /** Approved, not yet closed — outstanding qty counts as incoming stock. */
 export const OPEN_PO_STATUSES_FOR_INCOMING = [
   "OPEN",
@@ -174,18 +179,11 @@ export function powerKey(lensType: string, lensId: string): string {
   return `${lensType}::${lensId}`;
 }
 
-/** Detect duplicate powers within a single PO draft payload. */
+/** Detect duplicate powers within a single PO draft payload (legacy and/or catalog). */
 export function findDuplicatePowersInDraft(
-  lines: Array<{ lensType: string; lensId: string }>
+  lines: PoLineIdentityInput[]
 ): string[] {
-  const seen = new Set<string>();
-  const dupes = new Set<string>();
-  for (const line of lines) {
-    const key = powerKey(line.lensType, line.lensId);
-    if (seen.has(key)) dupes.add(key);
-    else seen.add(key);
-  }
-  return [...dupes];
+  return findDuplicatePoIdentitiesInDraft(lines);
 }
 
 /**

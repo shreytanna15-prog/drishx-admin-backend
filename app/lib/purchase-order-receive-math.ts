@@ -4,6 +4,7 @@
 
 import { openPoLineOutstanding, type PoLineQtyInput } from "./purchase-order-math";
 import { missingReceiptDocuments } from "./procurement-documents";
+import { draftPowerIdentityKey } from "./catalog/catalog-po-identity-core";
 
 export const CLOSE_OUTSTANDING_REASONS = [
   "SUPPLIER_UNABLE_TO_SUPPLY",
@@ -21,8 +22,12 @@ export function isCloseOutstandingReason(value: string): value is CloseOutstandi
 }
 
 export type PowerReceiptInput = {
-  lensType: string;
-  lensId: string;
+  lensType?: string | null;
+  lensId?: string | null;
+  lensProductPowerId?: string | null;
+  lensProductVariantId?: string | null;
+  sph?: number | null;
+  cyl?: number | null;
   deliveredQuantity: number;
   damagedQuantity?: number;
   productLabel?: string | null;
@@ -32,8 +37,12 @@ export type PowerReceiptInput = {
 
 export type PoLineReceiptContext = PoLineQtyInput & {
   id: string;
-  lensType: string;
-  lensId: string;
+  lensType?: string | null;
+  lensId?: string | null;
+  lensProductPowerId?: string | null;
+  lensProductVariantId?: string | null;
+  sph?: number | null;
+  cyl?: number | null;
   productLabel?: string | null;
   rangeLabel?: string | null;
   powerLabel?: string | null;
@@ -43,6 +52,10 @@ export type ReconciledReceiptLine = {
   purchaseOrderLineId: string | null;
   lensType: string | null;
   lensId: string | null;
+  lensProductPowerId: string | null;
+  lensProductVariantId: string | null;
+  sph: number | null;
+  cyl: number | null;
   productLabel: string | null;
   rangeLabel: string | null;
   powerLabel: string | null;
@@ -76,13 +89,21 @@ export type RangeReconcileRow = {
   resolution: string | null;
 };
 
-function powerKey(lensType: string, lensId: string) {
-  return `${lensType}::${lensId}`;
+function receiptIdentityKey(row: {
+  lensType?: string | null;
+  lensId?: string | null;
+  lensProductPowerId?: string | null;
+  lensProductVariantId?: string | null;
+  sph?: number | null;
+  cyl?: number | null;
+}): string | null {
+  return draftPowerIdentityKey(row);
 }
 
 /**
  * Build power-wise reconciliation from PO lines + Excel deliveries.
  * Accepted defaults to delivered − damaged, capped at outstanding (excess is not accepted).
+ * Matches by catalog leaf id when present, else legacy lensType+lensId.
  */
 export function reconcilePowerReceipt(input: {
   poLines: PoLineReceiptContext[];
@@ -100,10 +121,24 @@ export function reconcilePowerReceipt(input: {
     warningCount: number;
   };
 } {
-  const byPower = new Map(input.poLines.map((l) => [powerKey(l.lensType, l.lensId), l]));
+  const byPower = new Map<string, PoLineReceiptContext>();
+  for (const l of input.poLines) {
+    const key = receiptIdentityKey(l);
+    if (key) byPower.set(key, l);
+    // Also index legacy so Excel rows without powerId still match bridged catalog lines.
+    if (l.lensType && l.lensId) {
+      const legacy = draftPowerIdentityKey({
+        lensType: l.lensType,
+        lensId: l.lensId,
+      });
+      if (legacy && !byPower.has(legacy)) byPower.set(legacy, l);
+    }
+  }
+
   const deliveredByPower = new Map<string, PowerReceiptInput[]>();
   for (const d of input.deliveries) {
-    const key = powerKey(d.lensType, d.lensId);
+    const key = receiptIdentityKey(d);
+    if (!key) continue;
     const list = deliveredByPower.get(key) ?? [];
     list.push(d);
     deliveredByPower.set(key, list);
@@ -111,6 +146,7 @@ export function reconcilePowerReceipt(input: {
 
   const lines: ReconciledReceiptLine[] = [];
   const seen = new Set<string>();
+  const seenPoLineIds = new Set<string>();
 
   for (const [key, rows] of deliveredByPower) {
     seen.add(key);
@@ -137,8 +173,12 @@ export function reconcilePowerReceipt(input: {
     if (!poLine) {
       lines.push({
         purchaseOrderLineId: null,
-        lensType: sample.lensType,
-        lensId: sample.lensId,
+        lensType: sample.lensType ?? null,
+        lensId: sample.lensId ?? null,
+        lensProductPowerId: sample.lensProductPowerId ?? null,
+        lensProductVariantId: sample.lensProductVariantId ?? null,
+        sph: sample.sph ?? null,
+        cyl: sample.cyl ?? null,
         productLabel: sample.productLabel ?? null,
         rangeLabel: sample.rangeLabel ?? null,
         powerLabel: sample.powerLabel ?? null,
@@ -158,6 +198,7 @@ export function reconcilePowerReceipt(input: {
       continue;
     }
 
+    seenPoLineIds.add(poLine.id);
     const outstanding = openPoLineOutstanding(poLine);
     const action = input.actions?.[key] ?? null;
     const netGood = Math.max(0, delivered - damaged);
@@ -191,8 +232,12 @@ export function reconcilePowerReceipt(input: {
 
     lines.push({
       purchaseOrderLineId: poLine.id,
-      lensType: poLine.lensType,
-      lensId: poLine.lensId,
+      lensType: poLine.lensType ?? null,
+      lensId: poLine.lensId ?? null,
+      lensProductPowerId: poLine.lensProductPowerId ?? null,
+      lensProductVariantId: poLine.lensProductVariantId ?? null,
+      sph: poLine.sph ?? null,
+      cyl: poLine.cyl ?? null,
       productLabel: sample.productLabel ?? poLine.productLabel ?? null,
       rangeLabel: sample.rangeLabel ?? poLine.rangeLabel ?? null,
       powerLabel: sample.powerLabel ?? poLine.powerLabel ?? null,
@@ -213,15 +258,21 @@ export function reconcilePowerReceipt(input: {
 
   // PO lines with no delivery → short / pending
   for (const poLine of input.poLines) {
-    const key = powerKey(poLine.lensType, poLine.lensId);
-    if (seen.has(key)) continue;
+    if (seenPoLineIds.has(poLine.id)) continue;
+    const key = receiptIdentityKey(poLine);
+    if (key && seen.has(key)) continue;
     const outstanding = openPoLineOutstanding(poLine);
     if (outstanding <= 0) continue;
-    const action = input.actions?.[key] ?? "KEEP_PENDING";
+    const actionKey = key ?? poLine.id;
+    const action = input.actions?.[actionKey] ?? "KEEP_PENDING";
     lines.push({
       purchaseOrderLineId: poLine.id,
-      lensType: poLine.lensType,
-      lensId: poLine.lensId,
+      lensType: poLine.lensType ?? null,
+      lensId: poLine.lensId ?? null,
+      lensProductPowerId: poLine.lensProductPowerId ?? null,
+      lensProductVariantId: poLine.lensProductVariantId ?? null,
+      sph: poLine.sph ?? null,
+      cyl: poLine.cyl ?? null,
       productLabel: poLine.productLabel ?? null,
       rangeLabel: poLine.rangeLabel ?? null,
       powerLabel: poLine.powerLabel ?? null,

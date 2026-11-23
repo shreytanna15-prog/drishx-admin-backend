@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildCatalogMatrix,
   toCatalogMatrixVariants,
@@ -9,6 +9,11 @@ import {
   type CatalogMatrixSheet,
   type CatalogMatrixStubColumn,
 } from "@/app/lib/catalog/catalog-matrix";
+import {
+  encodeStockLeafKey,
+  validateCatalogStockQuantities,
+} from "@/app/lib/catalog/lens-product-stock-core";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const STUB_WIDTH: Record<CatalogMatrixStubColumn["key"], number> = {
@@ -29,6 +34,22 @@ type VariantLike = {
   addMin?: number | null;
 };
 
+export type CatalogMatrixStockLeafView = {
+  current: number;
+  minStock: number;
+  targetStock: number;
+};
+
+export type CatalogMatrixRuleSaveEdit = {
+  variantId: string;
+  sph: number;
+  cyl: number;
+  minStock: number;
+  targetStock: number;
+};
+
+type Draft = { min: string; target: string };
+
 function sheetMatchesAxis(sheet: CatalogMatrixSheet, axis: number): boolean {
   return sheet.rows.some((row) => {
     const raw = row.stub.axis;
@@ -36,6 +57,32 @@ function sheetMatchesAxis(sheet: CatalogMatrixSheet, axis: number): boolean {
     const n = Number(raw);
     return Number.isFinite(n) && Math.abs(n - axis) < 1e-9;
   });
+}
+
+function baselineDraft(
+  leaf: CatalogMatrixStockLeafView | undefined
+): Draft {
+  return {
+    min: leaf && leaf.minStock > 0 ? String(leaf.minStock) : leaf ? String(leaf.minStock) : "",
+    target:
+      leaf && leaf.targetStock > 0
+        ? String(leaf.targetStock)
+        : leaf
+          ? String(leaf.targetStock)
+          : "",
+  };
+}
+
+function draftEqualsBaseline(
+  draft: Draft,
+  leaf: CatalogMatrixStockLeafView | undefined
+): boolean {
+  const base = baselineDraft(leaf);
+  const min = draft.min.trim() === "" ? "0" : draft.min.trim();
+  const target = draft.target.trim() === "" ? "0" : draft.target.trim();
+  const baseMin = base.min.trim() === "" ? "0" : base.min.trim();
+  const baseTarget = base.target.trim() === "" ? "0" : base.target.trim();
+  return min === baseMin && target === baseTarget;
 }
 
 export function CatalogMatrixPanel({
@@ -46,6 +93,10 @@ export function CatalogMatrixPanel({
   className,
   /** When true, Threshold/Target inputs are enabled (stock phase). */
   editable = false,
+  /** Live leaf values keyed by encodeStockLeafKey(variantId, sph, cyl). */
+  stockLeaves,
+  onSaveRules,
+  saving = false,
 }: {
   variants: VariantLike[];
   family: CatalogMatrixFamilyCaps;
@@ -54,8 +105,14 @@ export function CatalogMatrixPanel({
   highlightAxis?: number | null;
   className?: string;
   editable?: boolean;
+  stockLeaves?: Record<string, CatalogMatrixStockLeafView>;
+  onSaveRules?: (edits: CatalogMatrixRuleSaveEdit[]) => Promise<void> | void;
+  saving?: boolean;
 }) {
   const highlightRef = useRef<HTMLDivElement | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const model = useMemo(
     () =>
       buildCatalogMatrix(
@@ -78,7 +135,6 @@ export function CatalogMatrixPanel({
 
   const sheets = useMemo(() => {
     if (highlightAxis == null) return model.sheets;
-    // Selected axis first so deep-link doesn't open on a different axis sheet.
     const matched: CatalogMatrixSheet[] = [];
     const rest: CatalogMatrixSheet[] = [];
     for (const sheet of model.sheets) {
@@ -99,8 +155,6 @@ export function CatalogMatrixPanel({
 
   useEffect(() => {
     if (highlightAxis == null) return;
-    // Land flush on the selected-axis sheet so Attributes above is fully
-    // scrolled off-screen (no partial "Digital" peek under the chrome).
     const timer = window.setTimeout(() => {
       const target =
         highlightRef.current ??
@@ -110,6 +164,79 @@ export function CatalogMatrixPanel({
     }, 100);
     return () => window.clearTimeout(timer);
   }, [highlightAxis, firstHighlightKey, sheets.length]);
+
+  // Drop drafts that match baseline after stockLeaves refresh.
+  useEffect(() => {
+    setDrafts((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [key, draft] of Object.entries(prev)) {
+        if (draftEqualsBaseline(draft, stockLeaves?.[key])) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [stockLeaves]);
+
+  const dirtyKeys = useMemo(() => {
+    return Object.keys(drafts).filter(
+      (key) => !draftEqualsBaseline(drafts[key]!, stockLeaves?.[key])
+    );
+  }, [drafts, stockLeaves]);
+
+  function setDraftField(key: string, field: "min" | "target", value: string) {
+    setSaveError(null);
+    setDrafts((prev) => {
+      const leaf = stockLeaves?.[key];
+      const current = prev[key] ?? baselineDraft(leaf);
+      const nextDraft = { ...current, [field]: value };
+      if (draftEqualsBaseline(nextDraft, leaf)) {
+        if (!(key in prev)) return prev;
+        const { [key]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [key]: nextDraft };
+    });
+  }
+
+  async function handleSave() {
+    if (!onSaveRules || dirtyKeys.length === 0) return;
+    setSaveError(null);
+    const edits: CatalogMatrixRuleSaveEdit[] = [];
+    for (const key of dirtyKeys) {
+      const draft = drafts[key]!;
+      const parts = key.split(":");
+      if (parts.length !== 3) {
+        setSaveError(`Invalid leaf key: ${key}`);
+        return;
+      }
+      const variantId = parts[0]!;
+      const sph = Number(parts[1]);
+      const cyl = Number(parts[2]);
+      const minRaw = draft.min.trim() === "" ? "0" : draft.min.trim();
+      const targetRaw = draft.target.trim() === "" ? "0" : draft.target.trim();
+      if (!/^\d+$/.test(minRaw) || !/^\d+$/.test(targetRaw)) {
+        setSaveError("Threshold and target must be whole numbers ≥ 0.");
+        return;
+      }
+      const minStock = Number(minRaw);
+      const targetStock = Number(targetRaw);
+      const qtyError = validateCatalogStockQuantities(minStock, targetStock);
+      if (qtyError) {
+        setSaveError(qtyError);
+        return;
+      }
+      edits.push({ variantId, sph, cyl, minStock, targetStock });
+    }
+    try {
+      await onSaveRules(edits);
+      setDrafts({});
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save rules.");
+    }
+  }
 
   if (sheets.length === 0) {
     return (
@@ -140,24 +267,61 @@ export function CatalogMatrixPanel({
         className
       )}
     >
-      <div className="mb-4">
-        <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
-          Power matrix
-        </h2>
-        <p className="mt-1 text-xs text-(--brand-text-muted)">
-          Cells: Current / Threshold / Target
-          {editable
-            ? ". Threshold and Target are editable; Current is read-only."
-            : ". Triad boxes are ready; Threshold/Target save with stock leaf."}
-          {" "}
-          Cross sheet keeps the full +SPH/−CYL grid — gap-fail cells are disabled.
-        </p>
-        {highlightAxis != null ? (
-          <div className="mt-3 rounded-xl border-2 border-(--brand-primary) bg-(--brand-primary)/20 px-3 py-2 text-sm font-bold text-(--brand-text)">
-            Axis {highlightAxis}°
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-extrabold uppercase tracking-[0.14em] text-(--brand-primary)">
+            Power matrix
+          </h2>
+          <p className="mt-1 text-xs text-(--brand-text-muted)">
+            Cells: Current / Threshold / Target
+            {editable
+              ? ". Threshold and Target are editable; Current is read-only."
+              : ". Triad boxes are ready; Threshold/Target save with stock leaf."}{" "}
+            Cross sheet keeps the full +SPH/−CYL grid — gap-fail cells are
+            disabled.
+          </p>
+          {highlightAxis != null ? (
+            <div className="mt-3 rounded-xl border-2 border-(--brand-primary) bg-(--brand-primary)/20 px-3 py-2 text-sm font-bold text-(--brand-text)">
+              Axis {highlightAxis}°
+            </div>
+          ) : null}
+        </div>
+        {editable && onSaveRules ? (
+          <div className="flex shrink-0 items-center gap-2">
+            {dirtyKeys.length > 0 ? (
+              <span className="mr-1 text-xs font-semibold whitespace-nowrap text-amber-700 dark:text-amber-300">
+                {dirtyKeys.length} unsaved
+              </span>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={dirtyKeys.length === 0 || saving}
+              onClick={() => {
+                setDrafts({});
+                setSaveError(null);
+              }}
+              className="h-9 rounded-xl border-(--brand-card-border) bg-(--brand-card) px-4 text-sm font-semibold text-(--brand-text) hover:bg-(--brand-primary)/10"
+            >
+              Discard
+            </Button>
+            <Button
+              type="button"
+              disabled={dirtyKeys.length === 0 || saving}
+              onClick={() => void handleSave()}
+              className="h-9 rounded-xl bg-(--brand-primary) px-4 text-sm font-extrabold text-(--brand-primary-text) hover:opacity-95"
+            >
+              {saving ? "Saving…" : "Save thresholds"}
+            </Button>
           </div>
         ) : null}
       </div>
+
+      {saveError ? (
+        <div className="mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+          {saveError}
+        </div>
+      ) : null}
 
       <div className="space-y-6">
         {sheets.map((sheet) => {
@@ -177,7 +341,13 @@ export function CatalogMatrixPanel({
                 dimOthers && "opacity-40"
               )}
             >
-              <CatalogMatrixTable sheet={sheet} editable={editable} />
+              <CatalogMatrixTable
+                sheet={sheet}
+                editable={editable}
+                stockLeaves={stockLeaves}
+                drafts={drafts}
+                onDraftChange={setDraftField}
+              />
             </div>
           );
         })}
@@ -200,9 +370,15 @@ function stubLeft(
 function CatalogMatrixTable({
   sheet,
   editable,
+  stockLeaves,
+  drafts,
+  onDraftChange,
 }: {
   sheet: CatalogMatrixSheet;
   editable: boolean;
+  stockLeaves?: Record<string, CatalogMatrixStockLeafView>;
+  drafts: Record<string, Draft>;
+  onDraftChange: (key: string, field: "min" | "target", value: string) => void;
 }) {
   if (sheet.rows.length === 0 || sheet.dataColumns.length === 0) {
     return (
@@ -289,6 +465,9 @@ function CatalogMatrixTable({
                         cell={cell}
                         editable={editable}
                         sheetKind={sheet.kind}
+                        stockLeaves={stockLeaves}
+                        drafts={drafts}
+                        onDraftChange={onDraftChange}
                       />
                     </td>
                   );
@@ -306,10 +485,16 @@ function MatrixTriadCell({
   cell,
   editable,
   sheetKind,
+  stockLeaves,
+  drafts,
+  onDraftChange,
 }: {
   cell: CatalogMatrixCell | undefined;
   editable: boolean;
   sheetKind: CatalogMatrixSheet["kind"];
+  stockLeaves?: Record<string, CatalogMatrixStockLeafView>;
+  drafts: Record<string, Draft>;
+  onDraftChange: (key: string, field: "min" | "target", value: string) => void;
 }) {
   if (!cell || !cell.allowed) {
     return (
@@ -329,7 +514,7 @@ function MatrixTriadCell({
     );
   }
 
-  if (!cell.present) {
+  if (!cell.present || !cell.variantId) {
     return (
       <div
         className="h-9 rounded-md"
@@ -338,33 +523,44 @@ function MatrixTriadCell({
     );
   }
 
-  const canEditThreshold = editable;
+  const leafKey = encodeStockLeafKey(
+    cell.variantId,
+    cell.cellKey.sph,
+    cell.cellKey.cyl
+  );
+  const leaf = stockLeaves?.[leafKey];
+  const draft = drafts[leafKey] ?? baselineDraft(leaf);
+  const dirty = !draftEqualsBaseline(draft, leaf);
+  const current = leaf?.current ?? 0;
+
   const powerHint = [
     `SPH ${cell.cellKey.sph.toFixed(2)}`,
     `CYL ${cell.cellKey.cyl.toFixed(2)}`,
-    cell.variantId ? `Variant ${cell.variantId}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+    `Variant ${cell.variantId}`,
+  ].join(" · ");
 
   return (
     <div
-      className="flex h-9 items-center justify-center gap-0.5 rounded-md border border-dashed border-(--brand-card-border) px-1"
+      className={cn(
+        "flex h-9 items-center justify-center gap-0.5 rounded-md border border-dashed border-(--brand-card-border) px-1",
+        dirty && "ring-2 ring-amber-400"
+      )}
       title={powerHint}
     >
       <span
         className="min-w-6 rounded bg-(--brand-input-bg) px-1 py-0.5 text-center text-[11px] font-semibold tabular-nums text-(--brand-text-muted)"
         aria-label="Current stock (read-only)"
       >
-        –
+        {current}
       </span>
       <span className="text-(--brand-text-muted)/50">/</span>
       <input
         inputMode="numeric"
-        defaultValue=""
+        value={draft.min}
         placeholder="–"
-        disabled={!canEditThreshold}
-        readOnly={!canEditThreshold}
+        disabled={!editable}
+        readOnly={!editable}
+        onChange={(e) => onDraftChange(leafKey, "min", e.target.value)}
         aria-label={`Threshold for ${powerHint}`}
         className={cn(
           "h-6 w-8 rounded border border-(--brand-card-border) bg-(--brand-card) px-0.5 text-center text-[11px] tabular-nums text-(--brand-text)",
@@ -375,10 +571,11 @@ function MatrixTriadCell({
       <span className="text-(--brand-text-muted)/50">/</span>
       <input
         inputMode="numeric"
-        defaultValue=""
+        value={draft.target}
         placeholder="–"
-        disabled={!canEditThreshold}
-        readOnly={!canEditThreshold}
+        disabled={!editable}
+        readOnly={!editable}
+        onChange={(e) => onDraftChange(leafKey, "target", e.target.value)}
         aria-label={`Target for ${powerHint}`}
         className={cn(
           "h-6 w-8 rounded border border-(--brand-card-border) bg-(--brand-card) px-0.5 text-center text-[11px] tabular-nums text-(--brand-text)",

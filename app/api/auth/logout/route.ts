@@ -3,6 +3,7 @@ import {
   clearRefreshCookie,
   isMobileClient,
   parseRefreshCookie,
+  resolveAuthBrowserChannel,
   revokeRefreshToken,
 } from "../../../lib/auth";
 import { getSession } from "../../../lib/session-auth";
@@ -17,6 +18,7 @@ export async function POST(req: NextRequest) {
   const auditCtx = buildAuditRequestContext(req);
   const session = getSession(req);
   let rawRefreshToken: string | null = null;
+  const browserChannel = resolveAuthBrowserChannel(req);
 
   if (isMobileClient(req)) {
     try {
@@ -26,7 +28,10 @@ export async function POST(req: NextRequest) {
       rawRefreshToken = null;
     }
   } else {
-    rawRefreshToken = parseRefreshCookie(req.headers.get("cookie"));
+    rawRefreshToken = parseRefreshCookie(
+      req.headers.get("cookie"),
+      browserChannel
+    );
   }
 
   if (rawRefreshToken) {
@@ -44,6 +49,9 @@ export async function POST(req: NextRequest) {
   }
 
   const response = NextResponse.json({ ok: true });
-  response.headers.append("Set-Cookie", clearRefreshCookie());
+  response.headers.append(
+    "Set-Cookie",
+    clearRefreshCookie(browserChannel)
+  );
   return response;
 }

@@ -1551,6 +1551,9 @@ model LensProductVariant {
   powerRange    LensPowerRange @relation(fields: [powerRangeId], references: [id])
   axisRef       LensAxis?      @relation(fields: [axisId], references: [id])
   addition      LensAddition?  @relation(fields: [additionId], references: [id])
+  powers        LensProductPower[]
+  purchaseOrderLines PurchaseOrderLine[]
+  goodsReceiptLines  GoodsReceiptLine[]
 
   /// Uniqueness with optional dims: migration uses NULLS NOT DISTINCT.
   @@index([productId, isActive])
@@ -1558,6 +1561,129 @@ model LensProductVariant {
   @@index([axisId])
   @@index([additionId])
   @@index([isActive, updatedAt])
+}
+
+/// Stock leaf under a catalog variant — deepest pin-point (variant + exact SPH + CYL).
+/// Axis / ADD / eye live on the variant; do not duplicate them here for identity.
+model LensProductPower {
+  id                   String             @id @default(cuid())
+  lensProductVariantId String
+  lensProductVariant   LensProductVariant @relation(fields: [lensProductVariantId], references: [id], onDelete: Cascade)
+  /// Exact cell inside the variant’s power range (0.25 grid).
+  sph                  Decimal            @db.Decimal(6, 2)
+  cyl                  Decimal            @db.Decimal(6, 2)
+  /// On hand — never free-edited; posts only via audited events (S2+).
+  quantity             Int                @default(0)
+  /// Discrepancy hold until Admin adjusts (S4+).
+  blockedQty           Int                @default(0)
+  /// Threshold (min) — editable on catalog matrix in S1.
+  minStock             Int                @default(0)
+  /// Target — editable on catalog matrix in S1.
+  targetStock          Int                @default(0)
+  /// Optional bridge while shop still uses legacy leaves (S3 dual-write).
+  legacyLensType       LensType?
+  legacyLensId         String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  adjustments              CatalogStockAdjustment[]
+  movements                StockMovement[]
+  stockCheckLines          CatalogStockCheckLine[]
+  purchaseOrderLines       PurchaseOrderLine[]
+  goodsReceiptLines        GoodsReceiptLine[]
+  openPurchaseOrderPowers  OpenPurchaseOrderPower[]
+  procurementRequests      ProcurementRequest[]
+
+  @@unique([lensProductVariantId, sph, cyl])
+  @@index([lensProductVariantId])
+  @@index([legacyLensType, legacyLensId])
+  @@index([minStock, targetStock])
+}
+
+enum CatalogStockCheckStatus {
+  OPEN
+  SUBMITTED
+  VERIFIED
+  CANCELLED
+}
+
+/// Physical count session — freezes listed leaves until verified or cancelled (S2b).
+model CatalogStockCheckSession {
+  id            String                  @id @default(cuid())
+  publicId      String                  @unique
+  /// Optional: session scoped to one catalog parent (all current leaves).
+  productId     String?
+  status        CatalogStockCheckStatus @default(OPEN)
+  notes         String?
+  startedById   String
+  submittedById String?
+  verifiedById  String?
+  cancelledById String?
+  startedAt     DateTime                @default(now())
+  submittedAt   DateTime?
+  verifiedAt    DateTime?
+  cancelledAt   DateTime?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  lines         CatalogStockCheckLine[]
+
+  @@index([status, startedAt])
+  @@index([productId, status])
+  @@index([startedById, startedAt])
+  @@index([createdAt])
+}
+
+model CatalogStockCheckLine {
+  id                   String                   @id @default(cuid())
+  sessionId            String
+  session              CatalogStockCheckSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  lensProductPowerId   String
+  lensProductPower     LensProductPower         @relation(fields: [lensProductPowerId], references: [id], onDelete: Restrict)
+  /// Snapshot at session start — Admin only; never expose to Employee APIs.
+  systemQtyAtStart     Int
+  /// Employee (or Admin) counted qty.
+  countedQty           Int?
+  /// Optional Admin override before verify.
+  verifiedCountedQty   Int?
+  adjustmentId         String?
+  notes                String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  @@unique([sessionId, lensProductPowerId])
+  @@index([lensProductPowerId])
+  @@index([sessionId])
+}
+
+enum CatalogStockAdjustmentStatus {
+  APPLIED
+  /// Reserved for stock-check verify flow (S2b).
+  PENDING_VERIFY
+  REJECTED
+}
+
+/// Controlled on-hand correction against a catalog stock leaf (S2).
+model CatalogStockAdjustment {
+  id              String                        @id @default(cuid())
+  publicId        String                        @unique
+  lensProductPowerId String
+  lensProductPower   LensProductPower           @relation(fields: [lensProductPowerId], references: [id], onDelete: Restrict)
+  qtyBefore       Int
+  countedQty      Int
+  qtyDelta        Int
+  qtyAfter        Int
+  /// physical_mismatch | damaged | counting_error | wrong_entry | other
+  reasonCode      String
+  reasonText      String?
+  status          CatalogStockAdjustmentStatus  @default(APPLIED)
+  submittedById   String
+  approvedById    String?
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
+
+  @@index([lensProductPowerId, createdAt])
+  @@index([submittedById, createdAt])
+  @@index([status, createdAt])
+  @@index([createdAt])
 }
 
 // --- Audit & Logs (immutable; no FK cascade from business entities) ---
@@ -1704,24 +1830,30 @@ enum StockMovementType {
 }
 
 /// General inventory movement ledger.
+/// Catalog leaves use `lensProductPowerId`; legacy shop leaves keep lensType+lensId.
 model StockMovement {
-  id             String            @id @default(cuid())
-  lensType       LensType
-  lensId         String
-  movementType   StockMovementType
-  quantityDelta  Float
-  quantityBefore Float
-  quantityAfter  Float
-  sourceType     String?
-  referenceId    String?
-  orderId        String?
-  actorUserId    String?
-  reasonCode     String?
-  reasonText     String?
-  notes          String?
-  createdAt      DateTime          @default(now())
+  id                   String             @id @default(cuid())
+  /// Legacy leaf identity (nullable once catalog leaf is set).
+  lensType             LensType?
+  lensId               String?
+  /// Catalog stock leaf (S2+). Prefer this for new posts.
+  lensProductPowerId   String?
+  lensProductPower     LensProductPower?  @relation(fields: [lensProductPowerId], references: [id], onDelete: SetNull)
+  movementType         StockMovementType
+  quantityDelta        Float
+  quantityBefore       Float
+  quantityAfter        Float
+  sourceType           String?
+  referenceId          String?
+  orderId              String?
+  actorUserId          String?
+  reasonCode           String?
+  reasonText           String?
+  notes                String?
+  createdAt            DateTime           @default(now())
 
   @@index([lensType, lensId, createdAt])
+  @@index([lensProductPowerId, createdAt])
   @@index([orderId])
   @@index([referenceId])
 }
@@ -2376,8 +2508,12 @@ model ProcurementRequest {
   id       String                   @id @default(cuid())
   /// Human-facing reference, e.g. PR-000125.
   publicId String                   @unique
-  lensType LensType
-  lensId   String
+  /// Legacy leaf — optional when catalog leaf is set (S4).
+  lensType LensType?
+  lensId   String?
+  /// Catalog stock leaf (S4+). Prefer for new catalog Run reorder.
+  lensProductPowerId String?
+  lensProductPower   LensProductPower? @relation(fields: [lensProductPowerId], references: [id], onDelete: SetNull)
   source   ProcurementRequestSource
   status   ProcurementRequestStatus @default(OPEN)
   priority ProcurementPriority      @default(NORMAL)
@@ -2418,6 +2554,7 @@ model ProcurementRequest {
   purchaseOrderAllocations PurchaseOrderAllocation[]
 
   @@index([lensType, lensId, status])
+  @@index([lensProductPowerId, status])
   @@index([status, source])
   @@index([orderId])
   @@index([createdAt])
@@ -2477,8 +2614,16 @@ model PurchaseOrderLine {
   purchaseOrderId      String
   purchaseOrder        PurchaseOrder             @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   lineNumber           Int
-  lensType             LensType
-  lensId               String
+  /// Legacy leaf identity — optional once catalog leaf is set (S3).
+  lensType             LensType?
+  lensId               String?
+  /// Catalog stock leaf (variant + sph + cyl). Prefer for new PO lines.
+  lensProductVariantId String?
+  lensProductVariant   LensProductVariant?       @relation(fields: [lensProductVariantId], references: [id], onDelete: Restrict)
+  lensProductPowerId   String?
+  lensProductPower     LensProductPower?         @relation(fields: [lensProductPowerId], references: [id], onDelete: Restrict)
+  sph                  Decimal?                  @db.Decimal(6, 2)
+  cyl                  Decimal?                  @db.Decimal(6, 2)
   productLabel         String?
   rangeLabel           String?
   powerLabel           String?
@@ -2498,6 +2643,8 @@ model PurchaseOrderLine {
 
   @@unique([purchaseOrderId, lineNumber])
   @@index([lensType, lensId])
+  @@index([lensProductPowerId])
+  @@index([lensProductVariantId, sph, cyl])
   @@index([procurementRequestId])
   @@index([purchaseOrderId])
 }
@@ -2587,6 +2734,12 @@ model GoodsReceiptLine {
   purchaseOrderLine   PurchaseOrderLine?     @relation(fields: [purchaseOrderLineId], references: [id], onDelete: SetNull)
   lensType            LensType?
   lensId              String?
+  lensProductVariantId String?
+  lensProductVariant  LensProductVariant?    @relation(fields: [lensProductVariantId], references: [id], onDelete: SetNull)
+  lensProductPowerId  String?
+  lensProductPower    LensProductPower?      @relation(fields: [lensProductPowerId], references: [id], onDelete: SetNull)
+  sph                 Decimal?               @db.Decimal(6, 2)
+  cyl                 Decimal?               @db.Decimal(6, 2)
   productLabel        String?
   rangeLabel          String?
   powerLabel          String?
@@ -2607,6 +2760,7 @@ model GoodsReceiptLine {
   @@index([goodsReceiptId])
   @@index([purchaseOrderLineId])
   @@index([lensType, lensId])
+  @@index([lensProductPowerId])
 }
 
 /// Human-entered supplier bill range totals for range-wise reconciliation (no OCR).
@@ -2628,16 +2782,22 @@ model GoodsReceiptBillSummary {
 }
 
 /// Atomic open-power lock: one approved/open PO may cover a power at a time.
+/// One open PO per power — unique on catalog leaf and/or legacy lens identity.
 model OpenPurchaseOrderPower {
-  lensType            LensType
-  lensId              String
-  purchaseOrderId     String
-  purchaseOrder       PurchaseOrder     @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  purchaseOrderLineId String            @unique
-  purchaseOrderLine   PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Cascade)
-  createdAt           DateTime          @default(now())
+  id                   String             @id @default(cuid())
+  /// Legacy lock key (nullable when catalog-only).
+  lensType             LensType?
+  lensId               String?
+  /// Catalog stock leaf lock (S3+). Prefer for new approvals.
+  lensProductPowerId   String?            @unique
+  lensProductPower     LensProductPower?  @relation(fields: [lensProductPowerId], references: [id], onDelete: Restrict)
+  purchaseOrderId      String
+  purchaseOrder        PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrderLineId  String             @unique
+  purchaseOrderLine    PurchaseOrderLine  @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Cascade)
+  createdAt            DateTime           @default(now())
 
-  @@id([lensType, lensId])
+  @@unique([lensType, lensId])
   @@index([purchaseOrderId])
 }
 

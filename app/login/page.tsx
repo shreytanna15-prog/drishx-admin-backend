@@ -62,7 +62,10 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Client": "admin",
+        },
         body: JSON.stringify({
           email: parsed.data.email,
           password: parsed.data.password,

@@ -17,7 +17,7 @@ export type PurchaseOrderDocumentParty = {
 
 export type PurchaseOrderDocumentLine = {
   lineNumber: number;
-  lensType: string;
+  lensType: string | null;
   productLabel: string | null;
   rangeLabel: string | null;
   powerLabel: string | null;

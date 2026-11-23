@@ -32,7 +32,10 @@ import {
   addLensProductVariantsRequest,
   fetchLensAttributes,
   fetchLensProduct,
+  fetchLensProductMatrixStock,
+  saveLensProductMatrixRulesRequest,
   updateLensProductParentRequest,
+  type CatalogStockLeaf,
   type LensAttribute,
   type LensProduct,
 } from "@/app/lib/admin-lens-catalog";
@@ -99,6 +102,10 @@ export default function LensProductParentDetailPage() {
   const [coatingDraft, setCoatingDraft] = useState("");
   const [coatingBusy, setCoatingBusy] = useState(false);
   const [coatingError, setCoatingError] = useState("");
+  const [stockLeaves, setStockLeaves] = useState<
+    Record<string, CatalogStockLeaf>
+  >({});
+  const [matrixSaving, setMatrixSaving] = useState(false);
 
   const { data: powerRangeData } = useGetPowerRanges({ activeOnly: true });
   const powerRanges = useMemo(
@@ -111,15 +118,63 @@ export default function LensProductParentDetailPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetchLensProduct(id);
+      const [res, matrix] = await Promise.all([
+        fetchLensProduct(id),
+        fetchLensProductMatrixStock(id).catch(() => null),
+      ]);
       setProduct(res.product);
+      setStockLeaves(matrix?.leaves ?? {});
     } catch (err) {
       setError(errorMessage(err, "Failed to load product."));
       setProduct(null);
+      setStockLeaves({});
     } finally {
       setLoading(false);
     }
   }, [id]);
+
+  const stockLeafViews = useMemo(() => {
+    const out: Record<
+      string,
+      { current: number; minStock: number; targetStock: number }
+    > = {};
+    for (const [key, leaf] of Object.entries(stockLeaves)) {
+      out[key] = {
+        current: leaf.current,
+        minStock: leaf.minStock,
+        targetStock: leaf.targetStock,
+      };
+    }
+    return out;
+  }, [stockLeaves]);
+
+  async function saveMatrixRules(
+    edits: Array<{
+      variantId: string;
+      sph: number;
+      cyl: number;
+      minStock: number;
+      targetStock: number;
+    }>
+  ) {
+    if (!id) return;
+    setMatrixSaving(true);
+    try {
+      const res = await saveLensProductMatrixRulesRequest(id, edits);
+      setStockLeaves((prev) => {
+        const next = { ...prev };
+        for (const leaf of res.leaves) {
+          const key = `${leaf.variantId}:${leaf.sph.toFixed(2)}:${leaf.cyl.toFixed(2)}`;
+          next[key] = leaf;
+        }
+        return next;
+      });
+    } catch (err) {
+      throw new Error(errorMessage(err, "Failed to save stock rules."));
+    } finally {
+      setMatrixSaving(false);
+    }
+  }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- load on mount
@@ -414,6 +469,10 @@ export default function LensProductParentDetailPage() {
         variants={product.variants}
         familyLabel={product.family.name}
         highlightAxis={highlightAxis}
+        editable
+        stockLeaves={stockLeafViews}
+        saving={matrixSaving}
+        onSaveRules={saveMatrixRules}
         family={{
           supportsAdd: product.family.supportsAdd,
           supportsAxis: product.family.supportsAxis,

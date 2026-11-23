@@ -3,7 +3,8 @@
  *
  * SPH: −40 … +30
  * CYL: −8 … +8
- * Create/edit form step: 0.25 or 0.5 (admin picks step; options regenerate).
+ * Create/edit form step: 0.25 or 0.5 per axis (SPH and CYL each have their own
+ * step control; options regenerate independently).
  *
  * Pure module — safe for client and server (no prisma / React).
  */

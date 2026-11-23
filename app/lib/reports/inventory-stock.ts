@@ -265,6 +265,64 @@ async function loadSupportedCatalogRows(): Promise<InventoryCatalogRowInput[]> {
     });
   }
 
+  // S5: include catalog stock leaves (skip rows already covered by legacy bridge).
+  const legacyIds = new Set(rows.map((r) => r.lensId));
+  const catalogPowers = await prisma.lensProductPower.findMany({
+    select: {
+      id: true,
+      quantity: true,
+      blockedQty: true,
+      sph: true,
+      cyl: true,
+      legacyLensType: true,
+      legacyLensId: true,
+      lensProductVariant: {
+        select: {
+          skuCode: true,
+          name: true,
+          axis: true,
+          eye: true,
+          sellingPrice: true,
+          purchasePrice: true,
+          addition: { select: { value: true } },
+          product: {
+            select: {
+              family: { select: { name: true } },
+              coating: { select: { name: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  for (const power of catalogPowers) {
+    if (power.legacyLensId && legacyIds.has(power.legacyLensId)) continue;
+    const available = Math.max(0, power.quantity - power.blockedQty);
+    rows.push({
+      lensType: power.legacyLensType ?? LensType.SINGLE_VISION,
+      lensId: power.legacyLensId ?? `catalog:${power.id}`,
+      category: power.lensProductVariant.product.family.name,
+      brand: power.lensProductVariant.skuCode,
+      item: power.lensProductVariant.name,
+      coating: power.lensProductVariant.product.coating?.name ?? null,
+      progressiveType: null,
+      index: null,
+      sph: num(power.sph),
+      cyl: num(power.cyl),
+      add:
+        power.lensProductVariant.addition?.value != null
+          ? num(power.lensProductVariant.addition.value)
+          : null,
+      axis: power.lensProductVariant.axis,
+      eye: power.lensProductVariant.eye,
+      crossPower: null,
+      onHand: available,
+      isDisabled: false,
+      costPrice: num(power.lensProductVariant.purchasePrice),
+      sellingPrice: num(power.lensProductVariant.sellingPrice),
+    });
+  }
+
   return rows;
 }
 

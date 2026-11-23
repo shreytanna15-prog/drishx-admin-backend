@@ -14,6 +14,12 @@ import { isProcurementLensType } from "./procurement-lens";
 export const RECEIVE_EXCEL_COLUMN_MAP = {
   lensType: ["lensType", "lens_type", "type"],
   lensId: ["lensId", "lens_id", "id", "sku"],
+  lensProductPowerId: [
+    "lensProductPowerId",
+    "lens_product_power_id",
+    "powerId",
+    "power_id",
+  ],
   productLabel: ["product", "productLabel", "product_label", "item"],
   rangeLabel: ["range", "rangeLabel", "range_label"],
   powerLabel: ["power", "powerLabel", "power_label"],
@@ -25,8 +31,9 @@ export const RECEIVE_EXCEL_COLUMN_MAP = {
 
 export type ParsedExcelDelivery = {
   rowNumber: number;
-  lensType: LensType;
-  lensId: string;
+  lensType: LensType | null;
+  lensId: string | null;
+  lensProductPowerId: string | null;
   productLabel: string | null;
   rangeLabel: string | null;
   powerLabel: string | null;
@@ -89,7 +96,7 @@ function parseLensType(raw: string): LensType | null {
 
 /**
  * Parse a power-wise receive workbook buffer.
- * Requires lensType + lensId + quantity columns (by alias map).
+ * Requires quantity plus either lensType+lensId or lensProductPowerId.
  */
 export async function parseReceiveExcelBuffer(
   buffer: ArrayBuffer | Buffer
@@ -113,6 +120,10 @@ export async function parseReceiveExcelBuffer(
   const col = {
     lensType: findColumn(headers, RECEIVE_EXCEL_COLUMN_MAP.lensType),
     lensId: findColumn(headers, RECEIVE_EXCEL_COLUMN_MAP.lensId),
+    lensProductPowerId: findColumn(
+      headers,
+      RECEIVE_EXCEL_COLUMN_MAP.lensProductPowerId
+    ),
     productLabel: findColumn(headers, RECEIVE_EXCEL_COLUMN_MAP.productLabel),
     rangeLabel: findColumn(headers, RECEIVE_EXCEL_COLUMN_MAP.rangeLabel),
     powerLabel: findColumn(headers, RECEIVE_EXCEL_COLUMN_MAP.powerLabel),
@@ -124,8 +135,13 @@ export async function parseReceiveExcelBuffer(
 
   const errors: string[] = [];
   const warnings: string[] = [];
-  if (col.lensType < 0) errors.push("Missing required column: lensType.");
-  if (col.lensId < 0) errors.push("Missing required column: lensId.");
+  const hasLegacyCols = col.lensType >= 0 && col.lensId >= 0;
+  const hasCatalogCol = col.lensProductPowerId >= 0;
+  if (!hasLegacyCols && !hasCatalogCol) {
+    errors.push(
+      "Missing identity columns: provide lensType+lensId and/or lensProductPowerId."
+    );
+  }
   if (col.quantity < 0) errors.push("Missing required column: quantity.");
   if (errors.length) return { rows: [], errors, warnings };
 
@@ -134,21 +150,29 @@ export async function parseReceiveExcelBuffer(
 
   sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
-    const lensTypeRaw = cellText(row.getCell(col.lensType + 1).value);
-    const lensId = cellText(row.getCell(col.lensId + 1).value);
-    if (!lensTypeRaw && !lensId) return;
+    const lensTypeRaw =
+      col.lensType >= 0 ? cellText(row.getCell(col.lensType + 1).value) : "";
+    const lensId =
+      col.lensId >= 0 ? cellText(row.getCell(col.lensId + 1).value) : "";
+    const lensProductPowerId =
+      col.lensProductPowerId >= 0
+        ? cellText(row.getCell(col.lensProductPowerId + 1).value)
+        : "";
+    if (!lensTypeRaw && !lensId && !lensProductPowerId) return;
 
-    const lensType = parseLensType(lensTypeRaw);
+    const lensType = lensTypeRaw ? parseLensType(lensTypeRaw) : null;
     const qtyRaw = cellNumber(row.getCell(col.quantity + 1).value);
     const damagedRaw =
       col.damaged >= 0 ? cellNumber(row.getCell(col.damaged + 1).value) : 0;
 
-    if (!lensType) {
+    if (lensTypeRaw && !lensType) {
       errors.push(`Row ${rowNumber}: invalid lensType "${lensTypeRaw}".`);
       return;
     }
-    if (!lensId) {
-      errors.push(`Row ${rowNumber}: lensId is required.`);
+    if (!lensProductPowerId && (!lensType || !lensId)) {
+      errors.push(
+        `Row ${rowNumber}: provide lensProductPowerId or lensType+lensId.`
+      );
       return;
     }
     if (qtyRaw == null || !Number.isInteger(qtyRaw) || qtyRaw < 0) {
@@ -161,7 +185,9 @@ export async function parseReceiveExcelBuffer(
       return;
     }
 
-    const key = `${lensType}::${lensId}`;
+    const key = lensProductPowerId
+      ? `power:${lensProductPowerId}`
+      : `${lensType}::${lensId}`;
     if (seenKeys.has(key)) {
       warnings.push(
         `Row ${rowNumber}: duplicate power ${key} — quantities will be summed.`
@@ -177,7 +203,8 @@ export async function parseReceiveExcelBuffer(
     rows.push({
       rowNumber,
       lensType,
-      lensId,
+      lensId: lensId || null,
+      lensProductPowerId: lensProductPowerId || null,
       productLabel:
         col.productLabel >= 0
           ? cellText(row.getCell(col.productLabel + 1).value) || null

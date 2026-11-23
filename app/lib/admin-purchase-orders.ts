@@ -20,8 +20,12 @@ export type PurchaseOrderListRow = {
 export type PurchaseOrderLineRow = {
   id: string;
   lineNumber: number;
-  lensType: string;
-  lensId: string;
+  lensType: string | null;
+  lensId: string | null;
+  lensProductPowerId: string | null;
+  lensProductVariantId: string | null;
+  sph: number | null;
+  cyl: number | null;
   productLabel: string | null;
   rangeLabel: string | null;
   powerLabel: string | null;
@@ -113,8 +117,12 @@ export type ImportedPoLine = {
 export type ReorderQueueItem = {
   id: string;
   publicId: string;
-  lensType: string;
-  lensId: string;
+  lensType: string | null;
+  lensId: string | null;
+  lensProductPowerId: string | null;
+  lensProductVariantId: string | null;
+  sph: number | null;
+  cyl: number | null;
   requiredQuantity: number;
   requestedQuantity: number;
   orderedQuantity: number;
@@ -122,6 +130,7 @@ export type ReorderQueueItem = {
   priority: string;
   source: string;
   productLabel: string | null;
+  rangeLabel: string | null;
   powerLabel: string | null;
   brand: string | null;
   item: string | null;
@@ -131,8 +140,9 @@ export type ReorderQueueItem = {
 
 export type DraftLineForm = {
   key: string;
-  lensType: string;
-  lensId: string;
+  lensType: string | null;
+  lensId: string | null;
+  lensProductPowerId?: string | null;
   requiredQuantity: number;
   poQuantity: number;
   rate: string;
@@ -205,8 +215,12 @@ export async function createPurchaseOrderDraft(body: {
   expectedDelivery?: string | null;
   notes?: string | null;
   lines: Array<{
-    lensType: string;
-    lensId: string;
+    lensType?: string | null;
+    lensId?: string | null;
+    lensProductPowerId?: string | null;
+    lensProductVariantId?: string | null;
+    sph?: number | null;
+    cyl?: number | null;
     requiredQuantity: number;
     poQuantity: number;
     rate?: number | null;
@@ -229,8 +243,12 @@ export async function updatePurchaseOrderDraft(
     expectedDelivery?: string | null;
     notes?: string | null;
     lines: Array<{
-      lensType: string;
-      lensId: string;
+      lensType?: string | null;
+      lensId?: string | null;
+      lensProductPowerId?: string | null;
+      lensProductVariantId?: string | null;
+      sph?: number | null;
+      cyl?: number | null;
       requiredQuantity: number;
       poQuantity: number;
       rate?: number | null;
@@ -348,9 +366,12 @@ export async function importPurchaseOrderLines(file: File) {
 
 export function queueItemToDraftLine(item: ReorderQueueItem): DraftLineForm {
   return {
-    key: `${item.lensType}:${item.lensId}:${item.id}`,
+    key: item.lensProductPowerId
+      ? `power:${item.lensProductPowerId}`
+      : `${item.lensType}:${item.lensId}:${item.id}`,
     lensType: item.lensType,
     lensId: item.lensId,
+    lensProductPowerId: item.lensProductPowerId,
     requiredQuantity: item.unallocatedQuantity,
     poQuantity: item.unallocatedQuantity,
     rate: "",

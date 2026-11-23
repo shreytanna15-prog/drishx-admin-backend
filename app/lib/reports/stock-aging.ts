@@ -94,20 +94,24 @@ export async function computeStockAgingReport(options?: {
       select: {
         lensType: true,
         lensId: true,
+        lensProductPowerId: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
     }),
     prisma.goodsReceiptLine.findMany({
       where: {
-        lensType: { not: null },
-        lensId: { not: null },
         acceptedQuantity: { gt: 0 },
         goodsReceipt: { status: "CONFIRMED", confirmedAt: { not: null } },
+        OR: [
+          { AND: [{ lensType: { not: null } }, { lensId: { not: null } }] },
+          { lensProductPowerId: { not: null } },
+        ],
       },
       select: {
         lensType: true,
         lensId: true,
+        lensProductPowerId: true,
         goodsReceipt: { select: { confirmedAt: true } },
       },
     }),
@@ -115,16 +119,21 @@ export async function computeStockAgingReport(options?: {
 
   const lastReceipt = new Map<string, Date>();
   for (const m of movements) {
-    const key = `${m.lensType}::${m.lensId}`;
+    const key = m.lensProductPowerId
+      ? `catalog:${m.lensProductPowerId}`
+      : `${m.lensType}::${m.lensId}`;
     if (!lastReceipt.has(key)) {
       lastReceipt.set(key, m.createdAt);
     }
   }
   for (const line of grLines) {
-    if (!line.lensType || !line.lensId || !line.goodsReceipt.confirmedAt) {
-      continue;
-    }
-    const key = `${line.lensType}::${line.lensId}`;
+    if (!line.goodsReceipt.confirmedAt) continue;
+    const key = line.lensProductPowerId
+      ? `catalog:${line.lensProductPowerId}`
+      : line.lensType && line.lensId
+        ? `${line.lensType}::${line.lensId}`
+        : null;
+    if (!key) continue;
     lastReceipt.set(
       key,
       mergeLastReceiptDates(

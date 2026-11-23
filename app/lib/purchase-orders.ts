@@ -42,6 +42,12 @@ import {
   PO_SENT_CHANNELS,
   type PoSentChannel,
 } from "./purchase-order-sent";
+import {
+  assertDraftLineHasIdentity,
+  CatalogPoResolveError,
+  resolveDraftLineCatalogIdentity,
+} from "./catalog/catalog-po-resolve";
+import { formatCatalogPowerLabel, hasLegacyIdentity } from "./catalog/catalog-po-identity-core";
 
 export {
   MAIN_WAREHOUSE_CODE,
@@ -62,8 +68,14 @@ export class PurchaseOrderError extends Error {
 }
 
 export type DraftLineInput = {
-  lensType: LensType;
-  lensId: string;
+  /** Legacy leaf — optional when catalog identity is provided. */
+  lensType?: LensType | null;
+  lensId?: string | null;
+  /** Catalog leaf — preferred for new lines (S3). */
+  lensProductPowerId?: string | null;
+  lensProductVariantId?: string | null;
+  sph?: number | null;
+  cyl?: number | null;
   requiredQuantity: number;
   poQuantity: number;
   rate?: number | null;
@@ -164,6 +176,50 @@ async function enrichLineLabels(
   client: DbClient,
   line: DraftLineInput
 ): Promise<DraftLineInput> {
+  try {
+    assertDraftLineHasIdentity(line, 0);
+  } catch (err) {
+    if (err instanceof CatalogPoResolveError) {
+      throw new PurchaseOrderError(err.message, err.status, err.code);
+    }
+    throw err;
+  }
+
+  let catalog: Awaited<ReturnType<typeof resolveDraftLineCatalogIdentity>> = null;
+  try {
+    catalog = await resolveDraftLineCatalogIdentity(client, line);
+  } catch (err) {
+    if (err instanceof CatalogPoResolveError) {
+      throw new PurchaseOrderError(err.message, err.status, err.code);
+    }
+    throw err;
+  }
+
+  if (catalog) {
+    const legacyType = line.lensType ?? catalog.legacyLensType;
+    const legacyId = line.lensId ?? catalog.legacyLensId;
+    return {
+      ...line,
+      lensType: legacyType,
+      lensId: legacyId,
+      lensProductPowerId: catalog.lensProductPowerId,
+      lensProductVariantId: catalog.lensProductVariantId,
+      sph: catalog.sph,
+      cyl: catalog.cyl,
+      productLabel: line.productLabel ?? catalog.productLabel,
+      rangeLabel: line.rangeLabel ?? catalog.rangeLabel,
+      powerLabel: line.powerLabel ?? catalog.powerLabel,
+    };
+  }
+
+  if (!hasLegacyIdentity(line) || !line.lensType || !line.lensId) {
+    throw new PurchaseOrderError(
+      "Provide lensProductPowerId, or variantId+sph+cyl, or legacy lensType+lensId.",
+      400,
+      "IDENTITY_REQUIRED"
+    );
+  }
+
   const lens = await readLensDescriptor(client, line.lensType, line.lensId);
   if (!lens) {
     throw new PurchaseOrderError(
@@ -250,8 +306,12 @@ async function assertActiveSupplier(db: DbClient, supplierId: string) {
 function lineCreateData(lines: DraftLineInput[]) {
   return lines.map((line, index) => ({
     lineNumber: index + 1,
-    lensType: line.lensType,
-    lensId: line.lensId,
+    lensType: line.lensType ?? null,
+    lensId: line.lensId ?? null,
+    lensProductVariantId: line.lensProductVariantId ?? null,
+    lensProductPowerId: line.lensProductPowerId ?? null,
+    sph: line.sph != null ? new Prisma.Decimal(line.sph.toFixed(2)) : null,
+    cyl: line.cyl != null ? new Prisma.Decimal(line.cyl.toFixed(2)) : null,
     productLabel: line.productLabel,
     rangeLabel: line.rangeLabel,
     powerLabel: line.powerLabel,
@@ -528,25 +588,42 @@ export async function approvePurchaseOrder(input: {
     }
     await assertActiveSupplier(tx, po.supplierId);
 
-    // Atomic power locks — the (lensType, lensId) primary key rejects a second
-    // open PO for the same power, including under concurrent approval.
+    // Atomic power locks — unique on catalog leaf and/or legacy identity.
     for (const line of po.lines) {
-      const existingLock = await tx.openPurchaseOrderPower.findUnique({
-        where: { lensType_lensId: { lensType: line.lensType, lensId: line.lensId } },
-        include: { purchaseOrder: { select: { publicId: true } } },
-      });
-      if (existingLock) {
-        throw new PurchaseOrderError(
-          `${existingLock.purchaseOrder.publicId} is still open for ${line.productLabel ?? line.lensType} ${line.powerLabel ?? ""}. Close or cancel it before approving another PO for this power.`.replace(/\s+\./, "."),
-          409,
-          "PO_POWER_ALREADY_OPEN"
-        );
+      if (line.lensProductPowerId) {
+        const catalogLock = await tx.openPurchaseOrderPower.findUnique({
+          where: { lensProductPowerId: line.lensProductPowerId },
+          include: { purchaseOrder: { select: { publicId: true } } },
+        });
+        if (catalogLock) {
+          throw new PurchaseOrderError(
+            `${catalogLock.purchaseOrder.publicId} is still open for ${line.productLabel ?? "catalog"} ${line.powerLabel ?? ""}. Close or cancel it before approving another PO for this power.`.replace(/\s+\./, "."),
+            409,
+            "PO_POWER_ALREADY_OPEN"
+          );
+        }
+      }
+      if (line.lensType && line.lensId) {
+        const existingLock = await tx.openPurchaseOrderPower.findUnique({
+          where: {
+            lensType_lensId: { lensType: line.lensType, lensId: line.lensId },
+          },
+          include: { purchaseOrder: { select: { publicId: true } } },
+        });
+        if (existingLock) {
+          throw new PurchaseOrderError(
+            `${existingLock.purchaseOrder.publicId} is still open for ${line.productLabel ?? line.lensType} ${line.powerLabel ?? ""}. Close or cancel it before approving another PO for this power.`.replace(/\s+\./, "."),
+            409,
+            "PO_POWER_ALREADY_OPEN"
+          );
+        }
       }
       try {
         await tx.openPurchaseOrderPower.create({
           data: {
-            lensType: line.lensType,
-            lensId: line.lensId,
+            lensType: line.lensType ?? null,
+            lensId: line.lensId ?? null,
+            lensProductPowerId: line.lensProductPowerId ?? null,
             purchaseOrderId: po.id,
             purchaseOrderLineId: line.id,
           },
@@ -554,7 +631,7 @@ export async function approvePurchaseOrder(input: {
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
           throw new PurchaseOrderError(
-            `Another purchase order was just approved for ${line.productLabel ?? line.lensType} ${line.powerLabel ?? ""}. Reload and review.`,
+            `Another purchase order was just approved for ${line.productLabel ?? line.lensType ?? "catalog"} ${line.powerLabel ?? ""}. Reload and review.`,
             409,
             "PO_POWER_ALREADY_OPEN"
           );
@@ -565,10 +642,12 @@ export async function approvePurchaseOrder(input: {
 
     // Exact PR allocations (approve only) — one row per PR contribution per line.
     for (const line of po.lines) {
+      if (!line.lensProductPowerId && (!line.lensType || !line.lensId)) continue;
       const candidates = await tx.procurementRequest.findMany({
         where: {
-          lensType: line.lensType,
-          lensId: line.lensId,
+          ...(line.lensProductPowerId
+            ? { lensProductPowerId: line.lensProductPowerId }
+            : { lensType: line.lensType!, lensId: line.lensId! }),
           status: { in: [...OPEN_REQUEST_STATUSES] },
         },
         orderBy: { createdAt: "asc" },
@@ -856,8 +935,12 @@ export async function cancelPurchaseOrder(input: {
 export type ProcurementQueueItem = {
   id: string;
   publicId: string;
-  lensType: LensType;
-  lensId: string;
+  lensType: LensType | null;
+  lensId: string | null;
+  lensProductPowerId: string | null;
+  lensProductVariantId: string | null;
+  sph: number | null;
+  cyl: number | null;
   requiredQuantity: number;
   requestedQuantity: number;
   orderedQuantity: number;
@@ -865,6 +948,7 @@ export type ProcurementQueueItem = {
   priority: string;
   source: string;
   productLabel: string | null;
+  rangeLabel: string | null;
   powerLabel: string | null;
   brand: string | null;
   item: string | null;
@@ -882,43 +966,94 @@ export async function listOpenProcurementQueue(
     },
     orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
     take: 300,
+    include: {
+      lensProductPower: {
+        include: {
+          lensProductVariant: {
+            select: {
+              id: true,
+              name: true,
+              skuCode: true,
+              product: {
+                select: {
+                  family: { select: { name: true } },
+                  base: { select: { name: true } },
+                  color: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   });
-  const pending = rows.filter((row) => row.requestedQuantity - row.orderedQuantity > 0);
+  const pending = rows.filter(
+    (row) =>
+      row.requestedQuantity - row.orderedQuantity > 0 &&
+      (row.lensProductPower || (row.lensType && row.lensId))
+  );
 
   const locks = pending.length
     ? await client.openPurchaseOrderPower.findMany({
         where: {
-          OR: pending.map((row) => ({ lensType: row.lensType, lensId: row.lensId })),
+          OR: pending.flatMap((row) => [
+            ...(row.lensProductPowerId
+              ? [{ lensProductPowerId: row.lensProductPowerId }]
+              : []),
+            ...(row.lensType && row.lensId
+              ? [{ lensType: row.lensType, lensId: row.lensId }]
+              : []),
+          ]),
         },
         include: { purchaseOrder: { select: { id: true, publicId: true, status: true } } },
       })
     : [];
-  const lockByPower = new Map(
-    locks.map((lock) => [powerKey(lock.lensType, lock.lensId), lock.purchaseOrder])
-  );
+  const lockByPower = new Map<string, (typeof locks)[number]["purchaseOrder"]>();
+  for (const lock of locks) {
+    if (lock.lensProductPowerId) lockByPower.set(`power:${lock.lensProductPowerId}`, lock.purchaseOrder);
+    if (lock.lensType && lock.lensId) lockByPower.set(powerKey(lock.lensType, lock.lensId), lock.purchaseOrder);
+  }
 
   const result: ProcurementQueueItem[] = [];
   for (const row of pending) {
-    const lens = await readLensDescriptor(client, row.lensType, row.lensId);
+    const leaf = row.lensProductPower;
+    const variant = leaf?.lensProductVariant;
+    const lens = !leaf && row.lensType && row.lensId
+      ? await readLensDescriptor(client, row.lensType, row.lensId)
+      : null;
+    const catalogLabel = variant
+      ? [variant.skuCode, variant.product.family.name, variant.product.base.name, variant.product.color?.name]
+          .filter(Boolean).join(" · ")
+      : null;
     result.push({
       id: row.id,
       publicId: row.publicId,
       lensType: row.lensType,
       lensId: row.lensId,
+      lensProductPowerId: leaf?.id ?? null,
+      lensProductVariantId: variant?.id ?? null,
+      sph: leaf ? Number(leaf.sph) : null,
+      cyl: leaf ? Number(leaf.cyl) : null,
       requiredQuantity: row.requiredQuantity,
       requestedQuantity: row.requestedQuantity,
       orderedQuantity: row.orderedQuantity,
       unallocatedQuantity: row.requestedQuantity - row.orderedQuantity,
       priority: row.priority,
       source: row.source,
-      productLabel: lens
+      productLabel: catalogLabel ?? (lens
         ? [lens.brand, lens.item, lens.coating].filter(Boolean).join(" · ") || null
-        : null,
-      powerLabel: lens ? formatLensPower(lens) : null,
+        : null),
+      rangeLabel: variant?.name ?? null,
+      powerLabel: leaf
+        ? formatCatalogPowerLabel(Number(leaf.sph), Number(leaf.cyl))
+        : lens
+          ? formatLensPower(lens)
+          : null,
       brand: lens?.brand ?? null,
       item: lens?.item ?? null,
       coating: lens?.coating ?? null,
-      openPurchaseOrder: lockByPower.get(powerKey(row.lensType, row.lensId)) ?? null,
+      openPurchaseOrder: (leaf ? lockByPower.get(`power:${leaf.id}`) : null) ??
+        (row.lensType && row.lensId ? lockByPower.get(powerKey(row.lensType, row.lensId)) : null) ?? null,
     });
   }
   return result;
@@ -1115,6 +1250,10 @@ export function serializePurchaseOrder(po: PurchaseOrderDetail) {
       lineNumber: line.lineNumber,
       lensType: line.lensType,
       lensId: line.lensId,
+      lensProductVariantId: line.lensProductVariantId,
+      lensProductPowerId: line.lensProductPowerId,
+      sph: line.sph == null ? null : Number(line.sph),
+      cyl: line.cyl == null ? null : Number(line.cyl),
       productLabel: line.productLabel,
       rangeLabel: line.rangeLabel,
       powerLabel: line.powerLabel,

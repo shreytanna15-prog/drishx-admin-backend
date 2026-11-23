@@ -154,8 +154,8 @@ export type ReorderCheckResult =
 type ProcurementRequestRecord = {
   id: string;
   publicId: string;
-  lensType: LensType;
-  lensId: string;
+  lensType: LensType | null;
+  lensId: string | null;
   source: ProcurementRequestSource;
   status: ProcurementRequestStatus;
   priority: ProcurementPriority;

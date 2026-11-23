@@ -85,6 +85,17 @@ export function purchaseOrderErrorResponse(error: unknown) {
       { status: error.status }
     );
   }
+  const named = error as { name?: string; message?: string; status?: number; code?: string };
+  if (
+    named?.name === "CatalogStockFreezeError" ||
+    named?.name === "CatalogStockReceiveError" ||
+    named?.name === "CatalogPoResolveError"
+  ) {
+    return NextResponse.json(
+      { error: named.message ?? "Request failed.", code: named.code },
+      { status: named.status ?? 400 }
+    );
+  }
   console.error("Purchase order error:", error);
   return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
 }
@@ -106,15 +117,67 @@ export function parseDraftLines(raw: unknown): DraftLineInput[] {
       throw new PurchaseOrderError(`Invalid line at index ${index}.`, 400);
     }
     const row = item as Record<string, unknown>;
-    if (!isProcurementLensType(row.lensType)) {
+
+    const lensProductPowerId =
+      typeof row.lensProductPowerId === "string" && row.lensProductPowerId.trim()
+        ? row.lensProductPowerId.trim()
+        : typeof row.powerId === "string" && row.powerId.trim()
+          ? row.powerId.trim()
+          : null;
+    const lensProductVariantId =
+      typeof row.lensProductVariantId === "string" && row.lensProductVariantId.trim()
+        ? row.lensProductVariantId.trim()
+        : typeof row.variantId === "string" && row.variantId.trim()
+          ? row.variantId.trim()
+          : null;
+    const sphRaw = row.sph != null && row.sph !== "" ? Number(row.sph) : null;
+    const cylRaw = row.cyl != null && row.cyl !== "" ? Number(row.cyl) : null;
+    if (sphRaw != null && !Number.isFinite(sphRaw)) {
+      throw new PurchaseOrderError(`Line ${index + 1}: sph is invalid.`, 400);
+    }
+    if (cylRaw != null && !Number.isFinite(cylRaw)) {
+      throw new PurchaseOrderError(`Line ${index + 1}: cyl is invalid.`, 400);
+    }
+
+    let lensType: LensType | null = null;
+    let lensId: string | null = null;
+    if (row.lensType != null && row.lensType !== "") {
+      if (!isProcurementLensType(row.lensType)) {
+        throw new PurchaseOrderError(
+          `Line ${index + 1}: lensType must be SINGLE_VISION, KRYPTOK or PROGRESSIVE.`,
+          400
+        );
+      }
+      lensType = row.lensType as LensType;
+    }
+    if (typeof row.lensId === "string" && row.lensId.trim()) {
+      lensId = row.lensId.trim();
+    }
+
+    const hasCatalog =
+      Boolean(lensProductPowerId) ||
+      (Boolean(lensProductVariantId) && sphRaw != null && cylRaw != null);
+    const hasLegacy = Boolean(lensType && lensId);
+    if (!hasCatalog && !hasLegacy) {
       throw new PurchaseOrderError(
-        `Line ${index + 1}: lensType must be SINGLE_VISION, KRYPTOK or PROGRESSIVE.`,
+        `Line ${index + 1}: provide lensProductPowerId, or variantId+sph+cyl, or lensType+lensId.`,
+        400,
+        "IDENTITY_REQUIRED"
+      );
+    }
+    if ((lensType && !lensId) || (!lensType && lensId)) {
+      throw new PurchaseOrderError(
+        `Line ${index + 1}: lensType and lensId must be provided together.`,
         400
       );
     }
-    if (typeof row.lensId !== "string" || !row.lensId.trim()) {
-      throw new PurchaseOrderError(`Line ${index + 1}: lensId is required.`, 400);
+    if (lensProductVariantId && (sphRaw == null || cylRaw == null) && !lensProductPowerId) {
+      throw new PurchaseOrderError(
+        `Line ${index + 1}: variantId requires sph and cyl.`,
+        400
+      );
     }
+
     const poQuantity = Number(row.poQuantity);
     const requiredQuantity = Number(
       row.requiredQuantity != null ? row.requiredQuantity : row.poQuantity
@@ -139,8 +202,12 @@ export function parseDraftLines(raw: unknown): DraftLineInput[] {
       }
     }
     return {
-      lensType: row.lensType as LensType,
-      lensId: row.lensId.trim(),
+      lensType,
+      lensId,
+      lensProductPowerId,
+      lensProductVariantId,
+      sph: sphRaw,
+      cyl: cylRaw,
       requiredQuantity,
       poQuantity,
       rate,

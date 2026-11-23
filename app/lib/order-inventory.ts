@@ -154,6 +154,23 @@ export async function setOrderPickedQuantity(
     }
   }
 
+  // S4: pick short → blocked on bridged catalog leaf (no-op without legacy bridge).
+  const prevShort = Math.max(0, order.quantity - order.pickedQuantity);
+  const newShort = Math.max(0, order.quantity - clamped);
+  const addedShort = newShort - prevShort;
+  if (addedShort > 0 && lensId) {
+    const { incrementCatalogBlockedByLegacyLens } = await import(
+      "@/app/lib/catalog/catalog-stock-block"
+    );
+    await incrementCatalogBlockedByLegacyLens({
+      lensType: order.lensType,
+      lensId,
+      shortQty: addedShort,
+      actorUserId: audit?.actorUserId ?? null,
+      referenceId: order.id,
+    });
+  }
+
   return prisma.order.update({
     where: { id: order.id },
     data: { pickedQuantity: clamped },

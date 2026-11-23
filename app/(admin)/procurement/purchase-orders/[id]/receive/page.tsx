@@ -254,9 +254,9 @@ export default function ReceiveGoodsPage() {
                 onChange={(e) => setExcelFile(e.target.files?.[0] ?? null)}
               />
               <span className="text-xs text-(--brand-text-muted)">
-                Columns: lensType, lensId, quantity (optional: product, range,
-                power, damaged). Mapping is configurable when the client template
-                arrives.
+                Columns: lensProductPowerId, quantity for catalog stock (or
+                lensType, lensId, quantity for legacy stock). Optional: product,
+                range, power, damaged.
               </span>
             </label>
             <label className="block space-y-1.5 text-sm">

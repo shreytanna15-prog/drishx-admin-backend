@@ -4,6 +4,7 @@ import {
   clearRefreshCookie,
   isMobileClient,
   parseRefreshCookie,
+  resolveAuthBrowserChannel,
   rotateRefreshToken,
   signAccessToken,
 } from "../../../lib/auth";
@@ -15,6 +16,7 @@ import { toSafeUser } from "../../../lib/user-public";
 
 export async function POST(req: NextRequest) {
   let rawRefreshToken: string | null = null;
+  const browserChannel = resolveAuthBrowserChannel(req);
 
   if (isMobileClient(req)) {
     try {
@@ -24,7 +26,10 @@ export async function POST(req: NextRequest) {
       rawRefreshToken = null;
     }
   } else {
-    rawRefreshToken = parseRefreshCookie(req.headers.get("cookie"));
+    rawRefreshToken = parseRefreshCookie(
+      req.headers.get("cookie"),
+      browserChannel
+    );
   }
 
   if (!rawRefreshToken) {
@@ -48,7 +53,10 @@ export async function POST(req: NextRequest) {
 
       const response = unauthorizedResponse(rotated.code);
       if (shouldClearRefreshCookie(rotated)) {
-        response.headers.append("Set-Cookie", clearRefreshCookie());
+        response.headers.append(
+          "Set-Cookie",
+          clearRefreshCookie(browserChannel)
+        );
       }
       return response;
     }
@@ -65,14 +73,20 @@ export async function POST(req: NextRequest) {
 
     if (!user) {
       const response = unauthorizedResponse("TOKEN_INVALID");
-      response.headers.append("Set-Cookie", clearRefreshCookie());
+      response.headers.append(
+        "Set-Cookie",
+        clearRefreshCookie(browserChannel)
+      );
       return response;
     }
 
     // RW-04: suspended / rejected customers and inactive staff cannot refresh.
     const accessDenied = accountAccessErrorResponse(user);
     if (accessDenied) {
-      accessDenied.headers.append("Set-Cookie", clearRefreshCookie());
+      accessDenied.headers.append(
+        "Set-Cookie",
+        clearRefreshCookie(browserChannel)
+      );
       return accessDenied;
     }
 
@@ -94,13 +108,16 @@ export async function POST(req: NextRequest) {
     }
 
     const response = NextResponse.json(body);
-    response.headers.append(
-      "Set-Cookie",
-      buildRefreshCookie(rotated.rawToken, rotated.expiresAt)
-    );
+    if (!isMobileClient(req)) {
+      response.headers.append(
+        "Set-Cookie",
+        buildRefreshCookie(rotated.rawToken, rotated.expiresAt, browserChannel)
+      );
+    }
     return response;
-  } catch {
+  } catch (error) {
     // Infra / DB blip — keep the refresh cookie; clients treat 5xx as transient.
+    console.error("POST /api/auth/refresh error:", error);
     return NextResponse.json(
       {
         error: "Unable to refresh session. Please try again.",

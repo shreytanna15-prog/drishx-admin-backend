@@ -4,6 +4,7 @@ import {
   buildRefreshCookie,
   createRefreshToken,
   isMobileClient,
+  resolveAuthBrowserChannel,
   signAccessToken,
   type SessionPayload,
 } from "./auth";
@@ -36,7 +37,13 @@ export async function issueAuthTokens(
   }
 
   const response = NextResponse.json(body);
-  response.headers.append("Set-Cookie", buildRefreshCookie(refreshToken, expiresAt));
+  if (!isMobileClient(req)) {
+    const channel = resolveAuthBrowserChannel(req);
+    response.headers.append(
+      "Set-Cookie",
+      buildRefreshCookie(refreshToken, expiresAt, channel)
+    );
+  }
   return response;
 }
 

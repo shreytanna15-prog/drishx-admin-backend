@@ -23,7 +23,35 @@ function jwtSecret(): string {
 
 export const ACCESS_TOKEN_EXPIRY = "15m";
 export const REFRESH_TOKEN_DAYS = 30;
-export const REFRESH_COOKIE_NAME = "drishx_refresh";
+/** Shop / web BFF refresh cookie (X-Client: web or unset). */
+export const WEB_REFRESH_COOKIE_NAME = "drishx_refresh";
+/**
+ * Admin panel refresh cookie (X-Client: admin).
+ * Must differ from the web cookie: browsers share host cookies across ports, so
+ * admin (:3000) and web (:3001) would otherwise rotate the same token and force
+ * logout via refresh-family theft detection.
+ */
+export const ADMIN_REFRESH_COOKIE_NAME = "drishx_admin_refresh";
+/** @deprecated Prefer WEB_REFRESH_COOKIE_NAME or refreshCookieNameForChannel. */
+export const REFRESH_COOKIE_NAME = WEB_REFRESH_COOKIE_NAME;
+
+export type AuthBrowserChannel = "admin" | "web";
+
+export function resolveAuthBrowserChannel(req: {
+  headers: { get(name: string): string | null };
+}): AuthBrowserChannel {
+  return req.headers.get("x-client")?.toLowerCase() === "admin"
+    ? "admin"
+    : "web";
+}
+
+export function refreshCookieNameForChannel(
+  channel: AuthBrowserChannel
+): string {
+  return channel === "admin"
+    ? ADMIN_REFRESH_COOKIE_NAME
+    : WEB_REFRESH_COOKIE_NAME;
+}
 
 export type SessionPayload = {
   userId: string;
@@ -183,25 +211,28 @@ export async function rotateRefreshToken(rawToken: string): Promise<RotateRefres
   const newHash = hashRefreshToken(rawNewToken);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
 
-  const issued = await prisma.$transaction(async (tx) => {
-    const claimed = await tx.refreshToken.updateMany({
-      where: { id: existing.id, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    if (claimed.count === 0) {
-      return null;
-    }
-    await tx.refreshToken.create({
-      data: {
-        userId: existing.userId,
-        tokenHash: newHash,
-        familyId: existing.familyId,
-        expiresAt,
-        userAgent: existing.userAgent,
-      },
-    });
-    return true;
-  });
+  const issued = await prisma.$transaction(
+    async (tx) => {
+      const claimed = await tx.refreshToken.updateMany({
+        where: { id: existing.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        return null;
+      }
+      await tx.refreshToken.create({
+        data: {
+          userId: existing.userId,
+          tokenHash: newHash,
+          familyId: existing.familyId,
+          expiresAt,
+          userAgent: existing.userAgent,
+        },
+      });
+      return true;
+    },
+    { maxWait: 10_000, timeout: 30_000 }
+  );
 
   if (!issued) {
     // Lost the race; winner already claimed. Prefer concurrent recovery so the
@@ -255,23 +286,33 @@ export async function revokeRefreshToken(rawToken: string) {
   return true;
 }
 
-export function buildRefreshCookie(rawToken: string, expiresAt: Date) {
+export function buildRefreshCookie(
+  rawToken: string,
+  expiresAt: Date,
+  channel: AuthBrowserChannel = "web"
+) {
+  const name = refreshCookieNameForChannel(channel);
   const maxAge = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
   const secure = getEnv().NODE_ENV === "production" ? "; Secure" : "";
-  return `${REFRESH_COOKIE_NAME}=${rawToken}; HttpOnly${secure}; SameSite=Lax; Path=/api/auth; Max-Age=${maxAge}`;
+  return `${name}=${rawToken}; HttpOnly${secure}; SameSite=Lax; Path=/api/auth; Max-Age=${maxAge}`;
 }
 
-export function clearRefreshCookie() {
+export function clearRefreshCookie(channel: AuthBrowserChannel = "web") {
+  const name = refreshCookieNameForChannel(channel);
   const secure = getEnv().NODE_ENV === "production" ? "; Secure" : "";
-  return `${REFRESH_COOKIE_NAME}=; HttpOnly${secure}; SameSite=Lax; Path=/api/auth; Max-Age=0`;
+  return `${name}=; HttpOnly${secure}; SameSite=Lax; Path=/api/auth; Max-Age=0`;
 }
 
-export function parseRefreshCookie(cookieHeader: string | null): string | null {
+export function parseRefreshCookie(
+  cookieHeader: string | null,
+  channel: AuthBrowserChannel = "web"
+): string | null {
   if (!cookieHeader) return null;
+  const name = refreshCookieNameForChannel(channel);
   const parts = cookieHeader.split(";").map((part) => part.trim());
   for (const part of parts) {
-    if (part.startsWith(`${REFRESH_COOKIE_NAME}=`)) {
-      return decodeURIComponent(part.slice(REFRESH_COOKIE_NAME.length + 1));
+    if (part.startsWith(`${name}=`)) {
+      return decodeURIComponent(part.slice(name.length + 1));
     }
   }
   return null;

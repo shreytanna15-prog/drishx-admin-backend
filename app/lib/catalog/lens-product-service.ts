@@ -1446,25 +1446,37 @@ export type UpdateLensProductParentInput = {
 async function assertParentAttrsEditable(productId: string) {
   const variants = await prisma.lensProductVariant.findMany({
     where: { productId },
-    select: { skuCode: true },
+    select: { id: true, skuCode: true },
   });
   const skus = variants.map((v) => v.skuCode).filter(Boolean);
-  if (skus.length === 0) return;
+  const variantIds = variants.map((v) => v.id);
+  if (variantIds.length === 0) return;
 
-  const [invoiceHit, purchaseHit] = await Promise.all([
-    prisma.invoiceLine.findFirst({
-      where: { sku: { in: skus } },
-      select: { id: true },
-    }),
-    prisma.purchaseBillLine.findFirst({
-      where: { sku: { in: skus } },
+  const [invoiceHit, purchaseHit, stockHit] = await Promise.all([
+    skus.length === 0
+      ? Promise.resolve(null)
+      : prisma.invoiceLine.findFirst({
+          where: { sku: { in: skus } },
+          select: { id: true },
+        }),
+    skus.length === 0
+      ? Promise.resolve(null)
+      : prisma.purchaseBillLine.findFirst({
+          where: { sku: { in: skus } },
+          select: { id: true },
+        }),
+    prisma.lensProductPower.findFirst({
+      where: {
+        lensProductVariantId: { in: variantIds },
+        OR: [{ quantity: { gt: 0 } }, { blockedQty: { gt: 0 } }],
+      },
       select: { id: true },
     }),
   ]);
 
-  if (invoiceHit || purchaseHit) {
+  if (invoiceHit || purchaseHit || stockHit) {
     throw new LensProductServiceError(
-      "Parent attributes are locked because variants appear on invoices or purchase bills. Create a new product instead.",
+      "Parent attributes are locked because variants have stock or appear on invoices / purchase bills. Create a new product instead.",
       409,
       "ATTR_LOCKED"
     );

@@ -50,6 +50,8 @@ const AdminPageHeaderContext = createContext<AdminPageHeaderContextValue | null>
 type AdminPageProps = {
   title: string;
   subtitle?: string;
+  /** Optional page toolbar (e.g. Refresh / Run reorder) — rendered above children. */
+  actions?: ReactNode;
   children: ReactNode;
 };
 
@@ -175,7 +177,12 @@ export function AdminChrome({ children }: { children: ReactNode }) {
 }
 
 /** Sets header title/subtitle for the persistent chrome without remounting it. */
-export function AdminPage({ title, subtitle, children }: AdminPageProps) {
+export function AdminPage({
+  title,
+  subtitle,
+  actions,
+  children,
+}: AdminPageProps) {
   const ctx = useContext(AdminPageHeaderContext);
   const setHeader = ctx?.setHeader;
 
@@ -187,7 +194,16 @@ export function AdminPage({ title, subtitle, children }: AdminPageProps) {
     });
   }, [title, subtitle, setHeader]);
 
-  return <>{children}</>;
+  return (
+    <>
+      {actions ? (
+        <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+          {actions}
+        </div>
+      ) : null}
+      {children}
+    </>
+  );
 }
 
 /** @deprecated Use AdminChrome in layout + AdminPage on each page. */

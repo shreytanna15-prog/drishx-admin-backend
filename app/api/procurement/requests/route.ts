@@ -103,6 +103,22 @@ export async function GET(req: NextRequest) {
         include: {
           order: { select: { id: true, orderNumber: true, status: true } },
           reorderRule: { select: { id: true, minStock: true, targetStock: true } },
+          lensProductPower: {
+            include: {
+              lensProductVariant: {
+                select: {
+                  skuCode: true,
+                  product: {
+                    select: {
+                      family: { select: { name: true } },
+                      base: { select: { name: true } },
+                      color: { select: { name: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
         orderBy: [{ status: "asc" }, { createdAt: "desc" }],
         take: limit,
@@ -116,7 +132,7 @@ export async function GET(req: NextRequest) {
 
     // Attach lens labels (brand / coating / power) for display + power filtering.
     const lensKeys = Array.from(
-      new Set(requests.map((r) => `${r.lensType}:${r.lensId}`))
+      new Set(requests.filter((r) => r.lensType && r.lensId).map((r) => `${r.lensType}:${r.lensId}`))
     );
     const lensDetails = await Promise.all(
       lensKeys.map((key) => {
@@ -130,10 +146,24 @@ export async function GET(req: NextRequest) {
 
     const rows = requests.map((request) => {
       const lens = lensByKey.get(`${request.lensType}:${request.lensId}`);
+      const leaf = request.lensProductPower;
+      const variant = leaf?.lensProductVariant;
+      const catalogLabel = variant
+        ? [variant.skuCode, variant.product.family.name, variant.product.base.name, variant.product.color?.name]
+            .filter(Boolean).join(" · ")
+        : null;
       return {
         ...request,
-        lensLabel: lens ? formatLensLabel(request.lensType, lens) : null,
-        power: lens
+        lensLabel: catalogLabel ?? (lens && request.lensType ? formatLensLabel(request.lensType, lens) : null),
+        power: leaf
+          ? {
+              sph: Number(leaf.sph),
+              cyl: Number(leaf.cyl),
+              crossPower: null,
+              add: null,
+              eye: null,
+            }
+          : lens
           ? {
               sph: lens.sph,
               cyl: lens.cyl,

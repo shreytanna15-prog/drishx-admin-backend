@@ -60,6 +60,7 @@ import {
   type PoWizardDraftLine,
 } from "@/app/lib/purchase-order-wizard";
 import { cn } from "@/lib/utils";
+import { draftPowerIdentityKey } from "@/app/lib/catalog/catalog-po-identity-core";
 
 type LineForm = PoWizardDraftLine;
 
@@ -68,8 +69,12 @@ const ERROR_BANNER =
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-(--brand-card-border) bg-(--brand-card) px-3 text-sm text-(--brand-text)";
 
-function powerKeyOf(line: { lensType: string; lensId: string }) {
-  return `${line.lensType}::${line.lensId}`;
+function powerKeyOf(line: {
+  lensType?: string | null;
+  lensId?: string | null;
+  lensProductPowerId?: string | null;
+}) {
+  return draftPowerIdentityKey(line) ?? `${line.lensType}::${line.lensId}`;
 }
 
 function NewPurchaseOrderInner() {
@@ -126,6 +131,10 @@ function NewPurchaseOrderInner() {
               key: powerKeyOf(l),
               lensType: l.lensType,
               lensId: l.lensId,
+              lensProductPowerId: l.lensProductPowerId,
+              lensProductVariantId: l.lensProductVariantId,
+              sph: l.sph,
+              cyl: l.cyl,
               requiredQuantity: l.requiredQuantity,
               poQuantity: String(l.poQuantity),
               rate: l.rate == null ? "" : String(l.rate),
@@ -236,13 +245,17 @@ function NewPurchaseOrderInner() {
         key: powerKeyOf(item),
         lensType: item.lensType,
         lensId: item.lensId,
+        lensProductPowerId: item.lensProductPowerId,
+        lensProductVariantId: item.lensProductVariantId,
+        sph: item.sph,
+        cyl: item.cyl,
         requiredQuantity: item.unallocatedQuantity,
         poQuantity: String(item.unallocatedQuantity),
         rate: "",
         procurementRequestId: item.id,
         procurementRequestIds: [item.id],
         productLabel: item.productLabel,
-        rangeLabel: null,
+        rangeLabel: item.rangeLabel,
         powerLabel: item.powerLabel,
         openPurchaseOrder: null,
         importFingerprint: null,
@@ -364,6 +377,10 @@ function NewPurchaseOrderInner() {
       lines: lines.map((line) => ({
         lensType: line.lensType,
         lensId: line.lensId,
+        lensProductPowerId: line.lensProductPowerId,
+        lensProductVariantId: line.lensProductVariantId,
+        sph: line.sph,
+        cyl: line.cyl,
         requiredQuantity: line.requiredQuantity,
         poQuantity: Number(line.poQuantity),
         rate: line.rate.trim() === "" ? null : Number(line.rate),
@@ -538,7 +555,7 @@ function NewPurchaseOrderInner() {
                         </TableCell>
                         <TableCell className="font-medium">{item.publicId}</TableCell>
                         <TableCell>
-                          <div>{item.productLabel || LENS_TYPE_LABELS[item.lensType] || item.lensType}</div>
+                          <div>{item.productLabel || LENS_TYPE_LABELS[item.lensType ?? ""] || item.lensType || "Catalog lens"}</div>
                           <div className="text-xs text-(--brand-text-muted)">{item.powerLabel || "—"}</div>
                           {alreadyAdded ? (
                             <div className="text-xs text-(--brand-text-muted)">Already added</div>
@@ -667,7 +684,7 @@ function NewPurchaseOrderInner() {
                     return (
                       <TableRow key={line.key}>
                         <TableCell>
-                          <div>{line.productLabel || line.lensType}</div>
+                          <div>{line.productLabel || line.lensType || "Catalog lens"}</div>
                           <div className="text-xs text-(--brand-text-muted)">
                             {[line.rangeLabel, line.powerLabel].filter(Boolean).join(" · ") || "—"}
                           </div>

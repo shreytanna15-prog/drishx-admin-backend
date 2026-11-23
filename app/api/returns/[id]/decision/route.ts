@@ -209,7 +209,30 @@ export async function POST(
         });
 
         if (stockDisposition === "RETURN_TO_SALEABLE" && item.lensId) {
-          await incrementLensStock(tx, item.lensType, item.lensId, Number(item.quantity));
+          const qty = Number(item.quantity);
+          // S5: prefer bridged catalog leaf; else legacy lens table.
+          const bridged = await tx.lensProductPower.findFirst({
+            where: {
+              legacyLensType: item.lensType,
+              legacyLensId: item.lensId,
+            },
+            select: { id: true },
+          });
+          if (bridged) {
+            const { receiveCatalogStockLine } = await import(
+              "@/app/lib/catalog/catalog-stock-receive"
+            );
+            await receiveCatalogStockLine({
+              lensProductPowerId: bridged.id,
+              quantityAdded: qty,
+              actorUserId: session.userId,
+              referenceId: id,
+              dualWriteLegacy: false,
+              client: tx,
+            });
+          } else {
+            await incrementLensStock(tx, item.lensType, item.lensId, qty);
+          }
         }
       }
 

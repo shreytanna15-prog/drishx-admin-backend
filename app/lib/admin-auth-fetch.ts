@@ -36,6 +36,11 @@ const NON_REFRESHABLE_401_CODES: AuthErrorCode[] = [
   "FORBIDDEN",
 ];
 
+/** Refresh when access JWT is within this window of expiry (proactive). */
+const PROACTIVE_REFRESH_MS = 2 * 60 * 1000;
+
+const ADMIN_CLIENT_HEADERS = { "X-Client": "admin" } as const;
+
 async function responseAuthCode(res: Response): Promise<AuthErrorCode | null> {
   try {
     const data = (await res.clone().json()) as { code?: AuthErrorCode };
@@ -68,6 +73,26 @@ function isTransientRefreshStatus(status: number) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+/** Read JWT `exp` without verifying — used only for proactive refresh timing. */
+export function accessTokenExpiresAtMs(token: string): number | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2 || !parts[1]) return null;
+    const json = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(json) as { exp?: unknown };
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function accessTokenNeedsRefresh(token: string | null): boolean {
+  if (!token) return false;
+  const expMs = accessTokenExpiresAtMs(token);
+  if (expMs == null) return false;
+  return expMs - Date.now() <= PROACTIVE_REFRESH_MS;
+}
+
 export async function refreshAccessToken(): Promise<RefreshOutcome> {
   if (refreshPromise) return refreshPromise;
 
@@ -78,7 +103,10 @@ export async function refreshAccessToken(): Promise<RefreshOutcome> {
       const res = await fetch("/api/auth/refresh", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...ADMIN_CLIENT_HEADERS,
+        },
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -113,7 +141,10 @@ export async function logoutSession(): Promise<void> {
     await fetch("/api/auth/logout", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...ADMIN_CLIENT_HEADERS,
+      },
     });
   } catch {
     // best effort
@@ -122,12 +153,28 @@ export async function logoutSession(): Promise<void> {
   }
 }
 
+function mergeAdminHeaders(init?: RequestInit): Headers {
+  const headers = new Headers(init?.headers);
+  headers.set("X-Client", "admin");
+  return headers;
+}
+
 export async function adminAuthFetch(
   path: string,
   init?: RequestInit,
   allowRetry = true
 ): Promise<Response> {
-  const headers = new Headers(init?.headers);
+  // Proactive refresh before the access JWT expires so mutations are less
+  // likely to hit 401 + cookie rotation races mid-click.
+  if (accessTokenNeedsRefresh(getAccessToken())) {
+    const proactive = await refreshAccessToken();
+    if (proactive.status === "transient") {
+      await new Promise((r) => setTimeout(r, 400));
+      await refreshAccessToken();
+    }
+  }
+
+  const headers = mergeAdminHeaders(init);
   const token = getAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   // Do not force Content-Type for FormData — browser must set multipart boundary.
@@ -161,7 +208,7 @@ export async function adminAuthFetch(
     return res;
   }
 
-  const retryHeaders = new Headers(init?.headers);
+  const retryHeaders = mergeAdminHeaders(init);
   const nextToken = getAccessToken();
   if (nextToken) retryHeaders.set("Authorization", `Bearer ${nextToken}`);
   if (init?.body && !(init.body instanceof FormData) && !retryHeaders.has("Content-Type")) {

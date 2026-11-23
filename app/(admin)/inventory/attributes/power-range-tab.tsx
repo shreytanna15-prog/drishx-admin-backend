@@ -42,7 +42,10 @@ const errorBannerClass =
   "rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200";
 
 type FormState = {
-  step: PowerStep;
+  /** Independent step for SPH bound selects. */
+  sphStep: PowerStep;
+  /** Independent step for CYL bound selects. */
+  cylStep: PowerStep;
   sphMin: string;
   sphMax: string;
   cylMin: string;
@@ -52,7 +55,8 @@ type FormState = {
 
 /** Open create at 0 so both SPH/CYL lists start there; scroll up/down for rest. */
 const EMPTY_FORM: FormState = {
-  step: 0.25,
+  sphStep: 0.25,
+  cylStep: 0.25,
   sphMin: "0",
   sphMax: "0",
   cylMin: "0",
@@ -95,10 +99,17 @@ function BoundSelect({
   );
 }
 
-function inferStepFromBounds(row: LensPowerRange): PowerStep {
-  const vals = [row.sphMin, row.sphMax, row.cylMin, row.cylMax];
+function inferStepFromValues(vals: number[]): PowerStep {
   const needsQuarter = vals.some((v) => Math.abs(Math.round(v * 4) % 2) === 1);
   return needsQuarter ? 0.25 : 0.5;
+}
+
+function stepSelectValue(step: PowerStep): string {
+  return step === 0.5 ? "0.50" : "0.25";
+}
+
+function stepLabel(step: PowerStep): string {
+  return step === 0.5 ? "0.50" : "0.25";
 }
 
 function isActiveToggle(vars: UpdatePowerRangeVariables) {
@@ -166,12 +177,12 @@ export function PowerRangeTab({
 
   const bounds = useMemo(() => parseBounds(form), [form]);
   const sphOptions = useMemo(
-    () => getPowerSelectOptions({ axis: "sph", step: form.step }),
-    [form.step]
+    () => getPowerSelectOptions({ axis: "sph", step: form.sphStep }),
+    [form.sphStep]
   );
   const cylOptions = useMemo(
-    () => getPowerSelectOptions({ axis: "cyl", step: form.step }),
-    [form.step]
+    () => getPowerSelectOptions({ axis: "cyl", step: form.cylStep }),
+    [form.cylStep]
   );
   const preview = useMemo(() => {
     if (!bounds) return null;
@@ -182,12 +193,19 @@ export function PowerRangeTab({
     };
   }, [bounds]);
 
-  function applyStep(nextStep: PowerStep) {
+  function applySphStep(nextStep: PowerStep) {
     setForm((f) => ({
       ...f,
-      step: nextStep,
+      sphStep: nextStep,
       sphMin: String(snapPowerToStep(Number(f.sphMin) || 0, "sph", nextStep)),
       sphMax: String(snapPowerToStep(Number(f.sphMax) || 0, "sph", nextStep)),
+    }));
+  }
+
+  function applyCylStep(nextStep: PowerStep) {
+    setForm((f) => ({
+      ...f,
+      cylStep: nextStep,
       cylMin: String(snapPowerToStep(Number(f.cylMin) || 0, "cyl", nextStep)),
       cylMax: String(snapPowerToStep(Number(f.cylMax) || 0, "cyl", nextStep)),
     }));
@@ -203,7 +221,8 @@ export function PowerRangeTab({
   function openEdit(row: LensPowerRange) {
     setEditing(row);
     setForm({
-      step: inferStepFromBounds(row),
+      sphStep: inferStepFromValues([row.sphMin, row.sphMax]),
+      cylStep: inferStepFromValues([row.cylMin, row.cylMax]),
       sphMin: String(row.sphMin),
       sphMax: String(row.sphMax),
       cylMin: String(row.cylMin),
@@ -267,7 +286,7 @@ export function PowerRangeTab({
         onOpenChange={onShowFormChange}
         size="md"
         title={editing ? "Edit Power range" : "Add Power range"}
-        description="SPH −40…+30 · CYL −8…+8. Pick a step, then bounds. Label is generated from SPH, e.g. -6.00 to +2.00."
+        description="SPH −40…+30 · CYL −8…+8. Pick a step for each axis, then bounds. Label is generated from SPH, e.g. -6.00 to +2.00."
       >
         <div className="flex flex-col gap-4">
           {formError ? (
@@ -276,12 +295,25 @@ export function PowerRangeTab({
             </div>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1.5 sm:col-span-2">
-              <span className={labelClass}>Step</span>
+            <label className="space-y-1.5">
+              <span className={labelClass}>SPH step</span>
               <AdminSelect
-                value={form.step === 0.5 ? "0.50" : "0.25"}
+                value={stepSelectValue(form.sphStep)}
                 onValueChange={(v) =>
-                  applyStep(v === "0.50" ? 0.5 : 0.25)
+                  applySphStep(v === "0.50" ? 0.5 : 0.25)
+                }
+                options={STEP_OPTIONS}
+                placeholder="0.25"
+                size="sm"
+                triggerClassName={selectClass}
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className={labelClass}>CYL step</span>
+              <AdminSelect
+                value={stepSelectValue(form.cylStep)}
+                onValueChange={(v) =>
+                  applyCylStep(v === "0.50" ? 0.5 : 0.25)
                 }
                 options={STEP_OPTIONS}
                 placeholder="0.25"
@@ -333,7 +365,8 @@ export function PowerRangeTab({
                       {preview.cyl}
                     </span>
                     <span className="text-xs text-(--brand-text-muted)">
-                      Step {form.step === 0.5 ? "0.50" : "0.25"}
+                      SPH step {stepLabel(form.sphStep)} · CYL step{" "}
+                      {stepLabel(form.cylStep)}
                     </span>
                   </>
                 ) : (

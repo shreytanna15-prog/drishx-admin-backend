@@ -321,9 +321,10 @@ async function loadMatrixRows(
   }
   const onOrder = new Map<string, number>();
   for (const line of poLines) {
+    if (!line.lensId) continue;
     onOrder.set(line.lensId, (onOrder.get(line.lensId) ?? 0) + openPoLineOutstanding(line));
   }
-  const lockById = new Map(locks.map((l) => [l.lensId, l.purchaseOrder]));
+  const lockById = new Map(locks.filter((l) => l.lensId).map((l) => [l.lensId!, l.purchaseOrder]));
 
   return lenses.map((lens) => {
     const rule = ruleById.get(lens.id);

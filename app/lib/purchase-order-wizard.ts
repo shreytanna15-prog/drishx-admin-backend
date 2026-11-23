@@ -16,8 +16,12 @@ export type PoWizardLineInput = {
  */
 export type PoWizardDraftLine = {
   key: string;
-  lensType: string;
-  lensId: string;
+  lensType: string | null;
+  lensId: string | null;
+  lensProductPowerId?: string | null;
+  lensProductVariantId?: string | null;
+  sph?: number | null;
+  cyl?: number | null;
   requiredQuantity: number;
   poQuantity: string;
   rate: string;
