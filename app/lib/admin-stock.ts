@@ -44,6 +44,26 @@ export type CatalogStockPower = {
   updatedAt: string;
 };
 
+export type CatalogStockProductCard = {
+  productId: string;
+  name: string;
+  familyCode: string;
+  familyName: string;
+  baseName: string;
+  materialName: string | null;
+  indexValue: number | null;
+  coatingName: string | null;
+  colorName: string | null;
+  variantCount: number;
+  leafCount: number;
+  totalOnHand: number;
+  totalReserved: number;
+  totalAvailable: number;
+  totalBlocked: number;
+  activeShortagesCount: number;
+  openPoCount: number;
+};
+
 export type CatalogStockOverview = {
   leafCount: number;
   onHandSum: number;
@@ -54,6 +74,7 @@ export type CatalogStockOverview = {
   openPoLeafCount: number;
   topShortages: Array<{
     id: string;
+    productId: string;
     skuCode: string;
     name: string;
     family: string;
@@ -63,6 +84,7 @@ export type CatalogStockOverview = {
     incoming: number;
     openPoPublicId: string | null;
   }>;
+  productCards: CatalogStockProductCard[];
 };
 
 export type CatalogStockTransaction = {
@@ -232,6 +254,23 @@ export function createCatalogStockAdjustmentRequest(body: {
   reasonText?: string | null;
 }) {
   return adminFetch<{ adjustment: CatalogStockAdjustment }>(
+    `/api/admin/stock/adjustments`,
+    { method: "POST", body: JSON.stringify(body) }
+  );
+}
+
+export function createBulkCatalogStockAdjustmentsRequest(body: {
+  items: Array<{
+    powerId?: string;
+    variantId?: string;
+    sph?: number;
+    cyl?: number;
+    countedQty: number;
+    reasonCode: string;
+    reasonText?: string | null;
+  }>;
+}) {
+  return adminFetch<{ adjustments: CatalogStockAdjustment[]; count: number }>(
     `/api/admin/stock/adjustments`,
     { method: "POST", body: JSON.stringify(body) }
   );

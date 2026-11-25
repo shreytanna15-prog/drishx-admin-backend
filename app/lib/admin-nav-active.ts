@@ -36,8 +36,20 @@ export function resolveActiveTitle(
   if (pathMatchesRoute(pathname, "/inventory/stock-overview")) {
     return "Stock Overview";
   }
+  if (pathMatchesRoute(pathname, "/inventory/stock-dashboard")) {
+    return "Stock Dashboard / Audit";
+  }
   if (pathMatchesRoute(pathname, "/inventory/power-wise-stock")) {
-    return "Reorder Rules";
+    return "Power-wise Inventory";
+  }
+  if (pathMatchesRoute(pathname, "/inventory/stock-transactions")) {
+    return "Stock Transactions";
+  }
+  if (pathMatchesRoute(pathname, "/inventory/stock-adjustments")) {
+    return "Stock Adjustments";
+  }
+  if (pathMatchesRoute(pathname, "/inventory/stock-checks")) {
+    return "Stock Checks";
   }
   if (pathMatchesRoute(pathname, "/inventory/stock-matrix")) return "Stock Matrix";
   if (pathMatchesRoute(pathname, "/procurement/suppliers")) return "Suppliers";
@@ -51,7 +63,7 @@ export function resolveActiveTitle(
     return "Purchase Orders";
   }
   if (pathMatchesRoute(pathname, "/procurement/requests")) {
-    return "Procurement Requests";
+    return "Procurement Cart";
   }
   if (pathMatchesRoute(pathname, "/orders/new")) return "Create Order";
   if (pathMatchesRoute(pathname, "/orders/overview")) return "Orders overview";

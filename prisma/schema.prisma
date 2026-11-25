@@ -1631,6 +1631,8 @@ model LensProductPower {
   /// Optional bridge while shop still uses legacy leaves (S3 dual-write).
   legacyLensType       LensType?
   legacyLensId         String?
+  preferredSupplierId  String?
+  preferredSupplier    Supplier?          @relation("LensPowerPreferredSupplier", fields: [preferredSupplierId], references: [id], onDelete: SetNull)
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
   adjustments              CatalogStockAdjustment[]
@@ -2099,6 +2101,8 @@ model Supplier {
   supplierPayments   SupplierPayment[]
   ledgerEntries      SupplierLedgerEntry[]
   reorderRules       ReorderRule[]
+  preferredPowers    LensProductPower[]    @relation("LensPowerPreferredSupplier")
+  procurementRequests ProcurementRequest[] @relation("ProcurementRequestSupplier")
 
   @@index([name])
   @@index([gstin])
@@ -2584,6 +2588,8 @@ model ProcurementRequest {
 
   reorderRuleId String?
   reorderRule   ReorderRule? @relation(fields: [reorderRuleId], references: [id], onDelete: SetNull)
+  supplierId    String?
+  supplier      Supplier?    @relation("ProcurementRequestSupplier", fields: [supplierId], references: [id], onDelete: SetNull)
 
   // --- Reorder event snapshot (PDF §9) ---
   stockAtTrigger       Int?
@@ -2608,6 +2614,7 @@ model ProcurementRequest {
 
   @@index([lensType, lensId, status])
   @@index([lensProductPowerId, status])
+  @@index([supplierId, status])
   @@index([status, source])
   @@index([orderId])
   @@index([createdAt])

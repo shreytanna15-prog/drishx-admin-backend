@@ -22,6 +22,12 @@ import {
   isProcurementLensType,
   readLensDescriptor,
 } from "../../../lib/procurement-lens";
+import {
+  addCatalogItemsToProcurementCart,
+  updateProcurementCartItems,
+  type CatalogCartItemInput,
+} from "../../../lib/catalog/catalog-procurement-cart";
+import { actorFromSession } from "../../../lib/audit";
 
 const SOURCES = Object.values(ProcurementRequestSource);
 const PRIORITIES = Object.values(ProcurementPriority);
@@ -103,15 +109,24 @@ export async function GET(req: NextRequest) {
         include: {
           order: { select: { id: true, orderNumber: true, status: true } },
           reorderRule: { select: { id: true, minStock: true, targetStock: true } },
+          supplier: { select: { id: true, name: true } },
           lensProductPower: {
             include: {
+              preferredSupplier: { select: { id: true, name: true } },
               lensProductVariant: {
                 select: {
+                  id: true,
                   skuCode: true,
+                  name: true,
+                  axis: true,
+                  eye: true,
+                  addition: { select: { value: true } },
                   product: {
                     select: {
-                      family: { select: { name: true } },
+                      id: true,
+                      family: { select: { code: true, name: true } },
                       base: { select: { name: true } },
+                      coating: { select: { name: true } },
                       color: { select: { name: true } },
                     },
                   },
@@ -148,20 +163,40 @@ export async function GET(req: NextRequest) {
       const lens = lensByKey.get(`${request.lensType}:${request.lensId}`);
       const leaf = request.lensProductPower;
       const variant = leaf?.lensProductVariant;
-      const catalogLabel = variant
-        ? [variant.skuCode, variant.product.family.name, variant.product.base.name, variant.product.color?.name]
-            .filter(Boolean).join(" · ")
+      const productName = variant
+        ? [
+            variant.product.family.name,
+            variant.product.base.name,
+            variant.product.coating?.name,
+            variant.product.color?.name,
+          ]
+            .filter(Boolean)
+            .join(" · ")
         : null;
+      const catalogLabel = variant
+        ? [variant.skuCode, productName].filter(Boolean).join(" · ")
+        : null;
+      const resolvedSupplier =
+        request.supplier ?? leaf?.preferredSupplier ?? null;
       return {
         ...request,
-        lensLabel: catalogLabel ?? (lens && request.lensType ? formatLensLabel(request.lensType, lens) : null),
+        supplierId: resolvedSupplier?.id ?? request.supplierId ?? null,
+        supplierName: resolvedSupplier?.name ?? null,
+        productId: variant?.product.id ?? null,
+        productName,
+        familyCode: variant?.product.family.code ?? null,
+        skuCode: variant?.skuCode ?? null,
+        lensLabel:
+          catalogLabel ??
+          (lens && request.lensType ? formatLensLabel(request.lensType, lens) : null),
         power: leaf
           ? {
               sph: Number(leaf.sph),
               cyl: Number(leaf.cyl),
               crossPower: null,
-              add: null,
-              eye: null,
+              add: variant?.addition?.value != null ? Number(variant.addition.value) : null,
+              eye: variant?.eye ?? null,
+              axis: variant?.axis ?? null,
             }
           : lens
           ? {
@@ -232,6 +267,55 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
+    // Catalog Procurement Cart path: single or batch `{ items: [...] }` or `{ powerId / variantId }`
+    if (
+      Array.isArray(body?.items) ||
+      typeof body?.powerId === "string" ||
+      typeof body?.variantId === "string"
+    ) {
+      const rawItems: unknown[] = Array.isArray(body?.items)
+        ? body.items
+        : [body];
+      const priority =
+        oneOf(body?.priority, PRIORITIES) ?? ProcurementPriority.NORMAL;
+      const cartItems: CatalogCartItemInput[] = rawItems.map((entry) => {
+        const rec = (entry ?? {}) as Record<string, unknown>;
+        return {
+          powerId: typeof rec.powerId === "string" ? rec.powerId : undefined,
+          variantId:
+            typeof rec.variantId === "string" ? rec.variantId : undefined,
+          sph: typeof rec.sph === "number" ? rec.sph : undefined,
+          cyl: typeof rec.cyl === "number" ? rec.cyl : undefined,
+          quantity: Number(rec.quantity),
+          supplierId:
+            typeof rec.supplierId === "string"
+              ? rec.supplierId
+              : typeof body?.supplierId === "string"
+                ? body.supplierId
+                : undefined,
+          priority:
+            typeof rec.priority === "string"
+              ? oneOf(rec.priority, PRIORITIES) ?? priority
+              : priority,
+          reason:
+            typeof rec.reason === "string"
+              ? rec.reason
+              : typeof body?.reason === "string"
+                ? body.reason
+                : null,
+        };
+      });
+
+      const result = await addCatalogItemsToProcurementCart({
+        items: cartItems,
+        approveImmediately: session.role === "ADMIN" && body?.approveImmediately !== false,
+        actor: actorFromSession(session),
+        request: buildAuditRequestContext(req),
+      });
+
+      return NextResponse.json(result, { status: 201 });
+    }
+
     if (!isProcurementLensType(body?.lensType)) {
       return NextResponse.json(
         { error: "lensType must be SINGLE_VISION, KRYPTOK or PROGRESSIVE." },
@@ -271,6 +355,52 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json(
       { error: message || "Internal Server Error" },
+      { status: 400 }
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// PATCH /api/procurement/requests
+// Access: ADMIN | EMPLOYEE (procurement.view)
+// Bulk-assign supplier or update requestedQuantity on open cart items.
+// ─────────────────────────────────────────────────────────────
+export async function PATCH(req: NextRequest) {
+  const auth = getSessionOrUnauthorized(req);
+  if (!auth.session) {
+    return auth.error;
+  }
+  const session = auth.session;
+  if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
+  if (session.role === "EMPLOYEE") {
+    const gate = await requireStaffPermission(session, "procurement.view");
+    if ("error" in gate) return gate.error;
+  }
+
+  try {
+    const body = (await req.json().catch(() => null)) as {
+      ids?: string[];
+      supplierId?: string | null;
+      requestedQuantity?: number;
+    } | null;
+
+    const ids = Array.isArray(body?.ids)
+      ? body.ids.map((x) => String(x ?? "").trim()).filter(Boolean)
+      : [];
+
+    const result = await updateProcurementCartItems({
+      ids,
+      supplierId: body?.supplierId,
+      requestedQuantity: body?.requestedQuantity,
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error("PATCH /api/procurement/requests error:", error);
+    return NextResponse.json(
+      { error: (error as Error).message || "Internal Server Error" },
       { status: 400 }
     );
   }

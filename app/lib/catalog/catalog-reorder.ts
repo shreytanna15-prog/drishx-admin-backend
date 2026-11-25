@@ -175,12 +175,18 @@ async function runCatalogReorderCheckLocked(
     `Leaf ${position.skuCode} ${position.sph.toFixed(2)}/${position.cyl.toFixed(2)}`,
   ].join(" | ");
 
+  const leafSupplier = await db.lensProductPower.findUnique({
+    where: { id: position.id },
+    select: { preferredSupplierId: true },
+  });
+
   const created = await db.procurementRequest.create({
     data: {
       publicId: await nextProcurementRequestPublicId(db),
       lensType: (position.legacyLensType as LensType | null) ?? null,
       lensId: position.legacyLensId,
       lensProductPowerId: position.id,
+      supplierId: leafSupplier?.preferredSupplierId ?? null,
       source: ProcurementRequestSource.MINIMUM_STOCK_THRESHOLD,
       status: ProcurementRequestStatus.OPEN,
       priority,

@@ -64,7 +64,7 @@ describe("resolveActiveTitle", () => {
     );
     assert.equal(
       resolveActiveTitle("/procurement/requests"),
-      "Procurement Requests"
+      "Procurement Cart"
     );
   });
 
@@ -80,7 +80,8 @@ describe("RW-08 Phase C nav entries", () => {
   it("activates Stock Matrix, Suppliers and Reorder Rules", () => {
     assert.equal(resolveActiveTitle("/inventory/stock-matrix"), "Stock Matrix");
     assert.equal(resolveActiveTitle("/procurement/suppliers"), "Suppliers");
-    assert.equal(resolveActiveTitle("/inventory/power-wise-stock"), "Reorder Rules");
+    assert.equal(resolveActiveTitle("/inventory/power-wise-stock"), "Power-wise Inventory");
+    assert.equal(resolveActiveTitle("/inventory/stock-dashboard"), "Stock Dashboard / Audit");
   });
 });
 

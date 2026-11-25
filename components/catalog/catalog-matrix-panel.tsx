@@ -13,6 +13,7 @@ import {
   encodeStockLeafKey,
   validateCatalogStockQuantities,
 } from "@/app/lib/catalog/lens-product-stock-core";
+import { AdminSelect } from "@/components/admin-select";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +47,13 @@ export type CatalogMatrixRuleSaveEdit = {
   cyl: number;
   minStock: number;
   targetStock: number;
+};
+
+export type CatalogMatrixCartPickItem = {
+  variantId: string;
+  sph: number;
+  cyl: number;
+  suggestedQty: number;
 };
 
 type Draft = { min: string; target: string };
@@ -97,6 +105,9 @@ export function CatalogMatrixPanel({
   stockLeaves,
   onSaveRules,
   saving = false,
+  onAddToCart,
+  addingToCart = false,
+  suppliers,
 }: {
   variants: VariantLike[];
   family: CatalogMatrixFamilyCaps;
@@ -108,10 +119,23 @@ export function CatalogMatrixPanel({
   stockLeaves?: Record<string, CatalogMatrixStockLeafView>;
   onSaveRules?: (edits: CatalogMatrixRuleSaveEdit[]) => Promise<void> | void;
   saving?: boolean;
+  onAddToCart?: (
+    items: CatalogMatrixCartPickItem[],
+    quantityOverride: number | null,
+    supplierId: string | null
+  ) => Promise<void> | void;
+  addingToCart?: boolean;
+  suppliers?: Array<{ id: string; name: string }>;
 }) {
   const highlightRef = useRef<HTMLDivElement | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [bulkMin, setBulkMin] = useState("");
+  const [bulkTarget, setBulkTarget] = useState("");
+  const [cartQty, setCartQty] = useState("");
+  const [cartSupplierId, setCartSupplierId] = useState("");
 
   const model = useMemo(
     () =>
@@ -238,6 +262,115 @@ export function CatalogMatrixPanel({
     }
   }
 
+  function toggleCellKey(key: string) {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleKeysBatch(keys: string[]) {
+    if (keys.length === 0) return;
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      const allSelected = keys.every((k) => next.has(k));
+      if (allSelected) {
+        for (const k of keys) next.delete(k);
+      } else {
+        for (const k of keys) next.add(k);
+      }
+      return next;
+    });
+  }
+
+  function selectAllBelowThreshold() {
+    const hits: string[] = [];
+    for (const sheet of sheets) {
+      for (const row of sheet.rows) {
+        for (const col of sheet.dataColumns) {
+          const cell = row.cells[col.key];
+          if (!cell || !cell.allowed || !cell.present || !cell.variantId) continue;
+          const key = encodeStockLeafKey(cell.variantId, cell.cellKey.sph, cell.cellKey.cyl);
+          const leaf = stockLeaves?.[key];
+          if (leaf && (leaf.minStock > 0 || leaf.targetStock > 0) && leaf.current <= leaf.minStock) {
+            hits.push(key);
+          }
+        }
+      }
+    }
+    setSelectMode(true);
+    setSelectedKeys(new Set(hits));
+  }
+
+  function applyBulkThresholds() {
+    if (selectedKeys.size === 0) return;
+    setSaveError(null);
+    const minTrim = bulkMin.trim();
+    const targetTrim = bulkTarget.trim();
+    if (minTrim === "" && targetTrim === "") {
+      setSaveError("Enter a Threshold and/or Target value to apply.");
+      return;
+    }
+    if ((minTrim !== "" && !/^\d+$/.test(minTrim)) || (targetTrim !== "" && !/^\d+$/.test(targetTrim))) {
+      setSaveError("Bulk threshold and target must be whole numbers ≥ 0.");
+      return;
+    }
+    setDrafts((prev) => {
+      const next = { ...prev };
+      for (const key of selectedKeys) {
+        const leaf = stockLeaves?.[key];
+        const current = next[key] ?? baselineDraft(leaf);
+        const updated: Draft = {
+          min: minTrim !== "" ? minTrim : current.min,
+          target: targetTrim !== "" ? targetTrim : current.target,
+        };
+        if (draftEqualsBaseline(updated, leaf)) {
+          delete next[key];
+        } else {
+          next[key] = updated;
+        }
+      }
+      return next;
+    });
+  }
+
+  async function handleAddSelectedToCart() {
+    if (!onAddToCart || selectedKeys.size === 0) return;
+    setSaveError(null);
+    const qtyOverrideTrim = cartQty.trim();
+    let qtyOverride: number | null = null;
+    if (qtyOverrideTrim !== "") {
+      if (!/^\d+$/.test(qtyOverrideTrim) || Number(qtyOverrideTrim) <= 0) {
+        setSaveError("Cart quantity must be a whole number > 0.");
+        return;
+      }
+      qtyOverride = Number(qtyOverrideTrim);
+    }
+    const items: CatalogMatrixCartPickItem[] = [];
+    for (const key of selectedKeys) {
+      const parts = key.split(":");
+      if (parts.length !== 3) continue;
+      const variantId = parts[0]!;
+      const sph = Number(parts[1]);
+      const cyl = Number(parts[2]);
+      const leaf = stockLeaves?.[key];
+      const suggestedQty =
+        qtyOverride ??
+        Math.max(1, (leaf?.targetStock ?? 0) - (leaf?.current ?? 0));
+      items.push({ variantId, sph, cyl, suggestedQty });
+    }
+    if (items.length === 0) return;
+    try {
+      await onAddToCart(items, qtyOverride, cartSupplierId || null);
+      setSelectedKeys(new Set());
+      setCartQty("");
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to add to cart.");
+    }
+  }
+
   if (sheets.length === 0) {
     return (
       <section
@@ -286,36 +419,140 @@ export function CatalogMatrixPanel({
             </div>
           ) : null}
         </div>
-        {editable && onSaveRules ? (
-          <div className="flex shrink-0 items-center gap-2">
-            {dirtyKeys.length > 0 ? (
-              <span className="mr-1 text-xs font-semibold whitespace-nowrap text-amber-700 dark:text-amber-300">
-                {dirtyKeys.length} unsaved
-              </span>
-            ) : null}
+        {editable ? (
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button
               type="button"
-              variant="outline"
-              disabled={dirtyKeys.length === 0 || saving}
+              variant={selectMode ? "default" : "outline"}
               onClick={() => {
-                setDrafts({});
-                setSaveError(null);
+                setSelectMode((v) => {
+                  if (v) setSelectedKeys(new Set());
+                  return !v;
+                });
               }}
-              className="h-9 rounded-xl border-(--brand-card-border) bg-(--brand-card) px-4 text-sm font-semibold text-(--brand-text) hover:bg-(--brand-primary)/10"
+              className="h-9 rounded-xl px-3.5 text-xs font-semibold"
             >
-              Discard
+              {selectMode ? "Done selecting" : "Bulk select"}
             </Button>
-            <Button
-              type="button"
-              disabled={dirtyKeys.length === 0 || saving}
-              onClick={() => void handleSave()}
-              className="h-9 rounded-xl bg-(--brand-primary) px-4 text-sm font-extrabold text-(--brand-primary-text) hover:opacity-95"
-            >
-              {saving ? "Saving…" : "Save thresholds"}
-            </Button>
+            {onSaveRules ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={dirtyKeys.length === 0 || saving}
+                  onClick={() => {
+                    setDrafts({});
+                    setSaveError(null);
+                  }}
+                  className="h-9 rounded-xl border-(--brand-card-border) bg-(--brand-card) px-4 text-sm font-semibold text-(--brand-text) hover:bg-(--brand-primary)/10"
+                >
+                  Discard{dirtyKeys.length > 0 ? ` (${dirtyKeys.length})` : ""}
+                </Button>
+                <Button
+                  type="button"
+                  disabled={dirtyKeys.length === 0 || saving}
+                  onClick={() => void handleSave()}
+                  className="h-9 rounded-xl bg-(--brand-primary) px-4 text-sm font-extrabold text-(--brand-primary-text) hover:opacity-95"
+                >
+                  {saving ? "Saving…" : "Save thresholds"}
+                </Button>
+              </>
+            ) : null}
           </div>
         ) : null}
       </div>
+
+      {editable && selectMode ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-500/40 bg-sky-500/5 p-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-block min-w-22 font-bold tabular-nums text-sky-600 dark:text-sky-400">
+              {selectedKeys.size} selected
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={selectAllBelowThreshold}
+              className="h-8 rounded-lg px-2.5 text-xs font-semibold"
+            >
+              Select shortages
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={selectedKeys.size === 0}
+              onClick={() => setSelectedKeys(new Set())}
+              className="h-8 rounded-lg px-2.5 text-xs"
+            >
+              Clear
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="Min"
+                value={bulkMin}
+                onChange={(e) => setBulkMin(e.target.value.replace(/[^0-9]/g, ""))}
+                className="h-8 w-16 rounded-lg border border-(--brand-card-border) bg-(--brand-card) px-2 text-center text-xs tabular-nums"
+              />
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="Target"
+                value={bulkTarget}
+                onChange={(e) => setBulkTarget(e.target.value.replace(/[^0-9]/g, ""))}
+                className="h-8 w-16 rounded-lg border border-(--brand-card-border) bg-(--brand-card) px-2 text-center text-xs tabular-nums"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={selectedKeys.size === 0}
+                onClick={applyBulkThresholds}
+                className="h-8 rounded-lg text-xs font-semibold"
+              >
+                Apply rules
+              </Button>
+            </div>
+            {onAddToCart ? (
+              <div className="flex items-center gap-1.5 border-l border-(--brand-card-border) pl-3">
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="Qty (auto)"
+                  value={cartQty}
+                  onChange={(e) => setCartQty(e.target.value.replace(/[^0-9]/g, ""))}
+                  className="h-8 w-20 rounded-lg border border-(--brand-card-border) bg-(--brand-card) px-2 text-center text-xs tabular-nums"
+                />
+                {suppliers && suppliers.length > 0 ? (
+                  <AdminSelect
+                    value={cartSupplierId}
+                    onValueChange={setCartSupplierId}
+                    size="sm"
+                    options={[
+                      { value: "", label: "Any supplier" },
+                      ...suppliers.map((s) => ({ value: s.id, label: s.name })),
+                    ]}
+                    triggerClassName="h-8 w-44 shrink-0 rounded-lg text-xs"
+                  />
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={selectedKeys.size === 0 || addingToCart}
+                  onClick={() => void handleAddSelectedToCart()}
+                  className="h-8 rounded-lg bg-(--brand-primary) px-3 text-xs font-bold text-(--brand-primary-text)"
+                >
+                  {addingToCart ? "Adding…" : "Add to Cart"}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {saveError ? (
         <div className="mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
@@ -347,6 +584,10 @@ export function CatalogMatrixPanel({
                 stockLeaves={stockLeaves}
                 drafts={drafts}
                 onDraftChange={setDraftField}
+                selectMode={selectMode}
+                selectedKeys={selectedKeys}
+                onToggleCell={toggleCellKey}
+                onToggleBatch={toggleKeysBatch}
               />
             </div>
           );
@@ -373,12 +614,20 @@ function CatalogMatrixTable({
   stockLeaves,
   drafts,
   onDraftChange,
+  selectMode,
+  selectedKeys,
+  onToggleCell,
+  onToggleBatch,
 }: {
   sheet: CatalogMatrixSheet;
   editable: boolean;
   stockLeaves?: Record<string, CatalogMatrixStockLeafView>;
   drafts: Record<string, Draft>;
   onDraftChange: (key: string, field: "min" | "target", value: string) => void;
+  selectMode: boolean;
+  selectedKeys: Set<string>;
+  onToggleCell: (key: string) => void;
+  onToggleBatch: (keys: string[]) => void;
 }) {
   if (sheet.rows.length === 0 || sheet.dataColumns.length === 0) {
     return (
@@ -427,7 +676,24 @@ function CatalogMatrixTable({
                 <th
                   key={column.key}
                   scope="col"
-                  className="border border-(--brand-card-border) bg-(--brand-input-bg) px-2 py-1.5 font-bold whitespace-nowrap text-(--brand-label)"
+                  onClick={
+                    selectMode
+                      ? () => {
+                          const colKeys: string[] = [];
+                          for (const r of sheet.rows) {
+                            const c = r.cells[column.key];
+                            if (c?.allowed && c.present && c.variantId) {
+                              colKeys.push(encodeStockLeafKey(c.variantId, c.cellKey.sph, c.cellKey.cyl));
+                            }
+                          }
+                          onToggleBatch(colKeys);
+                        }
+                      : undefined
+                  }
+                  className={cn(
+                    "border border-(--brand-card-border) bg-(--brand-input-bg) px-2 py-1.5 font-bold whitespace-nowrap text-(--brand-label)",
+                    selectMode && "cursor-pointer hover:bg-(--brand-primary)/15"
+                  )}
                   style={{ top: 0, minWidth: dataWidth }}
                 >
                   {column.label}
@@ -446,7 +712,24 @@ function CatalogMatrixTable({
                   return (
                     <td
                       key={stub.key}
-                      className="sticky z-10 border border-(--brand-card-border) bg-(--brand-card) px-2 py-1 font-semibold whitespace-nowrap text-(--brand-text)"
+                      onClick={
+                        selectMode
+                          ? () => {
+                              const rowKeys: string[] = [];
+                              for (const col of sheet.dataColumns) {
+                                const c = row.cells[col.key];
+                                if (c?.allowed && c.present && c.variantId) {
+                                  rowKeys.push(encodeStockLeafKey(c.variantId, c.cellKey.sph, c.cellKey.cyl));
+                                }
+                              }
+                              onToggleBatch(rowKeys);
+                            }
+                          : undefined
+                      }
+                      className={cn(
+                        "sticky z-10 border border-(--brand-card-border) bg-(--brand-card) px-2 py-1 font-semibold whitespace-nowrap text-(--brand-text)",
+                        selectMode && "cursor-pointer hover:bg-(--brand-primary)/15"
+                      )}
                       style={{ left, width, minWidth: width }}
                     >
                       {row.stub[stub.key] ?? "—"}
@@ -468,6 +751,9 @@ function CatalogMatrixTable({
                         stockLeaves={stockLeaves}
                         drafts={drafts}
                         onDraftChange={onDraftChange}
+                        selectMode={selectMode}
+                        selectedKeys={selectedKeys}
+                        onToggleCell={onToggleCell}
                       />
                     </td>
                   );
@@ -488,6 +774,9 @@ function MatrixTriadCell({
   stockLeaves,
   drafts,
   onDraftChange,
+  selectMode,
+  selectedKeys,
+  onToggleCell,
 }: {
   cell: CatalogMatrixCell | undefined;
   editable: boolean;
@@ -495,6 +784,9 @@ function MatrixTriadCell({
   stockLeaves?: Record<string, CatalogMatrixStockLeafView>;
   drafts: Record<string, Draft>;
   onDraftChange: (key: string, field: "min" | "target", value: string) => void;
+  selectMode: boolean;
+  selectedKeys: Set<string>;
+  onToggleCell: (key: string) => void;
 }) {
   if (!cell || !cell.allowed) {
     return (
@@ -532,6 +824,11 @@ function MatrixTriadCell({
   const draft = drafts[leafKey] ?? baselineDraft(leaf);
   const dirty = !draftEqualsBaseline(draft, leaf);
   const current = leaf?.current ?? 0;
+  const selected = selectedKeys.has(leafKey);
+  const isShort =
+    leaf != null &&
+    (leaf.minStock > 0 || leaf.targetStock > 0) &&
+    leaf.current <= leaf.minStock;
 
   const powerHint = [
     `SPH ${cell.cellKey.sph.toFixed(2)}`,
@@ -541,9 +838,13 @@ function MatrixTriadCell({
 
   return (
     <div
+      onClick={selectMode ? () => onToggleCell(leafKey) : undefined}
       className={cn(
         "flex h-9 items-center justify-center gap-0.5 rounded-md border border-dashed border-(--brand-card-border) px-1",
-        dirty && "ring-2 ring-amber-400"
+        isShort && "border-rose-400/70 bg-rose-50/50 dark:bg-rose-950/20",
+        selectMode && "cursor-pointer select-none",
+        selected && "ring-2 ring-sky-500 bg-sky-500/15",
+        dirty && !selected && "ring-2 ring-amber-400"
       )}
       title={powerHint}
     >
@@ -556,30 +857,34 @@ function MatrixTriadCell({
       <span className="text-(--brand-text-muted)/50">/</span>
       <input
         inputMode="numeric"
+        pattern="[0-9]*"
         value={draft.min}
         placeholder="–"
-        disabled={!editable}
-        readOnly={!editable}
-        onChange={(e) => onDraftChange(leafKey, "min", e.target.value)}
+        disabled={!editable || selectMode}
+        readOnly={!editable || selectMode}
+        onChange={(e) => onDraftChange(leafKey, "min", e.target.value.replace(/[^0-9]/g, ""))}
         aria-label={`Threshold for ${powerHint}`}
         className={cn(
           "h-6 w-8 rounded border border-(--brand-card-border) bg-(--brand-card) px-0.5 text-center text-[11px] tabular-nums text-(--brand-text)",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+          selectMode && "pointer-events-none",
           "disabled:cursor-not-allowed disabled:opacity-60"
         )}
       />
       <span className="text-(--brand-text-muted)/50">/</span>
       <input
         inputMode="numeric"
+        pattern="[0-9]*"
         value={draft.target}
         placeholder="–"
-        disabled={!editable}
-        readOnly={!editable}
-        onChange={(e) => onDraftChange(leafKey, "target", e.target.value)}
+        disabled={!editable || selectMode}
+        readOnly={!editable || selectMode}
+        onChange={(e) => onDraftChange(leafKey, "target", e.target.value.replace(/[^0-9]/g, ""))}
         aria-label={`Target for ${powerHint}`}
         className={cn(
           "h-6 w-8 rounded border border-(--brand-card-border) bg-(--brand-card) px-0.5 text-center text-[11px] tabular-nums text-(--brand-text)",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+          selectMode && "pointer-events-none",
           "disabled:cursor-not-allowed disabled:opacity-60"
         )}
       />

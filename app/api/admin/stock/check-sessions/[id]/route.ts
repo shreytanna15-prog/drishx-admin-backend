@@ -5,10 +5,10 @@ import {
   getCatalogStockCheckSession,
 } from "@/app/lib/catalog/catalog-stock-check";
 
-function requireAdmin(req: NextRequest) {
+function requireStaff(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);
   if (!auth.session) return { error: auth.error };
-  if (auth.session.role !== "ADMIN") {
+  if (auth.session.role !== "ADMIN" && auth.session.role !== "EMPLOYEE") {
     return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) };
   }
   return { session: auth.session };
@@ -16,15 +16,15 @@ function requireAdmin(req: NextRequest) {
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** GET /api/admin/stock/check-sessions/:id — includes system qty. */
+/** GET /api/admin/stock/check-sessions/:id — system qty included for ADMIN only; stripped for EMPLOYEE. */
 export async function GET(req: NextRequest, ctx: Ctx) {
-  const auth = requireAdmin(req);
+  const auth = requireStaff(req);
   if (auth.error) return auth.error;
 
   try {
     const { id } = await ctx.params;
     const session = await getCatalogStockCheckSession(id, {
-      includeSystemQty: true,
+      includeSystemQty: auth.session.role === "ADMIN",
     });
     return NextResponse.json({ session });
   } catch (error) {

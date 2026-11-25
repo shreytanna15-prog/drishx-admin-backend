@@ -62,6 +62,55 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (Array.isArray(body.items)) {
+      if (body.items.length === 0) {
+        return NextResponse.json(
+          { error: "items must not be empty.", code: "VALIDATION" },
+          { status: 400 }
+        );
+      }
+      if (body.items.length > 100) {
+        return NextResponse.json(
+          { error: "Maximum 100 adjustments per batch.", code: "VALIDATION" },
+          { status: 400 }
+        );
+      }
+      const actor = actorFromSession(auth.session);
+      const requestCtx = buildAuditRequestContext(req);
+      const adjustments = [];
+      for (const raw of body.items) {
+        const item = (raw ?? {}) as Record<string, unknown>;
+        const itemCounted = Number(item.countedQty);
+        if (!Number.isFinite(itemCounted)) {
+          return NextResponse.json(
+            { error: "Each item requires countedQty.", code: "VALIDATION" },
+            { status: 400 }
+          );
+        }
+        const adj = await createCatalogStockAdjustment({
+          powerId: typeof item.powerId === "string" ? item.powerId : null,
+          variantId: typeof item.variantId === "string" ? item.variantId : null,
+          sph: item.sph != null ? Number(item.sph) : null,
+          cyl: item.cyl != null ? Number(item.cyl) : null,
+          countedQty: itemCounted,
+          reasonCode: String(item.reasonCode ?? body.reasonCode ?? ""),
+          reasonText:
+            typeof item.reasonText === "string"
+              ? item.reasonText
+              : typeof body.reasonText === "string"
+                ? body.reasonText
+                : null,
+          actor,
+          request: requestCtx,
+        });
+        adjustments.push(adj);
+      }
+      return NextResponse.json(
+        { adjustments, count: adjustments.length },
+        { status: 201 }
+      );
+    }
+
     const countedQty = Number(body.countedQty);
     if (!Number.isFinite(countedQty)) {
       return NextResponse.json(

@@ -125,7 +125,7 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: "Inventory",
+    title: "Stock & Procurement",
     items: [
       {
         title: "Stock Overview",
@@ -138,9 +138,9 @@ const NAV_SECTIONS: NavSection[] = [
         href: "/inventory/power-wise-stock",
       },
       {
-        title: "Stock Transactions",
-        icon: FileText,
-        href: "/inventory/stock-transactions",
+        title: "Stock Dashboard / Audit",
+        icon: BarChart3,
+        href: "/inventory/stock-dashboard",
       },
       {
         title: "Stock Adjustments",
@@ -153,7 +153,12 @@ const NAV_SECTIONS: NavSection[] = [
         href: "/inventory/stock-checks",
       },
       {
-        title: "Procurement Requests",
+        title: "Stock Transactions",
+        icon: FileText,
+        href: "/inventory/stock-transactions",
+      },
+      {
+        title: "Procurement Cart",
         icon: ClipboardList,
         href: "/procurement/requests",
       },
@@ -168,14 +173,14 @@ const NAV_SECTIONS: NavSection[] = [
         href: "/procurement/suppliers",
       },
       {
-        title: "Attributes",
-        icon: Tags,
-        href: "/inventory/attributes",
-      },
-      {
         title: "Products & catalog",
         icon: Layers,
         href: "/inventory/products-catalog",
+      },
+      {
+        title: "Attributes",
+        icon: Tags,
+        href: "/inventory/attributes",
       },
       { title: "Smart Alerts", icon: Bell },
     ],

@@ -33,7 +33,6 @@ import {
   fetchLensAttributes,
   fetchLensProduct,
   fetchLensProductMatrixStock,
-  saveLensProductMatrixRulesRequest,
   updateLensProductParentRequest,
   type CatalogStockLeaf,
   type LensAttribute,
@@ -105,7 +104,6 @@ export default function LensProductParentDetailPage() {
   const [stockLeaves, setStockLeaves] = useState<
     Record<string, CatalogStockLeaf>
   >({});
-  const [matrixSaving, setMatrixSaving] = useState(false);
 
   const { data: powerRangeData } = useGetPowerRanges({ activeOnly: true });
   const powerRanges = useMemo(
@@ -147,34 +145,6 @@ export default function LensProductParentDetailPage() {
     }
     return out;
   }, [stockLeaves]);
-
-  async function saveMatrixRules(
-    edits: Array<{
-      variantId: string;
-      sph: number;
-      cyl: number;
-      minStock: number;
-      targetStock: number;
-    }>
-  ) {
-    if (!id) return;
-    setMatrixSaving(true);
-    try {
-      const res = await saveLensProductMatrixRulesRequest(id, edits);
-      setStockLeaves((prev) => {
-        const next = { ...prev };
-        for (const leaf of res.leaves) {
-          const key = `${leaf.variantId}:${leaf.sph.toFixed(2)}:${leaf.cyl.toFixed(2)}`;
-          next[key] = leaf;
-        }
-        return next;
-      });
-    } catch (err) {
-      throw new Error(errorMessage(err, "Failed to save stock rules."));
-    } finally {
-      setMatrixSaving(false);
-    }
-  }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- load on mount
@@ -464,15 +434,21 @@ export default function LensProductParentDetailPage() {
         </dl>
       </section>
 
+      <div className="mb-3 flex items-center justify-end">
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/inventory/stock-overview/${product.id}`}>
+            Manage Stock Matrix →
+          </Link>
+        </Button>
+      </div>
+
       <CatalogMatrixPanel
         className="mb-6"
         variants={product.variants}
         familyLabel={product.family.name}
         highlightAxis={highlightAxis}
-        editable
+        editable={false}
         stockLeaves={stockLeafViews}
-        saving={matrixSaving}
-        onSaveRules={saveMatrixRules}
         family={{
           supportsAdd: product.family.supportsAdd,
           supportsAxis: product.family.supportsAxis,

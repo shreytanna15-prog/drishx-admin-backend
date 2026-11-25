@@ -10,9 +10,9 @@
 
 **Locked stock identity:** `(lensProductVariantId, sph, cyl)` — axis / ADD / eye / parent attrs / range come from the variant (+ parent). Do **not** key stock by parent + duplicated optical dims.
 
-**Source of truth:** new multi-layer catalog (`LensProduct` / variants / `catalog-matrix.ts` + `CatalogMatrixPanel`). Stock = **same matrix**, triad editable when rules API is live. Cross Style B (`allowed: false` → disabled ×) is already on that shell — do **not** re-implement it on legacy stock-matrix.
+**Source of truth:** new multi-layer catalog (`LensProduct` / variants / `catalog-matrix.ts` + `CatalogMatrixPanel`). Catalog detail (`/inventory/products-catalog/[id]`) stays **read-only** for product setup; live editable stock matrix lives at **`/inventory/stock-overview/[id]`** (with Cross Style B `allowed: false` → disabled ×).
 
-**Do not touch (this phase):** `/inventory/stock-matrix`, `app/lib/stock-matrix.ts` band expansion for cross, or legacy lens-table identity — leave until cutover / redirect. All new stock matrix work goes on catalog parent detail.
+**Do not touch (this phase):** `/inventory/stock-matrix`, `app/lib/stock-matrix.ts` band expansion for cross, or legacy lens-table identity — leave until cutover / redirect. All new stock matrix work goes on `/inventory/stock-overview/[id]`.
 
 ---
 
@@ -145,13 +145,15 @@ Add `powers LensProductPower[]` on `LensProductVariant`.
 
 | Model | Change |
 |-------|--------|
+| `LensProductPower` | `preferredSupplierId` (optional default vendor), `minStock`, `targetStock`, `quantity`, `blockedQty`, `weightedAverageCost` |
 | `PurchaseOrderLine` | Add `lensProductVariantId`, `lensProductPowerId`, `sph`, `cyl` (as needed); stop requiring legacy ids once cut over |
 | `OpenPurchaseOrderPower` | PK / unique on `lensProductPowerId` instead of `lensType`+`lensId` |
 | `GoodsReceiptLine` | Same leaf FK |
-| `ReorderRule` | Unique on `lensProductPowerId` |
-| `ProcurementRequest` | Point at power leaf |
+| `ReorderRule` | Legacy-only (`lensType` + `lensId`); catalog threshold/target live directly on `LensProductPower` |
+| `ProcurementRequest` | Points at `lensProductPowerId` + `supplierId` (for supplier-grouped Procurement Cart) |
 | `StockMovement` | Prefer `lensProductPowerId`; keep legacy columns only if dual-writing |
-| **New** `StockAdjustment` | id, powerId, qtyBefore, countedQty, qtyDelta, qtyAfter, reasonCode, reasonText, submittedById, approvedById?, status, timestamps |
+| `CatalogStockAdjustment` | id, publicId, `lensProductPowerId`, qtyBefore, countedQty, qtyDelta, qtyAfter, reasonCode, reasonText, submittedById, approvedById, status, timestamps |
+| `CatalogStockCheckSession` / `Line` | Session freeze + blind employee count (`systemQtyAtStart` stripped for `EMPLOYEE`) + Admin verify |
 
 ### 3.3 Greenfield stock
 
@@ -175,12 +177,14 @@ When parent-attr edit is introduced: if any variant of the parent has related `L
 |--------|-----------------|---------|
 | GET | `/api/admin/catalog/lens-products/:id/matrix` | Family sheets + cells: current, min, target (0 if no leaf); each cell must resolve covering `variantId` |
 | PATCH | `/api/admin/catalog/lens-products/:id/matrix/rules` | Bulk/single update min/target (upsert leaf by variantId+sph+cyl) |
-| GET | `/api/admin/stock/powers` | Power-wise list + filters (parent attrs, variant SKU, q) |
+| GET | `/api/admin/stock/powers` | Power-wise list (includes 0-stock unstocked matrix cells by default) + filters (`q`, `familyCode`, `productId`, `shortageOnly`) |
 | GET | `/api/admin/stock/powers/:id` | Position: onHand, reserved, available, incoming |
 | GET | `/api/admin/stock/transactions` | Ledger |
-| POST | `/api/admin/stock/adjustments` | Controlled adjustment |
+| POST | `/api/admin/stock/adjustments` | Controlled single or bulk (`items: [...]`) adjustment |
 | GET | `/api/admin/stock/adjustments` | History |
-| GET | `/api/admin/stock/overview` | Aggregates / shortages |
+| GET | `/api/admin/stock/overview` | Aggregates, `topShortages`, and per-parent `productCards` |
+| GET/PATCH | `/api/admin/stock/check-sessions/:id` & `/counts` | Blind employee count (`systemQtyAtStart` stripped for `EMPLOYEE`) + Admin verify |
+| GET/POST/PATCH | `/api/procurement/requests` | Procurement Cart: catalog batch add (`items: [...]`), bulk supplier/qty assignment, and supplier-grouped PO creation |
 
 Matrix GET should reuse / wrap `buildCatalogMatrix` coverage so SV/KT/V2 sheet layout stays identical to catalog placeholders.
 
@@ -210,21 +214,22 @@ Consolidate into a dedicated **Stock & Procurement** section in the admin sideba
 
 | Screen | Target Route | Action & Specifications |
 |--------|--------------|-------------------------|
-| **Stock Overview** | `/inventory/stock-overview` | **Product Card Browser**: Displays product cards (catalog parent level) with stock figures (on-hand, available, active shortages). Clicking a card navigates directly to that product's full **2D Excel matrix** (`/inventory/products-catalog/[id]`). |
-| **Power-wise Inventory** | `/inventory/power-wise-stock` | Searchable flat table listing all valid power leaves (SPH/CYL) for all catalog products (including 0-stock unstocked leaves). Row-level threshold/target editing + Run Reorder. |
-| **Stock Dashboard / Audit** | `/inventory/stock-dashboard` (or overview KPI mode) | High-level summary KPI cards (total on-hand, reserved, blocked) and top shortage alerts. |
-| **Stock Adjustments** | `/inventory/stock-adjustments` | Controlled ± adjustment with mandatory reason codes, negative available guard, and audit trail. |
+| **Stock Overview** | `/inventory/stock-overview` | **Product Card Browser**: Displays product cards (catalog parent level) with stock figures (on-hand, available, reserved, active shortages). Clicking a card navigates directly to that product's live **2D Excel matrix** (`/inventory/stock-overview/[id]`). |
+| **Stock Matrix (Live)** | `/inventory/stock-overview/[id]` | Dedicated operational 2D Excel matrix (`CatalogMatrixPanel`, `editable`) with bulk selection, bulk Threshold/Target, shortage highlights, and **Add to Cart**. (`/inventory/products-catalog/[id]` stays read-only.) |
+| **Power-wise Inventory** | `/inventory/power-wise-stock` | Searchable flat table listing all valid power leaves (SPH/CYL) for all catalog products (including 0-stock unstocked leaves). Row-level threshold/target editing, Add to Cart, + Run Reorder. |
+| **Stock Dashboard / Audit** | `/inventory/stock-dashboard` | High-level summary KPI cards (total on-hand, reserved, available, blocked, open PO) and top shortage alerts. |
+| **Stock Adjustments** | `/inventory/stock-adjustments` | Controlled single & bulk-queue ± adjustment with mandatory reason codes, negative available guard, and audit trail. |
 | **Stock Checks** | `/inventory/stock-checks` | Session-based physical counting with count freeze and blind employee submission. |
 | **Stock Transactions** | `/inventory/stock-transactions` | Immutable audit ledger of all stock movements. |
-| **Procurement Cart / Queue** | `/procurement/requests` (Cart Mode) | **Admin Purchase Cart**: Consolidates shortages from reorder runs, customer order backorders, and manual power picks across multiple products into supplier-grouped PO creation. |
+| **Procurement Cart / Queue** | `/procurement/requests` | **Admin Purchase Cart**: Collects shortages from reorder runs, customer order backorders, and manual power picks across multiple products, grouped by **Supplier**, with one-click consolidated PO creation. |
 | **Purchase Orders** | `/procurement/purchase-orders` | Multi-product PO workflow (Draft → Approve → Sent → Receive with Excel reconciliation → Confirm Receipt). |
 | **Suppliers** | `/procurement/suppliers` | Vendor management and terms. |
 
 ### 5.1 Power Matrix Integration (2D Excel Grid)
-- **Hub**: `/inventory/products-catalog/[id]` (also accessible when clicking any product card in Stock Overview).
+- **Hub**: `/inventory/stock-overview/[id]` (1-click from any product card in Stock Overview; `/inventory/products-catalog/[id]` stays read-only).
 - **Behavior**: Renders `CatalogMatrixPanel` with live `Current / Threshold / Target` triad per cell.
 - **Unstocked Leaves**: Any valid cell with no database row must display `Current: 0` (never omitted from the grid).
-- **Bulk / Multi-cell Reordering**: Admin can pick multiple powers or entire bands directly on the sheet to send into the Procurement Cart.
+- **Bulk / Multi-cell Reordering**: Admin can toggle **Bulk select** to pick cells, rows, columns, or shortages on the sheet to bulk-set Threshold/Target or send into the Procurement Cart.
 
 ### 5.2 Procurement Cart Flow (Multi-Product Orders)
 - Instead of single-product PO creation, the Admin uses the **Procurement Cart / Shortage Queue** (`/procurement/requests`).
@@ -372,9 +377,9 @@ else:
 
 ## 10. Open engineering decisions
 
-1. Reserved: store column vs derive from open order lines (document choice in code).  
-2. Dual-write to `SingleVisionLens.quantity` during S3 — yes/no (default **no** if shop not demoing stock).  
-3. Freeze granularity: all leaves under parent vs leaves on the count sheet.  
+1. **Reserved (resolved):** Derived from open `Order` and `WholesaleOrderLineItem` rows via `getCatalogReservedForPowers` in `app/lib/catalog/catalog-stock-position.ts`.
+2. **Dual-write (resolved):** Default `false` in `receiveCatalogStockLine` (`catalog-stock-receive.ts`).
+3. **Freeze granularity (resolved):** Scoped to the leaves listed on the `CatalogStockCheckSession` (`CatalogStockCheckLine`).
 4. Deprecate `/inventory/stock-matrix` vs keep as product list facade.  
 5. When shop/cart switch to `lensProductPowerId` (separate cutover RW).  
 6. Order/returns/WAC follow-ons — see CLIENT-FOLLOW-ONS.md.  

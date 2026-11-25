@@ -20,6 +20,7 @@ import { AdminApiError } from "@/app/lib/admin-api";
 import {
   CATALOG_STOCK_ADJUSTMENT_REASON_LABELS,
   CATALOG_STOCK_ADJUSTMENT_REASONS,
+  createBulkCatalogStockAdjustmentsRequest,
   createCatalogStockAdjustmentRequest,
   fetchCatalogStockAdjustments,
   fetchCatalogStockPowers,
@@ -61,6 +62,16 @@ export default function StockAdjustmentsPage() {
   const [historyError, setHistoryError] = useState("");
   const [historyQ, setHistoryQ] = useState("");
   const [leavesLoading, setLeavesLoading] = useState(false);
+  const [bulkQueue, setBulkQueue] = useState<
+    Array<{
+      key: string;
+      leaf: CatalogStockPower;
+      countedQty: number;
+      reasonCode: string;
+      reasonText: string | null;
+    }>
+  >([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const selected = useMemo(
     () => leaves.find((l) => l.id === selectedId) ?? null,
@@ -167,8 +178,16 @@ export default function StockAdjustmentsPage() {
     setFormBusy(true);
     setFormError("");
     try {
+      const targetPayload =
+        selected && selected.id.startsWith("virtual:")
+          ? {
+            variantId: selected.variantId,
+            sph: selected.sph,
+            cyl: selected.cyl,
+          }
+          : { powerId: selectedId };
       await createCatalogStockAdjustmentRequest({
-        powerId: selectedId,
+        ...targetPayload,
         countedQty: counted,
         reasonCode,
         reasonText: reasonText.trim() || null,
@@ -198,6 +217,61 @@ export default function StockAdjustmentsPage() {
     previewDelta !== 0 &&
     !formBusy;
 
+  function addToBulkQueue() {
+    if (!selected || previewDelta == null || previewDelta === 0) return;
+    const counted = Number(countedQty);
+    if (!Number.isSafeInteger(counted) || counted < 0) {
+      setFormError("Counted / new quantity must be a whole number ≥ 0.");
+      return;
+    }
+    if (reasonCode === "other" && !reasonText.trim()) {
+      setFormError("Notes are required when reason is Other.");
+      return;
+    }
+    setFormError("");
+    setBulkQueue((prev) => {
+      const filtered = prev.filter((item) => item.key !== selected.id);
+      return [
+        ...filtered,
+        {
+          key: selected.id,
+          leaf: selected,
+          countedQty: counted,
+          reasonCode,
+          reasonText: reasonText.trim() || null,
+        },
+      ];
+    });
+  }
+
+  async function submitBulkQueue() {
+    if (bulkQueue.length === 0) return;
+    setBulkBusy(true);
+    setFormError("");
+    try {
+      await createBulkCatalogStockAdjustmentsRequest({
+        items: bulkQueue.map((item) => ({
+          ...(item.leaf.id.startsWith("virtual:")
+            ? {
+              variantId: item.leaf.variantId,
+              sph: item.leaf.sph,
+              cyl: item.leaf.cyl,
+            }
+            : { powerId: item.leaf.id }),
+          countedQty: item.countedQty,
+          reasonCode: item.reasonCode,
+          reasonText: item.reasonText,
+        })),
+      });
+      setBulkQueue([]);
+      await Promise.all([runLeafSearch(), loadHistory()]);
+    } catch (err) {
+      setFormError(errorMessage(err, "Failed to apply bulk adjustments."));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   return (
     <AdminPage
       title="Stock adjustments"
@@ -209,7 +283,7 @@ export default function StockAdjustmentsPage() {
         </h2>
 
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[240px] flex-1">
+          <div className="relative min-w-60 flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-(--brand-text-muted)" />
             <Input
               value={search}
@@ -268,13 +342,13 @@ export default function StockAdjustmentsPage() {
         {selected ? (
           <dl className="mt-4 grid gap-3 rounded-xl border border-(--brand-card-border) bg-(--brand-input-bg)/40 p-4 text-sm sm:grid-cols-4">
             <div>
-              <dt className="text-xs font-bold uppercase tracking-[0.1em] text-(--brand-label)">
+              <dt className="text-xs font-bold uppercase tracking-widest text-(--brand-label)">
                 SKU
               </dt>
               <dd className="mt-1 font-semibold break-all">{selected.skuCode}</dd>
             </div>
             <div>
-              <dt className="text-xs font-bold uppercase tracking-[0.1em] text-(--brand-label)">
+              <dt className="text-xs font-bold uppercase tracking-widest text-(--brand-label)">
                 Power
               </dt>
               <dd className="mt-1 font-semibold tabular-nums">
@@ -283,7 +357,7 @@ export default function StockAdjustmentsPage() {
               </dd>
             </div>
             <div>
-              <dt className="text-xs font-bold uppercase tracking-[0.1em] text-(--brand-label)">
+              <dt className="text-xs font-bold uppercase tracking-widest text-(--brand-label)">
                 On hand / blocked / avail
               </dt>
               <dd className="mt-1 font-semibold tabular-nums">
@@ -291,7 +365,7 @@ export default function StockAdjustmentsPage() {
               </dd>
             </div>
             <div>
-              <dt className="text-xs font-bold uppercase tracking-[0.1em] text-(--brand-label)">
+              <dt className="text-xs font-bold uppercase tracking-widest text-(--brand-label)">
                 Family
               </dt>
               <dd className="mt-1 font-semibold">{selected.family}</dd>
@@ -351,6 +425,15 @@ export default function StockAdjustmentsPage() {
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
           <Button
             type="button"
+            variant="outline"
+            disabled={!canApply || bulkBusy}
+            onClick={addToBulkQueue}
+            className="h-10 rounded-xl px-4 text-sm font-semibold"
+          >
+            Add to bulk queue
+          </Button>
+          <Button
+            type="button"
             disabled={!canApply}
             onClick={() => void submitAdjustment()}
             className="h-10 rounded-xl bg-(--brand-primary) px-5 text-sm font-extrabold text-(--brand-primary-text) hover:opacity-95"
@@ -365,6 +448,62 @@ export default function StockAdjustmentsPage() {
             )}
           </Button>
         </div>
+
+        {bulkQueue.length > 0 ? (
+          <div className="mt-5 rounded-xl border border-(--brand-primary)/40 bg-(--brand-primary)/5 p-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-xs font-extrabold uppercase tracking-[0.12em] text-(--brand-primary)">
+                Bulk adjustment queue ({bulkQueue.length})
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setBulkQueue([])}
+                >
+                  Clear
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={bulkBusy}
+                  onClick={() => void submitBulkQueue()}
+                  className="bg-(--brand-primary) font-bold text-(--brand-primary-text)"
+                >
+                  {bulkBusy ? "Applying…" : `Apply all (${bulkQueue.length})`}
+                </Button>
+              </div>
+            </div>
+            <ul className="space-y-1 text-xs">
+              {bulkQueue.map((item) => (
+                <li
+                  key={item.key}
+                  className="flex items-center justify-between rounded bg-(--brand-card) px-2.5 py-1.5"
+                >
+                  <span>
+                    <strong className="font-semibold">{item.leaf.skuCode}</strong>{" "}
+                    · {formatMatrixPower(item.leaf.sph)} /{" "}
+                    {formatMatrixPower(item.leaf.cyl)} · {item.leaf.onHand} →{" "}
+                    {item.countedQty} (
+                    {formatSigned(item.countedQty - item.leaf.onHand)})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBulkQueue((prev) =>
+                        prev.filter((x) => x.key !== item.key)
+                      )
+                    }
+                    className="text-(--brand-text-muted) underline"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </section>
 
       <section className={cardClass}>

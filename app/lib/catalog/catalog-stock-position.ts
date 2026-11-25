@@ -8,6 +8,10 @@ import {
   OPEN_PO_STATUSES_FOR_INCOMING,
   openPoLineOutstanding,
 } from "@/app/lib/purchase-order-math";
+import {
+  buildCatalogMatrix,
+  toCatalogMatrixVariants,
+} from "@/app/lib/catalog/catalog-matrix";
 import { catalogAvailable } from "@/app/lib/catalog/catalog-stock-position-core";
 import { encodeStockLeafKey } from "@/app/lib/catalog/lens-product-stock-core";
 import { ACTIVE_RESERVATION_STATUSES } from "@/app/lib/order-inventory";
@@ -253,6 +257,7 @@ export async function listCatalogStockPositions(params: {
   productId?: string;
   familyCode?: string;
   shortageOnly?: boolean;
+  includeUnstocked?: boolean;
   page?: number;
   limit?: number;
   client?: DbClient;
@@ -345,6 +350,170 @@ export async function listCatalogStockPositions(params: {
     getCatalogReservedForPowers(ids, db),
   ]);
 
+  if (params.includeUnstocked) {
+    const productWhere: Prisma.LensProductWhereInput = {
+      isActive: true,
+      ...(params.productId ? { id: params.productId } : {}),
+      ...(params.familyCode ? { family: { code: params.familyCode } } : {}),
+    };
+    const products = await db.lensProduct.findMany({
+      where: productWhere,
+      orderBy: [{ createdAt: "desc" }],
+      select: {
+        id: true,
+        family: {
+          select: {
+            code: true,
+            name: true,
+            supportsAdd: true,
+            supportsAxis: true,
+            supportsEye: true,
+          },
+        },
+        variants: {
+          where: {
+            isActive: true,
+            ...(q
+              ? {
+                  OR: [
+                    { skuCode: { contains: q, mode: "insensitive" } },
+                    { name: { contains: q, mode: "insensitive" } },
+                  ],
+                }
+              : {}),
+          },
+          select: {
+            id: true,
+            skuCode: true,
+            name: true,
+            sphMin: true,
+            sphMax: true,
+            cylMin: true,
+            cylMax: true,
+            axis: true,
+            eye: true,
+            addition: { select: { value: true } },
+          },
+        },
+      },
+    });
+
+    const variantIds = products.flatMap((p) => p.variants.map((v) => v.id));
+    const existingRows =
+      variantIds.length > 0
+        ? await db.lensProductPower.findMany({
+            where: { lensProductVariantId: { in: variantIds } },
+            include: powerInclude,
+          })
+        : [];
+    const existingIds = existingRows.map((r) => r.id);
+    const [exIncoming, exOpen, exReserved] = await Promise.all([
+      getCatalogIncomingForPowers(existingIds, db),
+      getCatalogOpenLocksForPowers(existingIds, db),
+      getCatalogReservedForPowers(existingIds, db),
+    ]);
+    const existingByKey = new Map<string, CatalogStockPositionDto>();
+    for (const row of existingRows) {
+      const dto = serializePosition(
+        row,
+        exIncoming.get(row.id) ?? 0,
+        exOpen.get(row.id) ?? null,
+        exReserved.get(row.id) ?? 0
+      );
+      existingByKey.set(dto.leafKey, dto);
+    }
+
+    const allVirtualAndReal: CatalogStockPositionDto[] = [];
+    const seenKeys = new Set<string>();
+    for (const p of products) {
+      if (p.variants.length === 0) continue;
+      const variantById = new Map(p.variants.map((v) => [v.id, v]));
+      const matrix = buildCatalogMatrix(
+        toCatalogMatrixVariants(
+          p.variants.map((v) => ({
+            id: v.id,
+            sphMin: Number(v.sphMin),
+            sphMax: Number(v.sphMax),
+            cylMin: Number(v.cylMin),
+            cylMax: Number(v.cylMax),
+            axis: v.axis,
+            eye: v.eye,
+            addition:
+              v.addition?.value != null
+                ? { value: Number(v.addition.value) }
+                : null,
+          }))
+        ),
+        {
+          supportsAdd: p.family.supportsAdd,
+          supportsAxis: p.family.supportsAxis,
+          supportsEye: p.family.supportsEye,
+        },
+        { familyLabel: p.family.name }
+      );
+      for (const sheet of matrix.sheets) {
+        for (const r of sheet.rows) {
+          for (const col of sheet.dataColumns) {
+            const cell = r.cells[col.key];
+            if (!cell || !cell.allowed || !cell.present || !cell.variantId) {
+              continue;
+            }
+            const leafKey = encodeStockLeafKey(
+              cell.variantId,
+              cell.cellKey.sph,
+              cell.cellKey.cyl
+            );
+            if (seenKeys.has(leafKey)) continue;
+            seenKeys.add(leafKey);
+            const real = existingByKey.get(leafKey);
+            if (real) {
+              allVirtualAndReal.push(real);
+            } else {
+              const v = variantById.get(cell.variantId);
+              if (!v) continue;
+              allVirtualAndReal.push({
+                id: `virtual:${leafKey}`,
+                leafKey,
+                variantId: v.id,
+                productId: p.id,
+                skuCode: v.skuCode,
+                name: v.name,
+                sph: cell.cellKey.sph,
+                cyl: cell.cellKey.cyl,
+                axis: v.axis,
+                eye: v.eye,
+                addition:
+                  v.addition?.value != null ? Number(v.addition.value) : null,
+                family: p.family.name,
+                onHand: 0,
+                blockedQty: 0,
+                reservedQty: 0,
+                available: 0,
+                incoming: 0,
+                minStock: 0,
+                targetStock: 0,
+                openPo: null,
+                legacyLensType: null,
+                legacyLensId: null,
+                updatedAt: "",
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const totalAll = allVirtualAndReal.length;
+    const paged = allVirtualAndReal.slice((page - 1) * limit, page * limit);
+    return {
+      items: paged,
+      page,
+      limit,
+      hasMore: page * limit < totalAll,
+      total: totalAll,
+    };
+  }
+
   return {
     items: rows.map((row) =>
       serializePosition(
@@ -361,30 +530,101 @@ export async function listCatalogStockPositions(params: {
   };
 }
 
+export type CatalogStockProductCardDto = {
+  productId: string;
+  name: string;
+  familyCode: string;
+  familyName: string;
+  baseName: string;
+  materialName: string | null;
+  indexValue: number | null;
+  coatingName: string | null;
+  colorName: string | null;
+  variantCount: number;
+  leafCount: number;
+  totalOnHand: number;
+  totalReserved: number;
+  totalAvailable: number;
+  totalBlocked: number;
+  activeShortagesCount: number;
+  openPoCount: number;
+};
+
 export async function getCatalogStockOverview(client: DbClient = prisma) {
-  const rows = await client.lensProductPower.findMany({
-    select: {
-      id: true,
-      quantity: true,
-      blockedQty: true,
-      minStock: true,
-      targetStock: true,
-      lensProductVariant: {
-        select: {
-          skuCode: true,
-          name: true,
-          product: { select: { id: true, family: { select: { name: true } } } },
+  const [products, rows] = await Promise.all([
+    client.lensProduct.findMany({
+      where: { isActive: true },
+      orderBy: [{ createdAt: "desc" }],
+      select: {
+        id: true,
+        family: { select: { code: true, name: true } },
+        base: { select: { name: true } },
+        material: { select: { name: true } },
+        index: { select: { value: true } },
+        coating: { select: { name: true } },
+        color: { select: { name: true } },
+        _count: { select: { variants: { where: { isActive: true } } } },
+      },
+    }),
+    client.lensProductPower.findMany({
+      select: {
+        id: true,
+        quantity: true,
+        blockedQty: true,
+        minStock: true,
+        targetStock: true,
+        lensProductVariant: {
+          select: {
+            skuCode: true,
+            name: true,
+            product: { select: { id: true, family: { select: { name: true } } } },
+          },
         },
       },
-    },
-    take: 5000,
-  });
+      take: 10000,
+    }),
+  ]);
   const ids = rows.map((r) => r.id);
   const [incomingMap, openMap, reservedMap] = await Promise.all([
     getCatalogIncomingForPowers(ids, client),
     getCatalogOpenLocksForPowers(ids, client),
     getCatalogReservedForPowers(ids, client),
   ]);
+
+  const cardMap = new Map<string, CatalogStockProductCardDto>();
+  const productOpenPos = new Map<string, Set<string>>();
+  for (const p of products) {
+    const computedName = [
+      p.family.name,
+      p.base.name,
+      p.material?.name,
+      p.index?.value != null ? Number(p.index.value).toFixed(2) : null,
+      p.coating?.name,
+      p.color?.name,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    cardMap.set(p.id, {
+      productId: p.id,
+      name: computedName,
+      familyCode: p.family.code,
+      familyName: p.family.name,
+      baseName: p.base.name,
+      materialName: p.material?.name ?? null,
+      indexValue: p.index?.value != null ? Number(p.index.value) : null,
+      coatingName: p.coating?.name ?? null,
+      colorName: p.color?.name ?? null,
+      variantCount: p._count.variants,
+      leafCount: 0,
+      totalOnHand: 0,
+      totalReserved: 0,
+      totalAvailable: 0,
+      totalBlocked: 0,
+      activeShortagesCount: 0,
+      openPoCount: 0,
+    });
+    productOpenPos.set(p.id, new Set());
+  }
 
   let onHandSum = 0;
   let blockedSum = 0;
@@ -393,6 +633,7 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
   let shortageCount = 0;
   const shortages: Array<{
     id: string;
+    productId: string;
     skuCode: string;
     name: string;
     family: string;
@@ -404,6 +645,7 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
   }> = [];
 
   for (const row of rows) {
+    const productId = row.lensProductVariant.product.id;
     const reservedQty = reservedMap.get(row.id) ?? 0;
     const available = catalogAvailable({
       onHand: row.quantity,
@@ -416,13 +658,25 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
     availableSum += available;
     const incoming = incomingMap.get(row.id) ?? 0;
     const openPo = openMap.get(row.id) ?? null;
-    if (
-      (row.minStock > 0 || row.targetStock > 0) &&
-      available <= row.minStock
-    ) {
+    const isShort =
+      (row.minStock > 0 || row.targetStock > 0) && available <= row.minStock;
+
+    const card = cardMap.get(productId);
+    if (card) {
+      card.leafCount += 1;
+      card.totalOnHand += row.quantity;
+      card.totalReserved += reservedQty;
+      card.totalAvailable += available;
+      card.totalBlocked += row.blockedQty;
+      if (isShort) card.activeShortagesCount += 1;
+      if (openPo) productOpenPos.get(productId)?.add(openPo.id);
+    }
+
+    if (isShort) {
       shortageCount += 1;
       shortages.push({
         id: row.id,
+        productId,
         skuCode: row.lensProductVariant.skuCode,
         name: row.lensProductVariant.name,
         family: row.lensProductVariant.product.family.name,
@@ -433,6 +687,11 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
         openPoPublicId: openPo?.publicId ?? null,
       });
     }
+  }
+
+  for (const [productId, poSet] of productOpenPos.entries()) {
+    const card = cardMap.get(productId);
+    if (card) card.openPoCount = poSet.size;
   }
 
   shortages.sort((a, b) => a.available - b.available);
@@ -446,5 +705,6 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
     shortageCount,
     openPoLeafCount: openMap.size,
     topShortages: shortages.slice(0, 25),
+    productCards: Array.from(cardMap.values()),
   };
 }

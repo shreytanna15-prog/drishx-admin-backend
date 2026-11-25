@@ -95,6 +95,13 @@ export type ProcurementRequestRow = {
   incomingAtTrigger: number | null;
   approvedAt: string | null;
   resolutionReason: string | null;
+  lensProductPowerId?: string | null;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  productId?: string | null;
+  productName?: string | null;
+  familyCode?: string | null;
+  skuCode?: string | null;
 };
 
 export type ProcurementRequestsResponse = {
@@ -255,5 +262,38 @@ export async function procurementRequestAction(
   await adminFetch(`/api/procurement/requests/${requestId}/${action}`, {
     method: "POST",
     body: JSON.stringify(body ?? {}),
+  });
+}
+
+export async function addCatalogItemsToProcurementCartRequest(body: {
+  items: Array<{
+    powerId?: string;
+    variantId?: string;
+    sph?: number;
+    cyl?: number;
+    quantity: number;
+    supplierId?: string | null;
+    reason?: string | null;
+  }>;
+  approveImmediately?: boolean;
+}) {
+  return adminFetch<{
+    created: Array<{ id: string; publicId: string; powerId: string }>;
+    updated: Array<{ id: string; publicId: string; powerId: string }>;
+    skippedOpenPo: Array<{ powerId: string; poPublicId: string }>;
+  }>("/api/procurement/requests", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateProcurementCartItemsRequest(body: {
+  ids: string[];
+  supplierId?: string | null;
+  requestedQuantity?: number;
+}) {
+  return adminFetch<{ updatedCount: number }>("/api/procurement/requests", {
+    method: "PATCH",
+    body: JSON.stringify(body),
   });
 }

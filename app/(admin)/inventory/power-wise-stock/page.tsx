@@ -22,6 +22,8 @@ import {
   patchCatalogStockPowerRules,
   runCatalogReorderCheckRequest,
 } from "@/app/lib/admin-stock";
+import { saveLensProductMatrixRulesRequest } from "@/app/lib/admin-lens-catalog";
+import { addCatalogItemsToProcurementCartRequest } from "@/app/lib/admin-procurement";
 import { useGetCatalogStockPowers } from "@/app/lib/modules/stock/query/use-get-catalog-stock-powers";
 
 export default function CatalogPowerWiseStockPage() {
@@ -35,6 +37,8 @@ export default function CatalogPowerWiseStockPage() {
   const [drafts, setDrafts] = useState<
     Record<string, { minStock: string; targetStock: string }>
   >({});
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [addingToCart, setAddingToCart] = useState(false);
 
   const { data, loading, refreshing, error: queryError, refetch } = useGetCatalogStockPowers({
     q: q.trim() || undefined,
@@ -55,10 +59,22 @@ export default function CatalogPowerWiseStockPage() {
     if (!draft) return;
     setActionError(null);
     try {
-      await patchCatalogStockPowerRules(id, {
-        minStock: Number(draft.minStock),
-        targetStock: Number(draft.targetStock),
-      });
+      if (id.startsWith("virtual:") && row) {
+        await saveLensProductMatrixRulesRequest(row.productId, [
+          {
+            variantId: row.variantId,
+            sph: row.sph,
+            cyl: row.cyl,
+            minStock: Number(draft.minStock),
+            targetStock: Number(draft.targetStock),
+          },
+        ]);
+      } else {
+        await patchCatalogStockPowerRules(id, {
+          minStock: Number(draft.minStock),
+          targetStock: Number(draft.targetStock),
+        });
+      }
       setMessage("Rules saved.");
       setDrafts((prev) => {
         const next = { ...prev };
@@ -90,15 +106,86 @@ export default function CatalogPowerWiseStockPage() {
     }
   }
 
+  async function addSelectedToCart() {
+    const picked = items.filter((item) => selectedIds.has(item.id));
+    if (picked.length === 0) return;
+    setAddingToCart(true);
+    setActionError(null);
+    setMessage(null);
+    try {
+      const res = await addCatalogItemsToProcurementCartRequest({
+        items: picked.map((row) => ({
+          ...(row.id.startsWith("virtual:")
+            ? { variantId: row.variantId, sph: row.sph, cyl: row.cyl }
+            : { powerId: row.id }),
+          quantity: Math.max(1, row.targetStock - row.available - row.incoming),
+        })),
+      });
+      setSelectedIds(new Set());
+      setMessage(
+        `Procurement Cart: ${res.created.length} added, ${res.updated.length} updated, ${res.skippedOpenPo.length} skipped (open PO).`
+      );
+      await refetch();
+    } catch (err) {
+      setActionError(
+        err instanceof AdminApiError ? err.message : "Failed to add to cart."
+      );
+    } finally {
+      setAddingToCart(false);
+    }
+  }
+
   return (
     <AdminPage
       title="Power-wise Inventory"
-      subtitle="Catalog stock leaves — available, incoming, threshold/target, and Run reorder."
-      actions={
-        <div className="flex flex-wrap gap-2">
+      subtitle="All catalog power leaves (including 0-stock) — available, incoming, threshold/target, and Run reorder."
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2 lg:flex-nowrap">
+        <div className="relative w-full lg:w-1/2 lg:shrink-0">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-(--brand-text-muted)" />
+          <Input
+            className="h-9 pl-8"
+            placeholder="Search SKU / name…"
+            value={q}
+            onChange={(e) => {
+              setPage(1);
+              setQ(e.target.value);
+            }}
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <AdminSelect
+            value={familyCode}
+            onValueChange={(value) => {
+              setPage(1);
+              setFamilyCode(value);
+            }}
+            options={[
+              { value: "", label: "All families" },
+              { value: "SV", label: "Single Vision" },
+              { value: "KT", label: "Kryptok" },
+              { value: "V2", label: "Progressive V2" },
+            ]}
+            triggerClassName="h-9 w-full min-w-32"
+          />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {selectedIds.size > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={addingToCart}
+              onClick={() => void addSelectedToCart()}
+              className="h-9 rounded-xl border-(--brand-primary) px-3 text-xs font-semibold text-(--brand-primary)"
+            >
+              {addingToCart ? "Adding…" : `Add ${selectedIds.size} to Cart`}
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"
+            size="sm"
             onClick={() => void refetch()}
             className="h-9 rounded-xl border-(--brand-card-border) bg-(--brand-card) px-4 text-sm font-semibold text-(--brand-text) hover:bg-(--brand-primary)/10"
           >
@@ -107,6 +194,7 @@ export default function CatalogPowerWiseStockPage() {
           </Button>
           <Button
             type="button"
+            size="sm"
             onClick={() => void runReorder()}
             disabled={running}
             className="h-9 rounded-xl bg-(--brand-primary) px-4 text-sm font-extrabold text-(--brand-primary-text) hover:opacity-95"
@@ -119,36 +207,16 @@ export default function CatalogPowerWiseStockPage() {
             Run reorder
           </Button>
         </div>
-      }
-    >
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-(--brand-text-muted)" />
-          <Input
-            className="pl-8"
-            placeholder="Search SKU / name…"
-            value={q}
-            onChange={(e) => {
-              setPage(1);
-              setQ(e.target.value);
-            }}
-          />
+      </div>
+
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">{total} leaves</Badge>
+          {refreshing ? (
+            <span className="text-xs text-(--brand-text-muted)">Refreshing…</span>
+          ) : null}
         </div>
-        <AdminSelect
-          value={familyCode}
-          onValueChange={(value) => {
-            setPage(1);
-            setFamilyCode(value);
-          }}
-          options={[
-            { value: "", label: "All families" },
-            { value: "SV", label: "Single Vision" },
-            { value: "KT", label: "Kryptok" },
-            { value: "V2", label: "Progressive V2" },
-          ]}
-          triggerClassName="h-9 min-w-36"
-        />
-        <label className="flex items-center gap-2 text-sm text-(--brand-text)">
+        <label className="flex h-9 items-center gap-2 rounded-md border border-(--brand-card-border) bg-(--brand-card) px-3 text-xs font-medium whitespace-nowrap text-(--brand-text)">
           <input
             type="checkbox"
             checked={shortageOnly}
@@ -159,8 +227,6 @@ export default function CatalogPowerWiseStockPage() {
           />
           Shortages only
         </label>
-        <Badge variant="secondary">{total} leaves</Badge>
-        {refreshing ? <span className="text-xs text-(--brand-text-muted)">Refreshing…</span> : null}
       </div>
 
       {message ? (
@@ -175,6 +241,20 @@ export default function CatalogPowerWiseStockPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all on page"
+                    checked={items.length > 0 && items.every((r) => selectedIds.has(r.id))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedIds(new Set(items.map((r) => r.id)));
+                      } else {
+                        setSelectedIds(new Set());
+                      }
+                    }}
+                  />
+                </TableHead>
                 <TableHead>SKU / Power</TableHead>
                 <TableHead className="text-right">On hand</TableHead>
                 <TableHead className="text-right">Reserved</TableHead>
@@ -204,6 +284,21 @@ export default function CatalogPowerWiseStockPage() {
                   const short = row.available <= row.minStock && row.minStock > 0;
                   return (
                     <TableRow key={row.id}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${row.skuCode}`}
+                          checked={selectedIds.has(row.id)}
+                          onChange={(e) => {
+                            setSelectedIds((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(row.id);
+                              else next.delete(row.id);
+                              return next;
+                            });
+                          }}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div className="font-medium">{row.skuCode}</div>
                         <div className="text-xs text-(--brand-text-muted)">
@@ -311,9 +406,9 @@ export default function CatalogPowerWiseStockPage() {
       </div>
 
       <p className="mt-4 text-xs text-(--brand-text-muted)">
-        Parent matrix:{" "}
-        <Link href="/inventory/products-catalog" className="underline">
-          Products &amp; catalog
+        Product matrices:{" "}
+        <Link href="/inventory/stock-overview" className="underline">
+          Stock Overview
         </Link>
         . Ledger:{" "}
         <Link href="/inventory/stock-transactions" className="underline">

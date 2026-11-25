@@ -241,85 +241,112 @@ export async function saveCatalogProductMatrixRules(input: {
   }
 
   const results: CatalogStockLeafDto[] = [];
+  const variantIds = Array.from(new Set(normalized.map((e) => e.variantId)));
 
-  await prisma.$transaction(async (tx) => {
-    for (const edit of normalized) {
-      const existing = await tx.lensProductPower.findUnique({
-        where: {
-          lensProductVariantId_sph_cyl: {
-            lensProductVariantId: edit.variantId,
-            sph: dec(edit.sph),
-            cyl: dec(edit.cyl),
-          },
-        },
+  await prisma.$transaction(
+    async (tx) => {
+      const existingRows = await tx.lensProductPower.findMany({
+        where: { lensProductVariantId: { in: variantIds } },
       });
+      const existingByKey = new Map(
+        existingRows.map((r) => [
+          encodeStockLeafKey(r.lensProductVariantId, Number(r.sph), Number(r.cyl)),
+          r,
+        ])
+      );
 
-      const before = existing
-        ? {
-            minStock: existing.minStock,
-            targetStock: existing.targetStock,
-            quantity: existing.quantity,
+      let changedCount = 0;
+      for (const edit of normalized) {
+        const key = encodeStockLeafKey(edit.variantId, edit.sph, edit.cyl);
+        const existing = existingByKey.get(key) ?? null;
+
+        const before = existing
+          ? {
+              minStock: existing.minStock,
+              targetStock: existing.targetStock,
+              quantity: existing.quantity,
+            }
+          : null;
+
+        const row = existing
+          ? await tx.lensProductPower.update({
+              where: { id: existing.id },
+              data: {
+                minStock: edit.minStock,
+                targetStock: edit.targetStock,
+              },
+            })
+          : await tx.lensProductPower.create({
+              data: {
+                lensProductVariantId: edit.variantId,
+                sph: dec(edit.sph),
+                cyl: dec(edit.cyl),
+                minStock: edit.minStock,
+                targetStock: edit.targetStock,
+                quantity: 0,
+                blockedQty: 0,
+              },
+            });
+
+        const after = {
+          minStock: row.minStock,
+          targetStock: row.targetStock,
+          quantity: row.quantity,
+        };
+
+        if (
+          !before ||
+          before.minStock !== after.minStock ||
+          before.targetStock !== after.targetStock
+        ) {
+          changedCount += 1;
+          if (normalized.length <= 5) {
+            const variant = variantById.get(edit.variantId);
+            await recordAuditEvent(tx, {
+              action: AuditAction.REORDER_RULE_CHANGED,
+              module: AuditModule.INVENTORY,
+              entityType: "LensProductPower",
+              entityId: row.id,
+              actor: input.actor,
+              request: input.request ?? null,
+              changes: diffFields(
+                (before ?? {}) as Record<string, unknown>,
+                after as Record<string, unknown>,
+                ["minStock", "targetStock"]
+              ),
+              context: {
+                productId: input.productId,
+                variantId: edit.variantId,
+                skuCode: variant?.skuCode ?? null,
+                sph: edit.sph,
+                cyl: edit.cyl,
+              },
+              activityMessage: `Catalog stock rules updated — ${variant?.skuCode ?? edit.variantId} ${edit.sph.toFixed(2)}/${edit.cyl.toFixed(2)}`,
+            });
           }
-        : null;
+        }
 
-      const row = existing
-        ? await tx.lensProductPower.update({
-            where: { id: existing.id },
-            data: {
-              minStock: edit.minStock,
-              targetStock: edit.targetStock,
-            },
-          })
-        : await tx.lensProductPower.create({
-            data: {
-              lensProductVariantId: edit.variantId,
-              sph: dec(edit.sph),
-              cyl: dec(edit.cyl),
-              minStock: edit.minStock,
-              targetStock: edit.targetStock,
-              quantity: 0,
-              blockedQty: 0,
-            },
-          });
+        results.push(serializeLeaf(row));
+      }
 
-      const after = {
-        minStock: row.minStock,
-        targetStock: row.targetStock,
-        quantity: row.quantity,
-      };
-
-      if (
-        !before ||
-        before.minStock !== after.minStock ||
-        before.targetStock !== after.targetStock
-      ) {
-        const variant = variantById.get(edit.variantId);
+      if (normalized.length > 5 && changedCount > 0) {
         await recordAuditEvent(tx, {
           action: AuditAction.REORDER_RULE_CHANGED,
           module: AuditModule.INVENTORY,
-          entityType: "LensProductPower",
-          entityId: row.id,
+          entityType: "LensProduct",
+          entityId: input.productId,
           actor: input.actor,
           request: input.request ?? null,
-          changes: diffFields(
-            (before ?? {}) as Record<string, unknown>,
-            after as Record<string, unknown>,
-            ["minStock", "targetStock"]
-          ),
           context: {
             productId: input.productId,
-            variantId: edit.variantId,
-            skuCode: variant?.skuCode ?? null,
-            sph: edit.sph,
-            cyl: edit.cyl,
+            editedCells: String(changedCount),
           },
-          activityMessage: `Catalog stock rules updated — ${variant?.skuCode ?? edit.variantId} ${edit.sph.toFixed(2)}/${edit.cyl.toFixed(2)}`,
+          activityMessage: `Bulk updated catalog stock rules (${changedCount} cells)`,
         });
       }
-
-      results.push(serializeLeaf(row));
-    }
-  });
+    },
+    { maxWait: 10_000, timeout: 60_000 }
+  );
 
   return { leaves: results, updated: results.length };
 }

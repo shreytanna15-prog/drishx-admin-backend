@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Loader2, Search, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, Loader2, Search, ShoppingCart, Store, X } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
@@ -17,10 +18,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AdminApiError } from "@/app/lib/admin-api";
+import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import {
   formatPowerValue,
-  LENS_TYPE_LABELS,
   PRIORITY_BADGE_CLASS,
   PROCUREMENT_PRIORITIES,
   PROCUREMENT_SOURCES,
@@ -29,33 +29,37 @@ import {
   STATUS_BADGE_CLASS,
   listProcurementRequests,
   procurementRequestAction,
+  updateProcurementCartItemsRequest,
   type ProcurementRequestRow,
   type ProcurementRequestsResponse,
 } from "@/app/lib/admin-procurement";
+import { createPurchaseOrderDraft } from "@/app/lib/admin-purchase-orders";
 import {
   procurementRequestsEmptyMessage,
   shouldCommitListResult,
 } from "@/app/lib/procurement-request-filters";
 import { cn } from "@/lib/utils";
 
-const LENS_TYPE_FILTERS = [
-  { value: "", label: "All lenses" },
-  { value: "SINGLE_VISION", label: "Single Vision" },
-  { value: "KRYPTOK", label: "Kryptok" },
-  { value: "PROGRESSIVE", label: "Progressive" },
-] as const;
+type SupplierOption = { id: string; name: string };
 
 export default function ProcurementRequestsPage() {
+  const router = useRouter();
   const [data, setData] = useState<ProcurementRequestsResponse | null>(null);
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [creatingPoFor, setCreatingPoFor] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"cart" | "list">("cart");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkSupplierId, setBulkSupplierId] = useState("");
+  const [assigningSupplier, setAssigningSupplier] = useState(false);
+  const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("");
   const [status, setStatus] = useState("");
   const [priority, setPriority] = useState("");
-  const [lensType, setLensType] = useState("");
   const [openOnly, setOpenOnly] = useState(true);
   const loadSeqRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -70,29 +74,37 @@ export default function ProcurementRequestsPage() {
       if (source) params.set("source", source);
       if (status) params.set("status", status);
       if (priority) params.set("priority", priority);
-      if (lensType) params.set("lensType", lensType);
       if (openOnly) params.set("openOnly", "true");
       params.set("limit", "300");
 
-      const res = await listProcurementRequests(params, {
-        signal: controller.signal,
-      });
+      const [res, supRes] = await Promise.all([
+        listProcurementRequests(params, { signal: controller.signal }),
+        adminFetch<{ suppliers: Array<{ id: string; name: string; isActive?: boolean }> }>(
+          "/api/procurement/suppliers",
+          { signal: controller.signal }
+        ).catch(() => ({ suppliers: [] })),
+      ]);
       if (!shouldCommitListResult(seq, loadSeqRef.current)) return;
       setData(res);
+      setSuppliers(
+        (supRes.suppliers ?? [])
+          .filter((s) => s.isActive !== false)
+          .map((s) => ({ id: s.id, name: s.name }))
+      );
     } catch (err) {
       if (!shouldCommitListResult(seq, loadSeqRef.current)) return;
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError(
         err instanceof AdminApiError
           ? err.message
-          : "Failed to load procurement requests."
+          : "Failed to load procurement cart."
       );
     } finally {
       if (shouldCommitListResult(seq, loadSeqRef.current)) {
         setLoading(false);
       }
     }
-  }, [source, status, priority, lensType, openOnly]);
+  }, [source, status, priority, openOnly]);
 
   useEffect(() => {
     void load();
@@ -101,8 +113,6 @@ export default function ProcurementRequestsPage() {
     };
   }, [load]);
 
-  // Filter changes are user events, so the loading flag is set from the
-  // handler rather than from inside the effect.
   function changeFilter(setter: (value: string) => void) {
     return (value: string) => {
       setLoading(true);
@@ -123,10 +133,42 @@ export default function ProcurementRequestsPage() {
     return list.filter(
       (row) =>
         (row.lensLabel ?? "").toLowerCase().includes(q) ||
+        (row.productName ?? "").toLowerCase().includes(q) ||
+        (row.skuCode ?? "").toLowerCase().includes(q) ||
+        (row.supplierName ?? "").toLowerCase().includes(q) ||
         row.publicId.toLowerCase().includes(q) ||
         (row.order?.orderNumber ?? "").toLowerCase().includes(q)
     );
   }, [data, query]);
+
+  const supplierGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        supplierId: string | null;
+        supplierName: string;
+        items: ProcurementRequestRow[];
+        totalQty: number;
+      }
+    >();
+    for (const row of rows) {
+      const key = row.supplierId ?? "__unassigned__";
+      const existing = groups.get(key) ?? {
+        supplierId: row.supplierId ?? null,
+        supplierName: row.supplierName ?? "Unassigned Supplier",
+        items: [],
+        totalQty: 0,
+      };
+      existing.items.push(row);
+      existing.totalQty += row.outstandingQuantity;
+      groups.set(key, existing);
+    }
+    return Array.from(groups.values()).sort((a, b) => {
+      if (!a.supplierId && b.supplierId) return -1;
+      if (a.supplierId && !b.supplierId) return 1;
+      return a.supplierName.localeCompare(b.supplierName);
+    });
+  }, [rows]);
 
   async function act(row: ProcurementRequestRow, action: "approve" | "cancel") {
     setBusyId(row.id);
@@ -136,11 +178,11 @@ export default function ProcurementRequestsPage() {
       await procurementRequestAction(
         row.id,
         action,
-        action === "cancel" ? { reason: "Cancelled from admin console" } : undefined
+        action === "cancel" ? { reason: "Removed from procurement cart" } : undefined
       );
       setNotice(
         action === "approve"
-          ? `${row.publicId} approved. It is now ready to purchase.`
+          ? `${row.publicId} approved and ready to purchase.`
           : `${row.publicId} cancelled.`
       );
       await load();
@@ -151,18 +193,141 @@ export default function ProcurementRequestsPage() {
     }
   }
 
+  async function assignSupplierToSelected() {
+    if (selectedIds.size === 0 || !bulkSupplierId) return;
+    setAssigningSupplier(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await updateProcurementCartItemsRequest({
+        ids: Array.from(selectedIds),
+        supplierId: bulkSupplierId,
+      });
+      setSelectedIds(new Set());
+      setNotice(`Assigned supplier to ${res.updatedCount} cart item(s).`);
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError ? err.message : "Failed to assign supplier."
+      );
+    } finally {
+      setAssigningSupplier(false);
+    }
+  }
+
+  async function saveRowQty(row: ProcurementRequestRow) {
+    const raw = qtyDrafts[row.id];
+    if (raw == null) return;
+    const qty = Number(raw.trim());
+    if (!Number.isInteger(qty) || qty <= 0) {
+      setError("Quantity must be a whole number > 0.");
+      return;
+    }
+    setBusyId(row.id);
+    setError("");
+    try {
+      await updateProcurementCartItemsRequest({
+        ids: [row.id],
+        requestedQuantity: qty,
+      });
+      setQtyDrafts((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof AdminApiError ? err.message : "Failed to update qty.");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  async function createConsolidatedPoForSupplier(
+    supplierId: string,
+    groupItems: ProcurementRequestRow[]
+  ) {
+    const eligible = groupItems.filter(
+      (r) =>
+        (r.status === "OPEN" ||
+          r.status === "UNDER_REVIEW" ||
+          r.status === "APPROVED") &&
+        r.outstandingQuantity > 0
+    );
+    if (eligible.length === 0) {
+      setError("No eligible items in this supplier group.");
+      return;
+    }
+    setCreatingPoFor(supplierId);
+    setError("");
+    setNotice("");
+    try {
+      // Auto-approve OPEN/UNDER_REVIEW items so they can be allocated cleanly on PO submit/approve.
+      for (const item of eligible) {
+        if (item.status === "OPEN" || item.status === "UNDER_REVIEW") {
+          await procurementRequestAction(item.id, "approve");
+        }
+      }
+      const res = await createPurchaseOrderDraft({
+        supplierId,
+        warehouseCode: "MAIN",
+        lines: eligible.map((item) => ({
+          lensType: item.lensType ?? null,
+          lensId: item.lensId ?? null,
+          lensProductPowerId: item.lensProductPowerId ?? null,
+          requiredQuantity: item.outstandingQuantity,
+          poQuantity: item.outstandingQuantity,
+          procurementRequestId: item.id,
+          productLabel: item.lensLabel ?? null,
+          powerLabel: formatPowerValue(item.power),
+        })),
+      });
+      router.push(`/procurement/purchase-orders/new?draft=${res.purchaseOrder.id}`);
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Failed to create Purchase Order from cart."
+      );
+      setCreatingPoFor(null);
+    }
+  }
+
   const summary = data?.summary;
 
   return (
-    <AdminPage title="Procurement" subtitle="Purchase Management">
+    <AdminPage
+      title="Procurement Cart"
+      subtitle="Shortages and manual matrix picks grouped by supplier for consolidated multi-product Purchase Orders."
+      actions={
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant={viewMode === "cart" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setViewMode("cart")}
+          >
+            <ShoppingCart className="size-4" />
+            Cart (By Supplier)
+          </Button>
+          <Button
+            type="button"
+            variant={viewMode === "list" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setViewMode("list")}
+          >
+            Flat Queue
+          </Button>
+        </div>
+      }
+    >
       <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight text-(--brand-text)">
-            Procurement Requests
+            Procurement Cart &amp; Requests
           </h1>
           <p className="mt-1 text-sm text-(--brand-text-muted)">
-            Everything DrishX needs to buy. Approving a request authorises the
-            purchase — no money moves until a human approves.
+            Group shortages across products by supplier and generate one consolidated Purchase Order.
           </p>
         </div>
         {summary ? (
@@ -197,13 +362,6 @@ export default function ProcurementRequestsPage() {
           size="sm"
           triggerClassName="h-10 w-auto min-w-[10rem]"
         />
-        <AdminSelect
-          value={lensType}
-          onValueChange={changeFilter(setLensType)}
-          options={[...LENS_TYPE_FILTERS]}
-          size="sm"
-          triggerClassName="h-10 w-auto min-w-[10rem]"
-        />
         <label className="flex items-center gap-2 text-sm text-(--brand-text-muted)">
           <input
             type="checkbox"
@@ -218,11 +376,44 @@ export default function ProcurementRequestsPage() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search PR, lens, order…"
+            placeholder="Search PR, SKU, product, supplier…"
             className="h-10 border-(--brand-input-border) bg-(--brand-input-bg) pl-9 text-(--brand-text) placeholder:text-(--brand-placeholder)"
           />
         </div>
       </div>
+
+      {selectedIds.size > 0 ? (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-(--brand-primary)/40 bg-(--brand-primary)/5 p-3 text-sm">
+          <span className="font-bold text-(--brand-text)">
+            {selectedIds.size} selected
+          </span>
+          <AdminSelect
+            value={bulkSupplierId}
+            onValueChange={setBulkSupplierId}
+            size="sm"
+            options={[
+              { value: "", label: "Select supplier…" },
+              ...suppliers.map((s) => ({ value: s.id, label: s.name })),
+            ]}
+            triggerClassName="h-9 w-48 shrink-0"
+          />
+          <Button
+            type="button"
+            size="sm"
+            disabled={!bulkSupplierId || assigningSupplier}
+            onClick={() => void assignSupplierToSelected()}
+          >
+            {assigningSupplier ? "Assigning…" : "Assign Supplier"}
+          </Button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="text-xs text-(--brand-text-muted) underline underline-offset-2"
+          >
+            Clear selection
+          </button>
+        </div>
+      ) : null}
 
       {notice ? (
         <div className="mb-4 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -238,179 +429,284 @@ export default function ProcurementRequestsPage() {
 
       {loading ? (
         <TableSkeleton compact columns={8} rows={8} />
+      ) : rows.length === 0 ? (
+        <div className="rounded-xl border border-(--brand-card-border) bg-(--brand-card) px-6 py-12 text-center text-sm text-(--brand-text-muted)">
+          {procurementRequestsEmptyMessage(
+            Boolean(query.trim() || source || status || priority || !openOnly)
+          )}
+        </div>
+      ) : viewMode === "cart" ? (
+        <div className="space-y-5">
+          {supplierGroups.map((group) => {
+            const groupKey = group.supplierId ?? "__unassigned__";
+            const allGroupSelected = group.items.every((r) => selectedIds.has(r.id));
+            return (
+              <section
+                key={groupKey}
+                className="overflow-hidden rounded-xl border border-(--brand-card-border) bg-(--brand-card)"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-(--brand-card-border) bg-(--brand-input-bg)/40 px-4 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select all in ${group.supplierName}`}
+                      checked={allGroupSelected}
+                      onChange={(e) => {
+                        setSelectedIds((prev) => {
+                          const next = new Set(prev);
+                          for (const r of group.items) {
+                            if (e.target.checked) next.add(r.id);
+                            else next.delete(r.id);
+                          }
+                          return next;
+                        });
+                      }}
+                    />
+                    <Store className="size-4 text-(--brand-primary)" />
+                    <h2 className="text-sm font-bold text-(--brand-text)">
+                      {group.supplierName}
+                    </h2>
+                    <Badge variant="secondary">
+                      {group.items.length} {group.items.length === 1 ? "line" : "lines"} · {group.totalQty} pcs
+                    </Badge>
+                  </div>
+
+                  {group.supplierId ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={creatingPoFor !== null}
+                      onClick={() =>
+                        void createConsolidatedPoForSupplier(
+                          group.supplierId!,
+                          group.items
+                        )
+                      }
+                      className="h-9 rounded-xl bg-(--brand-primary) px-4 text-xs font-extrabold text-(--brand-primary-text)"
+                    >
+                      {creatingPoFor === group.supplierId ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          Creating PO…
+                        </>
+                      ) : (
+                        `Create Purchase Order (${group.items.length})`
+                      )}
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-amber-700 dark:text-amber-300">
+                      Select rows above and assign a supplier to create a PO.
+                    </span>
+                  )}
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-8" />
+                      <TableHead>Product / Variant / Power</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {group.items.map((row) => {
+                      const draftVal = qtyDrafts[row.id];
+                      return (
+                        <TableRow key={row.id}>
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(row.id)}
+                              onChange={(e) => {
+                                setSelectedIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(row.id);
+                                  else next.delete(row.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium text-(--brand-text)">
+                              {row.lensLabel ?? row.publicId}
+                            </div>
+                            <div className="text-xs text-(--brand-text-muted)">
+                              {row.publicId}
+                              {row.power ? ` · ${formatPowerValue(row.power)}` : ""}
+                              {row.order?.orderNumber ? ` · Order ${row.order.orderNumber}` : ""}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{sourceLabel(row.source)}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              className={cn(
+                                STATUS_BADGE_CLASS[row.status] ??
+                                  "bg-zinc-100 text-zinc-700"
+                              )}
+                            >
+                              {row.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="inline-flex items-center gap-1">
+                              <Input
+                                inputMode="numeric"
+                                value={draftVal ?? String(row.requestedQuantity)}
+                                onChange={(e) =>
+                                  setQtyDrafts((prev) => ({
+                                    ...prev,
+                                    [row.id]: e.target.value,
+                                  }))
+                                }
+                                className="h-8 w-16 text-right tabular-nums"
+                              />
+                              {draftVal != null &&
+                              draftVal !== String(row.requestedQuantity) ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={busyId === row.id}
+                                  onClick={() => void saveRowQty(row)}
+                                  className="h-8 px-2 text-xs"
+                                >
+                                  Save
+                                </Button>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="inline-flex items-center gap-1">
+                              {(row.status === "OPEN" ||
+                                row.status === "UNDER_REVIEW") && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={busyId === row.id}
+                                  onClick={() => void act(row, "approve")}
+                                  title="Approve"
+                                >
+                                  <Check className="size-3.5" />
+                                </Button>
+                              )}
+                              {row.status !== "CANCELLED" &&
+                                row.status !== "RECEIVED" && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={busyId === row.id}
+                                    onClick={() => void act(row, "cancel")}
+                                    title="Remove"
+                                  >
+                                    <X className="size-3.5" />
+                                  </Button>
+                                )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </section>
+            );
+          })}
+        </div>
       ) : (
-        <AdminTable className="overflow-x-auto">
-          <Table className="min-w-[64rem]">
+        <AdminTable>
+          <Table>
             <TableHeader>
-              <TableRow className="border-(--brand-card-border) hover:bg-transparent">
-                <TableHead className="whitespace-nowrap text-(--brand-label)">
-                  Request
-                </TableHead>
-                <TableHead className="min-w-[10rem] text-(--brand-label)">
-                  Lens
-                </TableHead>
-                <TableHead className="whitespace-nowrap text-(--brand-label)">
-                  Power
-                </TableHead>
-                <TableHead className="w-[14rem] min-w-[12rem] max-w-[16rem] text-(--brand-label)">
-                  Source
-                </TableHead>
-                <TableHead className="whitespace-nowrap text-right text-(--brand-label)">
-                  Required
-                </TableHead>
-                <TableHead className="whitespace-nowrap text-right text-(--brand-label)">
-                  Received
-                </TableHead>
-                <TableHead className="whitespace-nowrap text-(--brand-label)">
-                  Status
-                </TableHead>
-                <TableHead className="whitespace-nowrap text-(--brand-label)">
-                  Priority
-                </TableHead>
-                <TableHead className="whitespace-nowrap text-(--brand-label)" />
+              <TableRow>
+                <TableHead>PR</TableHead>
+                <TableHead>Product / Power</TableHead>
+                <TableHead>Supplier</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Priority</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Requested</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={9}
-                    className="h-28 text-center text-(--brand-text-muted)"
-                  >
-                    {procurementRequestsEmptyMessage(
-                      Boolean(
-                        query.trim() || source || status || priority || lensType
-                      )
-                    )}
+              {rows.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="font-medium">{row.publicId}</TableCell>
+                  <TableCell>
+                    <div>{row.lensLabel ?? "—"}</div>
+                    {row.power ? (
+                      <div className="text-xs text-(--brand-text-muted)">
+                        {formatPowerValue(row.power)}
+                      </div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>{row.supplierName ?? "Unassigned"}</TableCell>
+                  <TableCell>{sourceLabel(row.source)}</TableCell>
+                  <TableCell>
+                    <Badge
+                      className={cn(
+                        PRIORITY_BADGE_CLASS[row.priority] ??
+                          "bg-zinc-100 text-zinc-700"
+                      )}
+                    >
+                      {row.priority}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      className={cn(
+                        STATUS_BADGE_CLASS[row.status] ??
+                          "bg-zinc-100 text-zinc-700"
+                      )}
+                    >
+                      {row.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.requestedQuantity}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="inline-flex items-center gap-1">
+                      {(row.status === "OPEN" ||
+                        row.status === "UNDER_REVIEW") && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={busyId === row.id}
+                          onClick={() => void act(row, "approve")}
+                        >
+                          Approve
+                        </Button>
+                      )}
+                      {row.status !== "CANCELLED" &&
+                        row.status !== "RECEIVED" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={busyId === row.id}
+                            onClick={() => void act(row, "cancel")}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                    </div>
                   </TableCell>
                 </TableRow>
-              ) : (
-                rows.map((row) => (
-                  <RequestRow
-                    key={row.id}
-                    row={row}
-                    busy={busyId === row.id}
-                    onApprove={() => void act(row, "approve")}
-                    onCancel={() => void act(row, "cancel")}
-                  />
-                ))
-              )}
+              ))}
             </TableBody>
           </Table>
         </AdminTable>
       )}
     </AdminPage>
-  );
-}
-
-function RequestRow({
-  row,
-  busy,
-  onApprove,
-  onCancel,
-}: {
-  row: ProcurementRequestRow;
-  busy: boolean;
-  onApprove: () => void;
-  onCancel: () => void;
-}) {
-  const canApprove = row.status === "OPEN" || row.status === "UNDER_REVIEW";
-  const canCancel = canApprove || row.status === "APPROVED";
-  const fullyReceived = row.receivedQuantity >= row.requestedQuantity;
-
-  return (
-    <TableRow className="border-(--brand-card-border) align-top">
-      <TableCell className="whitespace-nowrap">
-        <p className="font-semibold text-(--brand-text)">{row.publicId}</p>
-        <p className="text-xs text-(--brand-text-muted)">
-          {new Date(row.createdAt).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-          })}
-        </p>
-        {row.order ? (
-          <p className="text-xs text-(--brand-text-muted)">
-            Order {row.order.orderNumber}
-          </p>
-        ) : null}
-      </TableCell>
-      <TableCell className="max-w-[14rem] whitespace-normal text-(--brand-text)">
-        <p className="truncate font-medium" title={row.lensLabel ?? undefined}>
-          {row.lensLabel ?? "—"}
-        </p>
-        <p className="text-xs text-(--brand-text-muted)">
-          {LENS_TYPE_LABELS[row.lensType] ?? row.lensType}
-        </p>
-      </TableCell>
-      <TableCell className="whitespace-nowrap text-(--brand-text-muted)">
-        {formatPowerValue(row.power)}
-      </TableCell>
-      <TableCell className="max-w-[16rem] min-w-[12rem] whitespace-normal align-top text-(--brand-text-muted)">
-        <p className="font-medium text-(--brand-text)">{sourceLabel(row.source)}</p>
-        {row.source === "MINIMUM_STOCK_THRESHOLD" && row.availableAtTrigger !== null ? (
-          <p className="text-xs whitespace-nowrap">
-            avail {row.availableAtTrigger} / min {row.minStockAtTrigger} / target{" "}
-            {row.targetStockAtTrigger}
-          </p>
-        ) : null}
-        {row.triggerReason ? (
-          <p
-            className="mt-0.5 line-clamp-2 break-words text-xs opacity-80"
-            title={row.triggerReason}
-          >
-            {row.triggerReason}
-          </p>
-        ) : null}
-      </TableCell>
-      <TableCell className="whitespace-nowrap text-right tabular-nums text-(--brand-text)">
-        {row.requestedQuantity}
-        {row.requestedQuantity !== row.requiredQuantity ? (
-          <p className="text-xs text-(--brand-text-muted)">
-            needed {row.requiredQuantity}
-          </p>
-        ) : null}
-      </TableCell>
-      <TableCell
-        className={cn(
-          "whitespace-nowrap text-right tabular-nums",
-          fullyReceived ? "text-emerald-700" : "text-(--brand-text-muted)"
-        )}
-      >
-        {row.receivedQuantity}
-        {!fullyReceived && row.outstandingQuantity > 0 ? (
-          <p className="text-xs text-(--brand-text-muted)">
-            {row.outstandingQuantity} left
-          </p>
-        ) : null}
-      </TableCell>
-      <TableCell className="whitespace-nowrap">
-        <Badge className={STATUS_BADGE_CLASS[row.status] ?? STATUS_BADGE_CLASS.CANCELLED}>
-          {row.status.replace(/_/g, " ").toLowerCase()}
-        </Badge>
-      </TableCell>
-      <TableCell className="whitespace-nowrap">
-        <Badge className={PRIORITY_BADGE_CLASS[row.priority] ?? PRIORITY_BADGE_CLASS.NORMAL}>
-          {row.priority.toLowerCase()}
-        </Badge>
-      </TableCell>
-      <TableCell className="whitespace-nowrap text-right">
-        {busy ? (
-          <Loader2 className="ml-auto size-4 animate-spin text-(--brand-text-muted)" />
-        ) : canApprove ? (
-          <Button size="sm" onClick={onApprove}>
-            <Check className="mr-1.5 size-4" />
-            Approve
-          </Button>
-        ) : canCancel ? (
-          <Button size="sm" variant="outline" onClick={onCancel}>
-            <X className="mr-1.5 size-4" />
-            Cancel
-          </Button>
-        ) : (
-          <span className="text-xs text-(--brand-text-muted)">—</span>
-        )}
-      </TableCell>
-    </TableRow>
   );
 }
 
@@ -423,21 +719,17 @@ function StatPill({
   value: number;
   tone: "amber" | "sky" | "indigo" | "red";
 }) {
-  const toneClass: Record<string, string> = {
-    amber: "border-amber-300 bg-amber-50 text-amber-900",
-    sky: "border-sky-300 bg-sky-50 text-sky-900",
-    indigo: "border-indigo-300 bg-indigo-50 text-indigo-900",
-    red: "border-red-300 bg-red-50 text-red-900",
-  };
+  const cls =
+    tone === "red"
+      ? "border-red-300 bg-red-50 text-red-900"
+      : tone === "amber"
+        ? "border-amber-300 bg-amber-50 text-amber-900"
+        : tone === "sky"
+          ? "border-sky-300 bg-sky-50 text-sky-900"
+          : "border-indigo-300 bg-indigo-50 text-indigo-900";
   return (
-    <div
-      className={cn(
-        "rounded-xl border px-3 py-2 text-center",
-        value > 0 ? toneClass[tone] : "border-(--brand-card-border) bg-(--brand-card) text-(--brand-text-muted)"
-      )}
-    >
-      <p className="text-lg font-extrabold leading-none tabular-nums">{value}</p>
-      <p className="mt-1 text-xs">{label}</p>
+    <div className={cn("rounded-xl border px-3 py-1.5 text-xs font-semibold", cls)}>
+      {label}: <span className="font-extrabold tabular-nums">{value}</span>
     </div>
   );
 }

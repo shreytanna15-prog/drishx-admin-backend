@@ -20,11 +20,14 @@ export async function GET(req: NextRequest) {
     const sp = req.nextUrl.searchParams;
     const shortageOnly =
       sp.get("shortageOnly") === "1" || sp.get("shortageOnly") === "true";
+    const includeUnstocked =
+      sp.get("includeUnstocked") !== "0" && sp.get("includeUnstocked") !== "false";
     const data = await listCatalogStockPositions({
       q: sp.get("q") ?? undefined,
       productId: sp.get("productId") ?? undefined,
       familyCode: sp.get("familyCode") ?? undefined,
       shortageOnly,
+      includeUnstocked,
       page: Number(sp.get("page") ?? 1) || 1,
       limit: Number(sp.get("limit") ?? 20) || 20,
     });

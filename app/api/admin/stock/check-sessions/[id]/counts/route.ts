@@ -6,10 +6,10 @@ import {
   saveCatalogStockCheckCounts,
 } from "@/app/lib/catalog/catalog-stock-check";
 
-function requireAdmin(req: NextRequest) {
+function requireStaff(req: NextRequest) {
   const auth = getSessionOrUnauthorized(req);
   if (!auth.session) return { error: auth.error };
-  if (auth.session.role !== "ADMIN") {
+  if (auth.session.role !== "ADMIN" && auth.session.role !== "EMPLOYEE") {
     return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) };
   }
   return { session: auth.session };
@@ -17,9 +17,9 @@ function requireAdmin(req: NextRequest) {
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** PATCH — Admin may enter/override counted qty. */
+/** PATCH — Employee submits blind counted qty; Admin may enter/override. */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
-  const auth = requireAdmin(req);
+  const auth = requireStaff(req);
   if (auth.error) return auth.error;
 
   try {
@@ -30,7 +30,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const session = await saveCatalogStockCheckCounts({
       sessionId: id,
       lines: body?.lines ?? [],
-      asAdmin: true,
+      asAdmin: auth.session.role === "ADMIN",
       actor: actorFromSession(auth.session),
     });
     return NextResponse.json({ session });
