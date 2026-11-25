@@ -22,22 +22,23 @@ export async function decrementLensStock(
     orderId?: string;
     movementType?: "STOCK_PICKED" | "STOCK_DECREMENTED";
     request?: import("./audit").AuditRequestContext | null;
-  }
+  },
+  db: typeof prisma | Prisma.TransactionClient = prisma
 ) {
   if (quantity <= 0) return;
-  const before = (await getLensQuantity(prisma, lensType, lensId)) ?? 0;
+  const before = (await getLensQuantity(db, lensType, lensId)) ?? 0;
   if (lensType === LensType.SINGLE_VISION) {
-    await prisma.singleVisionLens.update({
+    await db.singleVisionLens.update({
       where: { id: lensId },
       data: { quantity: { decrement: quantity } },
     });
   } else if (lensType === LensType.KRYPTOK) {
-    await prisma.kryptokLens.update({
+    await db.kryptokLens.update({
       where: { id: lensId },
       data: { quantity: { decrement: quantity } },
     });
   } else if (lensType === LensType.PROGRESSIVE) {
-    await prisma.progressiveLens.update({
+    await db.progressiveLens.update({
       where: { id: lensId },
       data: { quantity: { decrement: quantity } },
     });
@@ -55,6 +56,7 @@ export async function decrementLensStock(
       actorName: audit.actorName,
       orderId: audit.orderId,
       request: audit.request,
+      client: db,
     });
   }
 }
@@ -193,6 +195,7 @@ export type UpsertCartReservationInput = {
   unitPrice: number;
   lineType?: CartLineType;
   wholesaleSpec?: Prisma.InputJsonValue | null;
+  lensProductPowerId?: string | null;
   sph?: number | null;
   cyl?: number | null;
   add?: number | null;
@@ -221,7 +224,7 @@ export async function upsertWholesaleCartReservation(
 function buildCartReservationPayload(
   input: UpsertCartReservationInput,
   expiresAt: Date
-): Omit<PrismaTypes.CartReservationCreateInput, "user"> {
+): Omit<PrismaTypes.CartReservationUncheckedCreateInput, "id" | "userId" | "createdAt" | "updatedAt"> {
   const {
     lensType,
     lensId,
@@ -230,6 +233,7 @@ function buildCartReservationPayload(
     unitPrice,
     lineType,
     wholesaleSpec,
+    lensProductPowerId,
     sph,
     cyl,
     add,
@@ -250,6 +254,7 @@ function buildCartReservationPayload(
     quantity,
     reservedQuantity: 0,
     unitPrice,
+    lensProductPowerId: lensProductPowerId?.trim() || null,
     sph: sph ?? null,
     cyl: cyl ?? null,
     add: add ?? null,
@@ -275,7 +280,7 @@ async function upsertCartReservationDirect(
       where: { userId_cartLineKey: { userId, cartLineKey: input.cartLineKey } },
       create: {
         ...payload,
-        user: { connect: { id: userId } },
+        userId,
       },
       update: payload,
     });
@@ -316,6 +321,7 @@ async function bulkSqlUpsertCartReservations(
       ${payload.quantity},
       ${0},
       ${payload.unitPrice},
+      ${payload.lensProductPowerId},
       ${payload.sph},
       ${payload.cyl},
       ${payload.add},
@@ -343,6 +349,7 @@ async function bulkSqlUpsertCartReservations(
       "quantity",
       "reservedQuantity",
       "unitPrice",
+      "lensProductPowerId",
       "sph",
       "cyl",
       "add",
@@ -365,6 +372,7 @@ async function bulkSqlUpsertCartReservations(
       "quantity" = EXCLUDED."quantity",
       "reservedQuantity" = 0,
       "unitPrice" = EXCLUDED."unitPrice",
+      "lensProductPowerId" = EXCLUDED."lensProductPowerId",
       "sph" = EXCLUDED."sph",
       "cyl" = EXCLUDED."cyl",
       "add" = EXCLUDED."add",
@@ -410,6 +418,7 @@ export async function bulkUpsertCartReservations(
 
   const lensRefs = new Map<string, { lensType: LensType; lensId: string; quantity: number }>();
   for (const line of lines) {
+    if (line.lensProductPowerId?.trim()) continue;
     const key = `${line.lensType}:${line.lensId}`;
     const existing = lensRefs.get(key);
     if (!existing || line.quantity > existing.quantity) {
@@ -426,6 +435,16 @@ export async function bulkUpsertCartReservations(
     if (!lens) {
       throw new Error("Lens not found.");
     }
+  }
+
+  for (const line of lines) {
+    const powerId = line.lensProductPowerId?.trim();
+    if (!powerId) continue;
+    const leaf = await prisma.lensProductPower.findUnique({
+      where: { id: powerId },
+      select: { id: true },
+    });
+    if (!leaf) throw new Error("Catalog stock leaf not found.");
   }
 
   const expiresAt = reservationExpiresAt();
@@ -549,6 +568,7 @@ export function mapReservationToCartItem(row: CartReservation, lensOnHand = 0) {
     cartLineKey: row.cartLineKey,
     lineType: row.lineType,
     wholesaleSpec: row.wholesaleSpec,
+    lensProductPowerId: row.lensProductPowerId ?? null,
     cartQuantity: row.quantity,
     reservedQuantity: 0,
     isBackorder: false,

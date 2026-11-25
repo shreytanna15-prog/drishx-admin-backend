@@ -11,6 +11,9 @@ import {
   requireProcurementView,
 } from "@/app/lib/purchase-order-http";
 import { MAX_PROCUREMENT_DOC_BYTES } from "@/app/lib/procurement-documents";
+import { resolveDraftLineCatalogIdentity } from "@/app/lib/catalog/catalog-po-resolve";
+import { normalizeStockPower } from "@/app/lib/catalog/lens-product-stock-core";
+import { Prisma } from "@prisma/client";
 
 /**
  * GET /api/procurement/purchase-orders/import
@@ -21,16 +24,30 @@ export async function GET(req: NextRequest) {
   if ("error" in gate && gate.error) return gate.error;
   try {
     const queue = await listOpenProcurementQueue();
-    const byPower = new Map<string, { lensType: string; lensId: string; product: string | null; power: string | null; required: number }>();
+    const byPower = new Map<string, {
+      lensProductPowerId: string | null;
+      skuCode: string | null;
+      sph: number | null;
+      cyl: number | null;
+      lensType: string | null;
+      lensId: string | null;
+      product: string | null;
+      power: string | null;
+      required: number;
+    }>();
     for (const item of queue) {
-      // This legacy template has lensType/lensId columns only. Catalog-only
-      // requests remain selectable from the reorder queue in the PO wizard.
-      if (item.openPurchaseOrder || !item.lensType || !item.lensId) continue;
-      const key = powerKey(item.lensType, item.lensId);
+      if (item.openPurchaseOrder) continue;
+      const key = item.lensProductPowerId
+        ? `power:${item.lensProductPowerId}`
+        : powerKey(item.lensType!, item.lensId!);
       const existing = byPower.get(key);
       if (existing) existing.required += item.unallocatedQuantity;
       else
         byPower.set(key, {
+          lensProductPowerId: item.lensProductPowerId,
+          skuCode: item.skuCode ?? null,
+          sph: item.sph ?? null,
+          cyl: item.cyl ?? null,
           lensType: item.lensType,
           lensId: item.lensId,
           product: item.productLabel,
@@ -84,17 +101,74 @@ export async function POST(req: NextRequest) {
     const errors: string[] = [];
     const warnings = [...parsed.warnings];
     const locks = await prisma.openPurchaseOrderPower.findMany({
-      where: { OR: parsed.rows.map((r) => ({ lensType: r.lensType, lensId: r.lensId })) },
+      where: {
+        OR: parsed.rows.flatMap((r) => [
+          ...(r.lensProductPowerId ? [{ lensProductPowerId: r.lensProductPowerId }] : []),
+          ...(r.lensType && r.lensId ? [{ lensType: r.lensType, lensId: r.lensId }] : []),
+        ]),
+      },
       include: { purchaseOrder: { select: { publicId: true } } },
     });
-    const lockByPower = new Map(
-      locks.flatMap((l) => l.lensType && l.lensId
-        ? [[powerKey(l.lensType, l.lensId), l.purchaseOrder.publicId] as const]
-        : [])
-    );
+    const lockByPower = new Map<string, string>();
+    for (const lock of locks) {
+      if (lock.lensProductPowerId) lockByPower.set(`power:${lock.lensProductPowerId}`, lock.purchaseOrder.publicId);
+      if (lock.lensType && lock.lensId) lockByPower.set(powerKey(lock.lensType, lock.lensId), lock.purchaseOrder.publicId);
+    }
 
     const lines = [];
     for (const row of parsed.rows) {
+      let powerId = row.lensProductPowerId;
+      if (!powerId && row.skuCode && row.sph != null && row.cyl != null) {
+        const sph = new Prisma.Decimal(normalizeStockPower(row.sph).toFixed(2));
+        const cyl = new Prisma.Decimal(normalizeStockPower(row.cyl).toFixed(2));
+        const leaf = await prisma.lensProductPower.findFirst({
+          where: {
+            sph,
+            cyl,
+            lensProductVariant: { skuCode: row.skuCode.trim() },
+          },
+          select: { id: true },
+        });
+        if (!leaf) {
+          errors.push(`Row ${row.rowNumber}: no catalog leaf for SKU ${row.skuCode} SPH ${row.sph} CYL ${row.cyl}.`);
+          continue;
+        }
+        powerId = leaf.id;
+      }
+      if (powerId) {
+        const catalog = await resolveDraftLineCatalogIdentity(prisma, {
+          ...row,
+          lensProductPowerId: powerId,
+        });
+        if (!catalog) {
+          errors.push(`Row ${row.rowNumber}: catalog stock leaf was not found.`);
+          continue;
+        }
+        if (row.lensType && row.lensId &&
+          (catalog.legacyLensType !== row.lensType || catalog.legacyLensId !== row.lensId)) {
+          errors.push(`Row ${row.rowNumber}: catalog power and legacy lens columns identify different stock.`);
+          continue;
+        }
+        const openPo = lockByPower.get(`power:${catalog.lensProductPowerId}`) ?? null;
+        if (openPo) warnings.push(`Row ${row.rowNumber}: ${openPo} is still open for this power.`);
+        lines.push({
+          lensType: catalog.legacyLensType,
+          lensId: catalog.legacyLensId,
+          lensProductPowerId: catalog.lensProductPowerId,
+          lensProductVariantId: catalog.lensProductVariantId,
+          sph: catalog.sph,
+          cyl: catalog.cyl,
+          requiredQuantity: row.requiredQuantity,
+          poQuantity: row.poQuantity,
+          rate: row.rate,
+          productLabel: `${catalog.skuCode} · ${catalog.productLabel}`,
+          rangeLabel: catalog.rangeLabel,
+          powerLabel: catalog.powerLabel,
+          openPurchaseOrder: openPo,
+        });
+        continue;
+      }
+      if (!row.lensType || !row.lensId) continue;
       const lens = await readLensDescriptor(prisma, row.lensType, row.lensId);
       if (!lens) {
         errors.push(`Row ${row.rowNumber}: lens ${row.lensId} was not found in the ${row.lensType} catalog.`);
@@ -112,10 +186,15 @@ export async function POST(req: NextRequest) {
       lines.push({
         lensType: row.lensType,
         lensId: row.lensId,
+        lensProductPowerId: null,
+        lensProductVariantId: null,
+        sph: null,
+        cyl: null,
         requiredQuantity: row.requiredQuantity,
         poQuantity: row.poQuantity,
         rate: row.rate,
         productLabel: [lens.brand, lens.item, lens.coating].filter(Boolean).join(" · ") || "Lens",
+        rangeLabel: null,
         powerLabel: formatLensPower(lens),
         openPurchaseOrder: openPo ?? null,
       });

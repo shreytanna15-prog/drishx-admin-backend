@@ -16,6 +16,7 @@ import {
   systemActor,
 } from "@/app/lib/audit";
 import { assertCatalogPowersNotFrozen } from "@/app/lib/catalog/catalog-stock-freeze";
+import { nextCatalogWeightedAverageCost } from "@/app/lib/finance/catalog-weighted-average";
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
@@ -72,6 +73,15 @@ export async function receiveCatalogStockLine(input: {
     );
   }
 
+  if (!input.client) {
+    return prisma.$transaction(
+      (tx) => receiveCatalogStockLine({ ...input, client: tx }),
+      { maxWait: 10_000, timeout: 30_000 }
+    );
+  }
+
+  await db.$queryRaw`SELECT "id" FROM "LensProductPower" WHERE "id" = ${powerId} FOR UPDATE`;
+
   await assertCatalogPowersNotFrozen([powerId], { client: db });
 
   const leaf = await db.lensProductPower.findUnique({
@@ -79,6 +89,7 @@ export async function receiveCatalogStockLine(input: {
     select: {
       id: true,
       quantity: true,
+      weightedAverageCost: true,
       legacyLensType: true,
       legacyLensId: true,
       lensProductVariantId: true,
@@ -96,10 +107,16 @@ export async function receiveCatalogStockLine(input: {
 
   const quantityBefore = leaf.quantity;
   const quantityAfter = quantityBefore + input.quantityAdded;
+  const weightedAverageCost = nextCatalogWeightedAverageCost({
+    onHandBefore: quantityBefore,
+    averageBefore: leaf.weightedAverageCost,
+    acceptedQuantity: input.quantityAdded,
+    unitCost: input.costPrice ?? null,
+  });
 
   await db.lensProductPower.update({
     where: { id: leaf.id },
-    data: { quantity: quantityAfter },
+    data: { quantity: quantityAfter, weightedAverageCost },
   });
 
   await db.stockMovement.create({
@@ -128,10 +145,18 @@ export async function receiveCatalogStockLine(input: {
       actorName: null,
     } satisfies AuditActor,
     request: null as AuditRequestContext | null,
-    changes: singleChange("quantity", quantityBefore, quantityAfter),
+    changes: [
+      ...singleChange("quantity", quantityBefore, quantityAfter),
+      ...singleChange(
+        "weightedAverageCost",
+        leaf.weightedAverageCost?.toString() ?? null,
+        weightedAverageCost?.toString() ?? null
+      ),
+    ],
     context: {
       lensProductPowerId: leaf.id,
       quantityDelta: input.quantityAdded,
+      unitCost: input.costPrice ?? null,
       referenceId: input.referenceId ?? null,
     },
     activityMessage: `Catalog stock received +${input.quantityAdded} (${quantityBefore} → ${quantityAfter})`,
@@ -139,7 +164,6 @@ export async function receiveCatalogStockLine(input: {
 
   // Dual-write intentionally omitted unless callers opt in (default no).
   void input.dualWriteLegacy;
-  void input.costPrice;
   void systemActor;
 
   return {

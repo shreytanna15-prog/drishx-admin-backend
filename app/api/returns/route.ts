@@ -248,6 +248,7 @@ export async function POST(req: NextRequest) {
             order.magnusLensId ??
             order.bifocalLensId ??
             null,
+          lensProductPowerId: order.lensProductPowerId,
           lensLabel,
           quantity,
           eye:

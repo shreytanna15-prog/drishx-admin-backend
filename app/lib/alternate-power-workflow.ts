@@ -94,6 +94,7 @@ export async function createOriginalPowerVersion(
       eye: order.eye,
       lensType: order.lensType,
       lensId,
+      lensProductPowerId: order.lensProductPowerId,
       source: PowerVersionSource.ORIGINAL,
       status: PowerVersionStatus.ACTIVE,
       reservedQuantity: order.reservedQuantity,

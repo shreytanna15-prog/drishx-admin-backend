@@ -2,6 +2,8 @@
 
 import { adminFetch, AdminApiError } from "@/app/lib/admin-api";
 import { adminAuthFetch } from "@/app/lib/admin-auth-fetch";
+import type { Paginated } from "@/app/lib/types/api-client";
+import type { CatalogStockPower } from "@/app/lib/admin-stock";
 
 export type PurchaseOrderListRow = {
   id: string;
@@ -104,12 +106,17 @@ export type PurchaseOrderHistoryEntry = {
 };
 
 export type ImportedPoLine = {
-  lensType: string;
-  lensId: string;
+  lensType: string | null;
+  lensId: string | null;
+  lensProductPowerId: string | null;
+  lensProductVariantId: string | null;
+  sph: number | null;
+  cyl: number | null;
   requiredQuantity: number;
   poQuantity: number;
   rate: number | null;
   productLabel: string;
+  rangeLabel: string | null;
   powerLabel: string;
   openPurchaseOrder: string | null;
 };
@@ -207,6 +214,24 @@ export async function fetchReorderQueue() {
   return adminFetch<{ queue: ReorderQueueItem[]; count: number }>(
     "/api/procurement/purchase-orders/queue"
   );
+}
+
+export function searchPurchaseOrderCatalogPowers(params: { q?: string; page?: number }) {
+  const sp = new URLSearchParams();
+  if (params.q) sp.set("q", params.q);
+  if (params.page) sp.set("page", String(params.page));
+  return adminFetch<Paginated<CatalogStockPower> & { total: number }>(
+    `/api/procurement/purchase-orders/powers?${sp.toString()}`
+  );
+}
+
+export async function loadPurchaseOrderWizardData(draftId?: string | null) {
+  const [queue, orders, draft] = await Promise.all([
+    fetchReorderQueue(),
+    fetchPurchaseOrders(),
+    draftId ? fetchPurchaseOrder(draftId) : Promise.resolve(null),
+  ]);
+  return { queue, orders, draft };
 }
 
 export async function createPurchaseOrderDraft(body: {

@@ -42,6 +42,9 @@ import {
   LedgerEntryType,
   OrderStatus,
 } from "@prisma/client";
+import { placeCatalogOrder } from "@/app/lib/catalog/place-catalog-order";
+import { CatalogOrderStockError } from "@/app/lib/catalog/catalog-order-stock";
+import { buildAuditRequestContext } from "@/app/lib/audit";
 import {
   buildOnBehalfActivityMessage,
   resolveOrderAttribution,
@@ -171,6 +174,8 @@ export async function POST(req: NextRequest) {
         checkoutBatchId?: string;
         redeemPoints?: number | null;
         deliveryServiceId?: string;
+        lensProductPowerId?: string;
+        stockMode?: string;
       };
 
     const notesResult = validateOrderNotes(rawNotes);
@@ -178,13 +183,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: notesResult.error }, { status: 400 });
     }
     const orderNotes = notesResult.notes;
-
-    if (!lensType || !quantity || quantity <= 0) {
-      return NextResponse.json(
-        { error: "lensType and a valid quantity are required." },
-        { status: 400 }
-      );
-    }
 
     if (
       session.role !== "CUSTOMER" &&
@@ -195,17 +193,6 @@ export async function POST(req: NextRequest) {
           error:
             "Customer userId is required. Create walk-in customers via OTP first.",
         },
-        { status: 400 }
-      );
-    }
-
-    if (!Object.values(LensType).includes(lensType as LensType)) {
-      return NextResponse.json({ error: "Invalid lensType." }, { status: 400 });
-    }
-
-    if (!lensId) {
-      return NextResponse.json(
-        { error: "lensId is required. Please update the app and add the item to cart again." },
         { status: 400 }
       );
     }
@@ -229,6 +216,73 @@ export async function POST(req: NextRequest) {
           },
         },
       });
+    }
+
+    const catalogPowerId =
+      (typeof body.lensProductPowerId === "string" && body.lensProductPowerId.trim()) ||
+      reservation?.lensProductPowerId ||
+      "";
+    if (catalogPowerId && targetCustomerId) {
+      if (!quantity || quantity <= 0) {
+        return NextResponse.json({ error: "A valid quantity is required." }, { status: 400 });
+      }
+      if (session.role !== "CUSTOMER") {
+        const customer = await prisma.user.findUnique({ where: { id: targetCustomerId } });
+        const gate = customer
+          ? assessStaffOnBehalfOrderEligibility(customer)
+          : ({ ok: false as const, message: "Customer not found." });
+        if (!gate.ok) {
+          return NextResponse.json({ error: gate.message }, { status: 403 });
+        }
+      }
+      const stockMode = body.stockMode === "NON_LIVE" ? "NON_LIVE" : "LIVE";
+      try {
+        const created = await placeCatalogOrder({
+          powerId: catalogPowerId,
+          quantity: Math.round(Number(quantity)),
+          live: stockMode === "LIVE",
+          customerId: targetCustomerId,
+          actorId: session.userId,
+          actorRole: session.role,
+          checkoutBatchId: typeof checkoutBatchId === "string" ? checkoutBatchId : null,
+          redeemPoints: session.role === "CUSTOMER" ? Number(redeemPoints) || null : null,
+          deliveryServiceId: typeof rawDeliveryServiceId === "string" ? rawDeliveryServiceId : null,
+          notes: orderNotes,
+          request: buildAuditRequestContext(req),
+        });
+        if (typeof cartLineKey === "string" && cartLineKey.trim()) {
+          await consumeCartReservation(targetCustomerId, cartLineKey.trim());
+        }
+        return NextResponse.json({
+          order: created.order,
+          transaction: created.transaction,
+          invoice: { id: created.invoiceId },
+          needsProcurement: created.needsProcurement,
+        }, { status: 201 });
+      } catch (error) {
+        if (error instanceof CatalogOrderStockError) {
+          return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+        }
+        throw error;
+      }
+    }
+
+    if (!lensType || !quantity || quantity <= 0) {
+      return NextResponse.json(
+        { error: "lensType and a valid quantity are required." },
+        { status: 400 }
+      );
+    }
+
+    if (!Object.values(LensType).includes(lensType as LensType)) {
+      return NextResponse.json({ error: "Invalid lensType." }, { status: 400 });
+    }
+
+    if (!lensId) {
+      return NextResponse.json(
+        { error: "lensId is required. Please update the app and add the item to cart again." },
+        { status: 400 }
+      );
     }
 
     const lens = await resolveLensForOrder(lensType as LensType, Number(quantity), lensId);

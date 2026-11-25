@@ -1452,7 +1452,7 @@ async function assertParentAttrsEditable(productId: string) {
   const variantIds = variants.map((v) => v.id);
   if (variantIds.length === 0) return;
 
-  const [invoiceHit, purchaseHit, stockHit] = await Promise.all([
+  const [invoiceHit, purchaseHit, stockHit, orderHit] = await Promise.all([
     skus.length === 0
       ? Promise.resolve(null)
       : prisma.invoiceLine.findFirst({
@@ -1472,11 +1472,17 @@ async function assertParentAttrsEditable(productId: string) {
       },
       select: { id: true },
     }),
+    prisma.order.findFirst({
+      where: {
+        lensProductPower: { lensProductVariantId: { in: variantIds } },
+      },
+      select: { id: true },
+    }),
   ]);
 
-  if (invoiceHit || purchaseHit || stockHit) {
+  if (invoiceHit || purchaseHit || stockHit || orderHit) {
     throw new LensProductServiceError(
-      "Parent attributes are locked because variants have stock or appear on invoices / purchase bills. Create a new product instead.",
+      "Parent attributes are locked because variants have stock, catalog orders, or appear on invoices / purchase bills. Create a new product instead.",
       409,
       "ATTR_LOCKED"
     );

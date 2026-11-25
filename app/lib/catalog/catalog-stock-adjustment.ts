@@ -28,6 +28,7 @@ import {
   encodeStockLeafKey,
   normalizeStockPower,
 } from "@/app/lib/catalog/lens-product-stock-core";
+import { getCatalogReservedForPowers } from "@/app/lib/catalog/catalog-stock-position";
 
 export {
   assessCatalogStockAdjustment,
@@ -426,11 +427,12 @@ export async function createCatalogStockAdjustment(input: {
     cyl: input.cyl,
   });
 
+  const currentReserved = (await getCatalogReservedForPowers([leaf.id])).get(leaf.id) ?? 0;
   const assessed = assessCatalogStockAdjustment({
     qtyBefore: leaf.onHand,
     countedQty: input.countedQty,
     blockedQty: leaf.blockedQty,
-    reservedQty: leaf.reservedQty,
+    reservedQty: currentReserved,
   });
   if (!assessed.ok) {
     throw new CatalogStockAdjustmentError(
@@ -459,6 +461,7 @@ export async function createCatalogStockAdjustment(input: {
   }
 
   const run = async (tx: Prisma.TransactionClient) => {
+    await tx.$queryRaw`SELECT "id" FROM "LensProductPower" WHERE "id" = ${leaf.id} FOR UPDATE`;
     try {
       await assertCatalogPowersNotFrozen([leaf.id], {
         exceptSessionId: input.allowFrozenSessionId,
@@ -489,11 +492,12 @@ export async function createCatalogStockAdjustment(input: {
       );
     }
 
+    const reservedQty = (await getCatalogReservedForPowers([fresh.id], tx)).get(fresh.id) ?? 0;
     const reassess = assessCatalogStockAdjustment({
       qtyBefore: fresh.quantity,
       countedQty: input.countedQty,
       blockedQty: fresh.blockedQty,
-      reservedQty: 0,
+      reservedQty,
     });
     if (!reassess.ok) {
       throw new CatalogStockAdjustmentError(
@@ -530,7 +534,12 @@ export async function createCatalogStockAdjustment(input: {
 
     await tx.lensProductPower.update({
       where: { id: fresh.id },
-      data: { quantity: reassess.qtyAfter },
+      data: {
+        quantity: reassess.qtyAfter,
+        ...(reassess.qtyDelta > 0 || reassess.qtyAfter === 0
+          ? { weightedAverageCost: null }
+          : {}),
+      },
     });
 
     await tx.stockMovement.create({

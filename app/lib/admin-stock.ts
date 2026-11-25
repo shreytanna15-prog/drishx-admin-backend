@@ -181,6 +181,7 @@ export function setCatalogStockPowerBlocked(
 }
 
 export function fetchCatalogStockTransactions(params?: {
+  q?: string;
   powerId?: string;
   productId?: string;
   movementType?: string;
@@ -190,6 +191,7 @@ export function fetchCatalogStockTransactions(params?: {
   limit?: number;
 }) {
   const sp = new URLSearchParams();
+  if (params?.q) sp.set("q", params.q);
   if (params?.powerId) sp.set("powerId", params.powerId);
   if (params?.productId) sp.set("productId", params.productId);
   if (params?.movementType) sp.set("movementType", params.movementType);

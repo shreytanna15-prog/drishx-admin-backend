@@ -117,6 +117,8 @@ export type InventoryCatalogRowInput = {
   eye: string | null;
   crossPower: number | null;
   onHand: number;
+  /** Catalog-only discrepancy hold; legacy lens rows have no blocked balance. */
+  blockedQty?: number;
   isDisabled: boolean;
   /**
    * Catalog cost when the family has `costPrice` (SV / Kryptok / Progressive).
@@ -340,7 +342,7 @@ export function buildInventoryStockPositions(
       crossPower: row.crossPower,
       onHand: row.onHand,
       committed,
-      available: availableUnitsFromOnHand(row.onHand, committed),
+      available: Math.max(0, row.onHand - committed - (row.blockedQty ?? 0)),
       isDisabled: row.isDisabled,
     };
   });
@@ -643,7 +645,7 @@ function commonSummary(
       ? `Showing first ${returnedCount} of ${matchingCount} rows (sorted). Totals above include all matching enabled rows.`
       : "All matching enabled rows shown. Totals include every matching enabled row.",
     reservationBasis:
-      "reservedQuantity − pickedQuantity on PENDING, PICKING, PACKED, DISPATCHED, PARTIALLY_FULFILLED, AWAITING_PROCUREMENT (Order FK per lens family)",
+      "Legacy rows: reservedQuantity − pickedQuantity on active orders. Catalog leaves: reserved 0 until orders bind to catalog stock leaves.",
     operationalNote:
       "Pick/pack stock mutation in order-inventory still covers SV/Kryptok/Progressive only; reports read Order reservations for all six families without changing that path.",
   };
@@ -851,7 +853,7 @@ export function inventoryStockToReportPayload(
         alsoPhysicalOutOfStockCount: alsoPhysical,
         alsoFullyCommittedCount: alsoCommitted,
         lowStockRule:
-          "Active ReorderRule only (isActive=true). Low when available ≤ minStock — same comparison as procurement. SKUs without a rule are omitted. No global default minimum.",
+          "Active legacy ReorderRule or configured catalog leaf threshold/target. Low when available ≤ minStock — same comparison as procurement. No global default minimum.",
       },
       meta: {
         truncated,

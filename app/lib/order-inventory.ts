@@ -1,4 +1,4 @@
-import { LensType, OrderStatus, PowerVersionStatus, type Order } from "@prisma/client";
+import { LensType, OrderStatus, PowerVersionStatus, Prisma, type Order } from "@prisma/client";
 import { prisma } from "./prisma";
 import { decrementLensStock, incrementLensStock } from "./cart-reservations";
 import {
@@ -9,6 +9,11 @@ import {
   type AuditRequestContext,
 } from "./audit";
 import { singleChange } from "./audit/diff";
+import {
+  changeCatalogOrderPicked, cancelCatalogOrderStock,
+  lockCatalogOrderPower, recordCatalogReservation,
+} from "./catalog/catalog-order-stock";
+import { getCatalogReservedForPowers } from "./catalog/catalog-stock-position";
 
 export type StockAuditOptions = {
   actorUserId?: string;
@@ -93,6 +98,9 @@ export async function fulfillOrderPick(
   order: Order,
   audit?: StockAuditOptions
 ): Promise<Order> {
+  if (order.lensProductPowerId) {
+    return setOrderPickedQuantity(order, order.reservedQuantity, audit);
+  }
   const lensId = getOrderLensId(order);
   const toPick = Math.max(0, order.reservedQuantity - order.pickedQuantity);
   if (!lensId || toPick <= 0) {
@@ -125,58 +133,74 @@ export async function fulfillOrderPick(
 export async function setOrderPickedQuantity(
   order: Order,
   newPickedQuantity: number,
-  audit?: StockAuditOptions
+  audit?: StockAuditOptions,
+  orderUpdate?: Prisma.OrderUpdateInput
 ): Promise<Order> {
-  const lensId = getOrderLensId(order);
-  const maxPick = Math.max(0, order.quantity);
-  const clamped = Math.max(0, Math.min(maxPick, Math.floor(newPickedQuantity)));
-  const delta = clamped - order.pickedQuantity;
+  return prisma.$transaction(async (tx) => {
+    // Serialize picks against the same order; any freeze rejection rolls back
+    // both the legacy stock movement and the catalog blocked balance.
+    await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${order.id} FOR UPDATE`;
+    const current = await tx.order.findUnique({ where: { id: order.id } });
+    if (!current) throw new Error("Order not found.");
+    const lensId = getOrderLensId(current);
+    const clamped = Math.max(0, Math.min(current.quantity, Math.floor(newPickedQuantity)));
+    const delta = clamped - current.pickedQuantity;
+    if (delta === 0 && !orderUpdate) return current;
 
-  if (delta === 0) {
-    return order;
-  }
-
-  if (lensId) {
-    if (delta > 0) {
-      await decrementLensStock(
-        order.lensType,
-        lensId,
-        delta,
-        stockAuditPayload(audit, "STOCK_PICKED")
-      );
-    } else {
-      await incrementLensStock(
-        order.lensType,
-        lensId,
-        -delta,
-        stockAuditPayload(audit, "STOCK_RESTORED")
-      );
+    if (current.lensProductPowerId) {
+      await changeCatalogOrderPicked({
+        tx,
+        order: current,
+        newPickedQuantity: clamped,
+        actor: audit?.actorUserId
+          ? { actorType: "HUMAN", actorUserId: audit.actorUserId, actorName: audit.actorName ?? null }
+          : systemActor(),
+        request: audit?.request,
+      });
+    } else if (lensId) {
+      if (delta > 0) {
+        await decrementLensStock(
+          current.lensType,
+          lensId,
+          delta,
+          stockAuditPayload(audit, "STOCK_PICKED"),
+          tx
+        );
+      } else {
+        await incrementLensStock(
+          current.lensType,
+          lensId,
+          -delta,
+          stockAuditPayload(audit, "STOCK_RESTORED"),
+          tx
+        );
+      }
     }
-  }
 
-  // S4: pick short → blocked on bridged catalog leaf (no-op without legacy bridge).
-  const prevShort = Math.max(0, order.quantity - order.pickedQuantity);
-  const newShort = Math.max(0, order.quantity - clamped);
-  const addedShort = newShort - prevShort;
-  if (addedShort > 0 && lensId) {
-    const { incrementCatalogBlockedByLegacyLens } = await import(
-      "@/app/lib/catalog/catalog-stock-block"
-    );
-    await incrementCatalogBlockedByLegacyLens({
-      lensType: order.lensType,
-      lensId,
-      shortQty: addedShort,
-      actorUserId: audit?.actorUserId ?? null,
-      referenceId: order.id,
+    const prevShort = Math.max(0, current.quantity - current.pickedQuantity);
+    const addedShort = Math.max(0, current.quantity - clamped) - prevShort;
+    if (addedShort > 0 && lensId && !current.lensProductPowerId) {
+      const { incrementCatalogBlockedByLegacyLens } = await import(
+        "@/app/lib/catalog/catalog-stock-block"
+      );
+      await incrementCatalogBlockedByLegacyLens({
+        lensType: current.lensType,
+        lensId,
+        shortQty: addedShort,
+        actorUserId: audit?.actorUserId ?? null,
+        actorName: audit?.actorName ?? null,
+        request: audit?.request,
+        referenceId: current.id,
+        client: tx,
+      });
+    }
+
+    const updated = await tx.order.update({
+      where: { id: current.id },
+      data: { ...orderUpdate, pickedQuantity: clamped },
     });
-  }
-
-  return prisma.order.update({
-    where: { id: order.id },
-    data: { pickedQuantity: clamped },
-  }).then(async (updated) => {
     if (updated.lineType === "RETAIL") {
-      await prisma.orderPowerVersion.updateMany({
+      await tx.orderPowerVersion.updateMany({
         where: { orderId: updated.id, status: PowerVersionStatus.ACTIVE },
         data: {
           pickedQuantity: clamped,
@@ -185,15 +209,29 @@ export async function setOrderPickedQuantity(
       });
     }
     return updated;
-  });
+  }, { maxWait: 10_000, timeout: 20_000 });
 }
 
 /** Restore inventory when a picked order is cancelled or deleted. */
 export async function restorePickedStock(
-  order: Pick<Order, "lensType" | "singleVisionLensId" | "kryptokLensId" | "progressiveLensId" | "pickedQuantity" | "id">,
+  order: Pick<Order, "lensType" | "singleVisionLensId" | "kryptokLensId" | "progressiveLensId" | "lensProductPowerId" | "reservedQuantity" | "pickedQuantity" | "id">,
   audit?: StockAuditOptions,
   db?: import("@prisma/client").Prisma.TransactionClient | typeof import("./prisma").prisma
 ) {
+  if (order.lensProductPowerId) {
+    const restore = async (tx: import("@prisma/client").Prisma.TransactionClient) => {
+      const full = await tx.order.findUniqueOrThrow({ where: { id: order.id } });
+      await cancelCatalogOrderStock({
+        tx, order: full,
+        actor: audit?.actorUserId
+          ? { actorType: "HUMAN", actorUserId: audit.actorUserId, actorName: audit.actorName ?? null }
+          : systemActor(),
+        request: audit?.request,
+      });
+    };
+    if (db && db !== prisma) return restore(db as import("@prisma/client").Prisma.TransactionClient);
+    return prisma.$transaction(restore, { maxWait: 10_000, timeout: 20_000 });
+  }
   const lensId = getOrderLensId(order);
   if (!lensId || order.pickedQuantity <= 0) return;
   await incrementLensStock(
@@ -224,8 +262,50 @@ async function readLensOnHand(lensType: LensType, lensId: string): Promise<numbe
 /** After stock intake, move a procurement order back to the active orders queue when stock allows. */
 export async function fulfillProcurementOrder(orderId: string): Promise<Order | null> {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order || order.status !== OrderStatus.AWAITING_PROCUREMENT) {
+  if (!order || (order.status !== OrderStatus.AWAITING_PROCUREMENT && order.status !== OrderStatus.PARTIALLY_FULFILLED)) {
     return null;
+  }
+
+  if (order.lensProductPowerId) {
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
+      const live = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+      if (!live.lensProductPowerId || (live.status !== OrderStatus.AWAITING_PROCUREMENT && live.status !== OrderStatus.PARTIALLY_FULFILLED)) {
+        return live;
+      }
+      const leaf = await lockCatalogOrderPower(tx, live.lensProductPowerId);
+      const committed = (await getCatalogReservedForPowers([leaf.id], tx)).get(leaf.id) ?? 0;
+      const available = Math.max(0, leaf.quantity - leaf.blockedQty - committed);
+      const nextReserved = Math.min(live.quantity, live.reservedQuantity + available);
+      const nextStatus = nextReserved >= live.quantity ? OrderStatus.PENDING
+        : nextReserved > 0 ? OrderStatus.PARTIALLY_FULFILLED : OrderStatus.AWAITING_PROCUREMENT;
+      if (nextReserved === live.reservedQuantity && nextStatus === live.status) return live;
+      const updated = await tx.order.update({
+        where: { id: orderId }, data: { reservedQuantity: nextReserved, status: nextStatus },
+      });
+      await tx.orderPowerVersion.updateMany({
+        where: { orderId, status: PowerVersionStatus.ACTIVE },
+        data: { reservedQuantity: nextReserved },
+      });
+      await recordCatalogReservation({
+        tx, powerId: leaf.id, orderId, quantity: nextReserved - live.reservedQuantity,
+        onHand: leaf.quantity, actor: systemActor(),
+      });
+      await recordAuditEvent(tx, {
+        action: AuditAction.SYSTEM_ORDER_COVERAGE_RECALCULATED,
+        module: AuditModule.SYSTEM, entityType: "Order", entityId: orderId,
+        actor: systemActor(),
+        changes: [
+          ...singleChange("reservedQuantity", live.reservedQuantity, nextReserved),
+          ...singleChange("status", live.status, nextStatus),
+        ],
+        activityMessage: `Catalog procurement coverage recalculated → ${nextStatus}`,
+      });
+      if (nextReserved >= live.quantity) {
+        await resolveOrderShortageRequests(orderId, live.quantity, tx);
+      }
+      return updated;
+    }, { maxWait: 10_000, timeout: 30_000 });
   }
 
   const lensId = getOrderLensId(order);
@@ -291,8 +371,11 @@ export async function fulfillProcurementOrder(orderId: string): Promise<Order | 
  * Close every open ORDER_SHORTAGE request for an order that is now fully
  * covered. History is preserved — only the status advances.
  */
-async function resolveOrderShortageRequests(orderId: string, orderQuantity: number) {
-  const open = await prisma.procurementRequest.findMany({
+async function resolveOrderShortageRequests(
+  orderId: string, orderQuantity: number,
+  db: typeof prisma | import("@prisma/client").Prisma.TransactionClient = prisma
+) {
+  const open = await db.procurementRequest.findMany({
     where: {
       orderId,
       source: "ORDER_SHORTAGE",
@@ -303,7 +386,7 @@ async function resolveOrderShortageRequests(orderId: string, orderQuantity: numb
 
   for (const request of open) {
     const stillNeeded = Math.max(0, request.requestedQuantity - request.receivedQuantity);
-    await prisma.procurementRequest.update({
+    await db.procurementRequest.update({
       where: { id: request.id },
       data: {
         status: stillNeeded > 0 ? "CANCELLED" : "RESOLVED",

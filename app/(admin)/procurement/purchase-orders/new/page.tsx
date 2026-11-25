@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -31,15 +31,14 @@ import { AdminApiError } from "@/app/lib/admin-api";
 import {
   createPurchaseOrderDraft,
   downloadPoImportTemplate,
-  fetchPurchaseOrder,
-  fetchPurchaseOrders,
-  fetchReorderQueue,
   formatPoMoney,
   importPurchaseOrderLines,
+  searchPurchaseOrderCatalogPowers,
   submitPurchaseOrder,
   updatePurchaseOrderDraft,
   type ReorderQueueItem,
 } from "@/app/lib/admin-purchase-orders";
+import { useGetPurchaseOrderWizard } from "@/app/lib/modules/procurement/query/use-get-purchase-order-wizard";
 import { LENS_TYPE_LABELS, PRIORITY_BADGE_CLASS } from "@/app/lib/admin-procurement";
 import {
   DUPLICATE_IMPORT_CONFIRM_MESSAGE,
@@ -60,7 +59,8 @@ import {
   type PoWizardDraftLine,
 } from "@/app/lib/purchase-order-wizard";
 import { cn } from "@/lib/utils";
-import { draftPowerIdentityKey } from "@/app/lib/catalog/catalog-po-identity-core";
+import { draftPowerIdentityKey, formatCatalogPowerLabel } from "@/app/lib/catalog/catalog-po-identity-core";
+import type { CatalogStockPower } from "@/app/lib/admin-stock";
 
 type LineForm = PoWizardDraftLine;
 
@@ -83,9 +83,8 @@ function NewPurchaseOrderInner() {
   const draftId = searchParams.get("draft");
 
   const [step, setStep] = useState<"select" | "review">(draftId ? "review" : "select");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<"" | "draft" | "submit">("");
-  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importNotice, setImportNotice] = useState("");
   const [importNoticeKeys, setImportNoticeKeys] = useState<string[]>([]);
@@ -93,9 +92,6 @@ function NewPurchaseOrderInner() {
     () => new Set()
   );
   const [importing, setImporting] = useState(false);
-  const [queue, setQueue] = useState<ReorderQueueItem[]>([]);
-  const [suppliers, setSuppliers] = useState<Array<{ id: string; name: string }>>([]);
-  const [warehouseCodes, setWarehouseCodes] = useState<string[]>(["MAIN"]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lines, setLines] = useState<LineForm[]>([]);
   const [supplierId, setSupplierId] = useState("");
@@ -103,23 +99,25 @@ function NewPurchaseOrderInner() {
   const [expectedDelivery, setExpectedDelivery] = useState("");
   const [notes, setNotes] = useState("");
   const [queueQuery, setQueueQuery] = useState("");
-  const [draftPublicId, setDraftPublicId] = useState<string | null>(null);
+  const [powerQuery, setPowerQuery] = useState("");
+  const [powerResults, setPowerResults] = useState<CatalogStockPower[]>([]);
+  const [powerPage, setPowerPage] = useState(0);
+  const [powerHasMore, setPowerHasMore] = useState(false);
+  const [powerSearching, setPowerSearching] = useState(false);
+  const [draftInitialized, setDraftInitialized] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setError("");
-      const [queueRes, listRes] = await Promise.all([fetchReorderQueue(), fetchPurchaseOrders()]);
-      setQueue(queueRes.queue);
-      setSuppliers(listRes.suppliers);
-      setWarehouseCodes(listRes.warehouseCodes.length ? listRes.warehouseCodes : ["MAIN"]);
-      if (draftId) {
-        const { purchaseOrder: po } = await fetchPurchaseOrder(draftId);
+  const { data, loading, error: queryError } = useGetPurchaseOrderWizard(draftId, {
+    onSuccess: (result) => {
+      if (!draftId && !supplierId && result.orders.suppliers[0]) {
+        setSupplierId(result.orders.suppliers[0].id);
+      }
+      if (draftId && result.draft && !draftInitialized) {
+        const po = result.draft.purchaseOrder;
         if (po.status !== "DRAFT" && po.status !== "PENDING_APPROVAL") {
-          setError(`${po.publicId} is ${po.status.toLowerCase().replace(/_/g, " ")} and can no longer be edited.`);
+          setActionError(`${po.publicId} is ${po.status.toLowerCase().replace(/_/g, " ")} and can no longer be edited.`);
           return;
         }
-        setDraftPublicId(po.publicId);
         setSupplierId(po.supplierId);
         setWarehouseCode(po.warehouseCode);
         setExpectedDelivery(po.expectedDelivery ? po.expectedDelivery.slice(0, 10) : "");
@@ -148,34 +146,24 @@ function NewPurchaseOrderInner() {
             };
           })
         );
-      } else if (listRes.suppliers[0]) {
-        setSupplierId(listRes.suppliers[0].id);
+        setDraftInitialized(true);
       }
-    } catch (err) {
-      setError(err instanceof AdminApiError ? err.message : "Failed to load.");
-    } finally {
-      setLoading(false);
-    }
-  }, [draftId]);
+    },
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const queue = useMemo(() => data?.queue.queue ?? [], [data?.queue.queue]);
+  const suppliers = data?.orders.suppliers ?? [];
+  const warehouseCodes = data?.orders.warehouseCodes.length ? data.orders.warehouseCodes : ["MAIN"];
+  const draftPublicId = data?.draft?.purchaseOrder.publicId ?? null;
+  const error = actionError || queryError?.message || "";
 
-  // Drop stale import success copy and session fingerprints when their lines go away.
-  useEffect(() => {
-    setImportedFingerprints((prev) => {
-      const next = pruneImportFingerprints(prev, lines);
-      if (next.size === prev.size && [...next].every((fp) => prev.has(fp))) {
-        return prev;
-      }
-      return next;
-    });
-    if (importNoticeShouldClear(importNoticeKeys, lines)) {
-      setImportNotice("");
-      setImportNoticeKeys([]);
-    }
-  }, [lines, importNoticeKeys]);
+  const activeImportedFingerprints = useMemo(
+    () => pruneImportFingerprints(importedFingerprints, lines),
+    [importedFingerprints, lines]
+  );
+  const visibleImportNotice = importNoticeShouldClear(importNoticeKeys, lines)
+    ? ""
+    : importNotice;
 
   const filteredQueue = useMemo(() => {
     const q = queueQuery.trim().toLowerCase();
@@ -231,12 +219,12 @@ function NewPurchaseOrderInner() {
       (item) => selectedIds.has(item.id) && !addedRequestIds.has(item.id)
     );
     if (!picked.length && !lines.length) {
-      setError("Select at least one item from the reorder queue, or import an Excel file.");
+      setActionError("Select at least one item from the reorder queue, or import an Excel file.");
       return;
     }
     if (!picked.length && lines.length) {
       setSelectedIds(new Set());
-      setError("");
+      setActionError("");
       setStep("review");
       return;
     }
@@ -262,8 +250,49 @@ function NewPurchaseOrderInner() {
       }))
     );
     setSelectedIds(new Set());
-    setError("");
+    setActionError("");
     setStep("review");
+  }
+
+  async function searchCatalogPowers(page = 1) {
+    setPowerSearching(true);
+    setActionError("");
+    try {
+      const result = await searchPurchaseOrderCatalogPowers({
+        q: powerQuery.trim() || undefined,
+        page,
+      });
+      setPowerResults((prev) => page === 1 ? result.items : [...prev, ...result.items]);
+      setPowerPage(page);
+      setPowerHasMore(result.hasMore);
+    } catch (err) {
+      setActionError(err instanceof AdminApiError ? err.message : "Catalog search failed.");
+    } finally {
+      setPowerSearching(false);
+    }
+  }
+
+  function addCatalogPower(power: CatalogStockPower) {
+    if (power.openPo) return;
+    mergeLines([{
+      key: `power:${power.id}`,
+      lensType: power.legacyLensType ?? null,
+      lensId: power.legacyLensId ?? null,
+      lensProductPowerId: power.id,
+      lensProductVariantId: power.variantId,
+      sph: power.sph,
+      cyl: power.cyl,
+      requiredQuantity: 0,
+      poQuantity: "1",
+      rate: "",
+      procurementRequestId: null,
+      procurementRequestIds: [],
+      productLabel: `${power.skuCode} · ${power.family}`,
+      rangeLabel: power.name,
+      powerLabel: formatCatalogPowerLabel(power.sph, power.cyl),
+      openPurchaseOrder: null,
+      importFingerprint: null,
+    }]);
   }
 
   async function onImportFile(
@@ -273,12 +302,12 @@ function NewPurchaseOrderInner() {
     if (!file) return;
     setImporting(true);
     setImportErrors([]);
-    setError("");
+    setActionError("");
     try {
       const bytes = await file.arrayBuffer();
       const fingerprint = await fingerprintImportBytes(bytes);
       const decision = decideDuplicateImport({
-        alreadyImported: importedFingerprints.has(fingerprint),
+        alreadyImported: activeImportedFingerprints.has(fingerprint),
         userConfirmedRepeat: Boolean(options?.userConfirmedRepeat),
       });
       if (decision.action === "block") {
@@ -286,7 +315,7 @@ function NewPurchaseOrderInner() {
         if (fileRef.current) fileRef.current.value = "";
         const confirmed = window.confirm(DUPLICATE_IMPORT_CONFIRM_MESSAGE);
         if (!confirmed) {
-          setError(
+          setActionError(
             "Import cancelled. Re-importing the same Excel file would add quantities again."
           );
           return;
@@ -300,13 +329,17 @@ function NewPurchaseOrderInner() {
         key: powerKeyOf(l),
         lensType: l.lensType,
         lensId: l.lensId,
+        lensProductPowerId: l.lensProductPowerId,
+        lensProductVariantId: l.lensProductVariantId,
+        sph: l.sph,
+        cyl: l.cyl,
         requiredQuantity: l.requiredQuantity,
         poQuantity: String(l.poQuantity),
         rate: l.rate == null ? "" : String(l.rate),
         procurementRequestId: null,
         procurementRequestIds: [],
         productLabel: l.productLabel,
-        rangeLabel: null,
+        rangeLabel: l.rangeLabel,
         powerLabel: l.powerLabel,
         openPurchaseOrder: l.openPurchaseOrder,
         importFingerprint: fingerprint,
@@ -325,11 +358,11 @@ function NewPurchaseOrderInner() {
       setImportNotice("");
       setImportNoticeKeys([]);
       if (err instanceof AdminApiError) {
-        setError(err.message);
+        setActionError(err.message);
         const list = err.details.errors;
         if (Array.isArray(list)) setImportErrors(list.filter((v): v is string => typeof v === "string"));
       } else {
-        setError("Import failed.");
+        setActionError("Import failed.");
       }
     } finally {
       setImporting(false);
@@ -338,11 +371,11 @@ function NewPurchaseOrderInner() {
   }
 
   async function downloadTemplate() {
-    setError("");
+    setActionError("");
     try {
       await downloadPoImportTemplate();
     } catch (err) {
-      setError(err instanceof AdminApiError ? err.message : "Could not download template.");
+      setActionError(err instanceof AdminApiError ? err.message : "Could not download template.");
     }
   }
 
@@ -352,23 +385,23 @@ function NewPurchaseOrderInner() {
 
   async function save(mode: "draft" | "submit") {
     if (!supplierId) {
-      setError("Select a supplier.");
+      setActionError("Select a supplier.");
       return;
     }
     if (!lines.length) {
-      setError("Add at least one line.");
+      setActionError("Add at least one line.");
       return;
     }
     if (!totals.canSave || Object.keys(lineErrors).length) {
-      setError("Fix the highlighted lines before saving.");
+      setActionError("Fix the highlighted lines before saving.");
       return;
     }
     if (expectedDelivery && expectedDelivery < new Date().toISOString().slice(0, 10) && !draftId) {
-      setError("Expected delivery cannot be in the past.");
+      setActionError("Expected delivery cannot be in the past.");
       return;
     }
     setSaving(mode);
-    setError("");
+    setActionError("");
     const body = {
       supplierId,
       warehouseCode,
@@ -398,7 +431,7 @@ function NewPurchaseOrderInner() {
       }
       router.push(`/procurement/purchase-orders/${res.purchaseOrder.id}`);
     } catch (err) {
-      setError(err instanceof AdminApiError ? err.message : "Could not save the purchase order.");
+      setActionError(err instanceof AdminApiError ? err.message : "Could not save the purchase order.");
       setSaving("");
     }
   }
@@ -419,7 +452,7 @@ function NewPurchaseOrderInner() {
             variant="ghost"
             size="sm"
             onClick={() => {
-              setError("");
+              setActionError("");
               setStep(backAction.targetStep);
             }}
           >
@@ -466,9 +499,9 @@ function NewPurchaseOrderInner() {
           </ul>
         ) : null}
       </div> : null}
-      {importNotice ? (
+      {visibleImportNotice ? (
         <p className="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100">
-          {importNotice}
+          {visibleImportNotice}
         </p>
       ) : null}
 
@@ -583,13 +616,65 @@ function NewPurchaseOrderInner() {
             </AdminTable>
           )}
 
+          <section className="rounded-xl border border-(--brand-card-border) bg-(--brand-card) p-4">
+            <h2 className="text-sm font-semibold text-(--brand-text)">Add a catalog power directly</h2>
+            <p className="mt-1 text-xs text-(--brand-text-muted)">
+              Search by variant SKU or name; set the PO quantity on the review step.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Input
+                value={powerQuery}
+                onChange={(e) => setPowerQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void searchCatalogPowers(); }}
+                placeholder="Search catalog SKU / variant"
+                aria-label="Search catalog powers"
+                className="min-w-48 flex-1"
+              />
+              <Button type="button" variant="outline" disabled={powerSearching} onClick={() => void searchCatalogPowers()}>
+                {powerSearching ? <Loader2 className="size-4 animate-spin" /> : null}
+                Search powers
+              </Button>
+            </div>
+            {powerResults.length > 0 ? (
+              <ul className="mt-3 divide-y divide-(--brand-card-border)">
+                {powerResults.map((power) => (
+                  <li key={power.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                    <div>
+                      <div className="font-medium">{power.skuCode} · {power.name}</div>
+                      <div className="text-xs text-(--brand-text-muted)">
+                        {formatCatalogPowerLabel(power.sph, power.cyl)} · available {power.available}
+                        {power.openPo ? ` · already on ${power.openPo.publicId}` : ""}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={Boolean(power.openPo)}
+                      onClick={() => addCatalogPower(power)}
+                    >
+                      <Plus className="size-4" /> Add
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : powerPage > 0 ? (
+              <p className="mt-3 text-sm text-(--brand-text-muted)">No matching catalog stock leaves.</p>
+            ) : null}
+            {powerHasMore ? (
+              <Button type="button" variant="outline" size="sm" disabled={powerSearching} onClick={() => void searchCatalogPowers(powerPage + 1)}>
+                Load more powers
+              </Button>
+            ) : null}
+          </section>
+
           <div className="flex flex-wrap justify-end gap-2">
             {lines.length ? (
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => {
-                  setError("");
+                  setActionError("");
                   setStep("review");
                 }}
               >

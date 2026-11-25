@@ -2,10 +2,9 @@
  * Create-PO Excel import (RW-08 Phase C).
  *
  * Template (sheet 1, header row 1 — header names are case/space-insensitive):
- *   lensType | lensId | product | power | required | poQuantity | rate
- * Required columns: lensType, lensId, poQuantity. `product` / `power` are
- * informational (labels are always re-read from the catalog). The downloadable
- * template is pre-filled from the open reorder queue so lens ids are exact.
+ *   lensProductPowerId | skuCode | sph | cyl | lensType | lensId | product | power | required | poQuantity | rate
+ * Required: poQuantity and either lensProductPowerId, or skuCode+sph+cyl (resolved server-side),
+ * or lensType+lensId. `product` / `power` / sku/sph/cyl labels are informational when id is present.
  */
 
 import ExcelJS from "exceljs";
@@ -13,6 +12,10 @@ import type { LensType } from "@prisma/client";
 import { isProcurementLensType } from "./procurement-rules";
 
 export const PO_IMPORT_COLUMNS = {
+  lensProductPowerId: ["lensProductPowerId", "lens_product_power_id", "powerId"],
+  skuCode: ["skuCode", "sku_code", "variantSku", "variant_sku"],
+  sph: ["sph", "sphere"],
+  cyl: ["cyl", "cylinder"],
   lensType: ["lensType", "lens_type", "type"],
   lensId: ["lensId", "lens_id", "id", "sku"],
   required: ["required", "requiredQuantity", "required_qty"],
@@ -24,8 +27,12 @@ export const PO_IMPORT_MAX_ROWS = 500;
 
 export type PoImportRow = {
   rowNumber: number;
-  lensType: LensType;
-  lensId: string;
+  lensType: LensType | null;
+  lensId: string | null;
+  lensProductPowerId: string | null;
+  skuCode: string | null;
+  sph: number | null;
+  cyl: number | null;
   requiredQuantity: number;
   poQuantity: number;
   rate: number | null;
@@ -86,6 +93,10 @@ export async function parsePoImportWorkbook(buffer: Uint8Array): Promise<PoImpor
     headers[col - 1] = normalizeHeader(cellText(cell.value));
   });
   const col = {
+    lensProductPowerId: findColumn(headers, PO_IMPORT_COLUMNS.lensProductPowerId),
+    skuCode: findColumn(headers, PO_IMPORT_COLUMNS.skuCode),
+    sph: findColumn(headers, PO_IMPORT_COLUMNS.sph),
+    cyl: findColumn(headers, PO_IMPORT_COLUMNS.cyl),
     lensType: findColumn(headers, PO_IMPORT_COLUMNS.lensType),
     lensId: findColumn(headers, PO_IMPORT_COLUMNS.lensId),
     required: findColumn(headers, PO_IMPORT_COLUMNS.required),
@@ -94,8 +105,10 @@ export async function parsePoImportWorkbook(buffer: Uint8Array): Promise<PoImpor
   };
   const errors: string[] = [];
   const warnings: string[] = [];
-  if (col.lensType < 0) errors.push("Missing required column: lensType.");
-  if (col.lensId < 0) errors.push("Missing required column: lensId.");
+  const hasSkuPowerCols = col.skuCode >= 0 && col.sph >= 0 && col.cyl >= 0;
+  if (col.lensProductPowerId < 0 && !hasSkuPowerCols && (col.lensType < 0 || col.lensId < 0)) {
+    errors.push("Provide lensProductPowerId, or skuCode+sph+cyl, or both lensType and lensId columns.");
+  }
   if (col.poQuantity < 0) errors.push("Missing required column: poQuantity.");
   if (errors.length) return { rows: [], errors, warnings };
 
@@ -108,8 +121,12 @@ export async function parsePoImportWorkbook(buffer: Uint8Array): Promise<PoImpor
     const get = (index: number) => (index >= 0 ? cellText(row.getCell(index + 1).value) : "");
     const lensTypeRaw = get(col.lensType);
     const lensId = get(col.lensId);
+    const lensProductPowerId = get(col.lensProductPowerId);
+    const skuCode = get(col.skuCode);
+    const sphRaw = get(col.sph);
+    const cylRaw = get(col.cyl);
     const qtyRaw = get(col.poQuantity);
-    if (!lensTypeRaw && !lensId && !qtyRaw) return;
+    if (!lensTypeRaw && !lensId && !lensProductPowerId && !skuCode && !qtyRaw) return;
 
     if (rows.length + errors.length >= PO_IMPORT_MAX_ROWS) {
       if (rows.length + errors.length === PO_IMPORT_MAX_ROWS) {
@@ -117,13 +134,31 @@ export async function parsePoImportWorkbook(buffer: Uint8Array): Promise<PoImpor
       }
       return;
     }
-    const lensType = parseLensType(lensTypeRaw);
-    if (!lensType) {
+    const lensType = lensTypeRaw ? parseLensType(lensTypeRaw) : null;
+    if (lensTypeRaw && !lensType) {
       errors.push(`Row ${rowNumber}: lensType "${lensTypeRaw}" must be SINGLE_VISION, KRYPTOK or PROGRESSIVE.`);
       return;
     }
-    if (!lensId) {
-      errors.push(`Row ${rowNumber}: lensId is required.`);
+    let sph: number | null = null;
+    let cyl: number | null = null;
+    if (skuCode || sphRaw || cylRaw) {
+      if (!skuCode || sphRaw === "" || cylRaw === "") {
+        errors.push(`Row ${rowNumber}: skuCode, sph, and cyl must be provided together.`);
+        return;
+      }
+      sph = Number(sphRaw);
+      cyl = Number(cylRaw);
+      if (!Number.isFinite(sph) || !Number.isFinite(cyl)) {
+        errors.push(`Row ${rowNumber}: sph and cyl must be numbers.`);
+        return;
+      }
+    }
+    if (!lensProductPowerId && !(skuCode && sph != null && cyl != null) && (!lensType || !lensId)) {
+      errors.push(`Row ${rowNumber}: provide lensProductPowerId, skuCode+sph+cyl, or lensType+lensId.`);
+      return;
+    }
+    if ((lensType && !lensId) || (!lensType && lensId)) {
+      errors.push(`Row ${rowNumber}: lensType and lensId must be provided together.`);
       return;
     }
     if (!qtyRaw) {
@@ -152,14 +187,29 @@ export async function parsePoImportWorkbook(buffer: Uint8Array): Promise<PoImpor
       }
       rate = Math.round(rate * 100) / 100;
     }
-    const key = `${lensType}::${lensId}`;
+    const key = lensProductPowerId
+      ? `power:${lensProductPowerId}`
+      : skuCode && sph != null && cyl != null
+        ? `sku:${skuCode}:${sph}:${cyl}`
+        : `${lensType}::${lensId}`;
     const firstRow = seen.get(key);
     if (firstRow !== undefined) {
       errors.push(`Row ${rowNumber}: the same power already appears on row ${firstRow}. Merge them into one line.`);
       return;
     }
     seen.set(key, rowNumber);
-    rows.push({ rowNumber, lensType, lensId, requiredQuantity, poQuantity, rate });
+    rows.push({
+      rowNumber,
+      lensType,
+      lensId: lensId || null,
+      lensProductPowerId: lensProductPowerId || null,
+      skuCode: skuCode || null,
+      sph,
+      cyl,
+      requiredQuantity,
+      poQuantity,
+      rate,
+    });
   });
 
   if (blankQuantityRows) {
@@ -170,8 +220,12 @@ export async function parsePoImportWorkbook(buffer: Uint8Array): Promise<PoImpor
 }
 
 export type PoImportTemplateRow = {
-  lensType: string;
-  lensId: string;
+  lensProductPowerId?: string | null;
+  skuCode?: string | null;
+  sph?: number | null;
+  cyl?: number | null;
+  lensType: string | null;
+  lensId: string | null;
   product: string | null;
   power: string | null;
   required: number | null;
@@ -182,6 +236,10 @@ export async function buildPoImportTemplate(prefill: PoImportTemplateRow[]): Pro
   workbook.creator = "DrishX Procurement";
   const sheet = workbook.addWorksheet("PO import");
   sheet.columns = [
+    { header: "lensProductPowerId", key: "lensProductPowerId", width: 34 },
+    { header: "skuCode", key: "skuCode", width: 22 },
+    { header: "sph", key: "sph", width: 8 },
+    { header: "cyl", key: "cyl", width: 8 },
     { header: "lensType", key: "lensType", width: 16 },
     { header: "lensId", key: "lensId", width: 30 },
     { header: "product", key: "product", width: 36 },
@@ -199,7 +257,7 @@ export async function buildPoImportTemplate(prefill: PoImportTemplateRow[]): Pro
   help.getColumn(1).width = 110;
   [
     "Fill poQuantity (whole number > 0) for each power to order; leave it empty to skip the row.",
-    "rate is optional (₹ per unit). lensType/lensId identify the exact power — do not edit them.",
+    "rate is optional (₹ per unit). Prefer lensProductPowerId, or skuCode+sph+cyl for catalog stock; lensType+lensId remains for legacy.",
     "Each power may appear only once. product/power columns are for reference; labels are re-read from the catalog.",
     "Pre-filled rows come from the open reorder queue at download time.",
   ].forEach((line) => help.addRow([line]));

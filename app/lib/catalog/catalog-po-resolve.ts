@@ -55,6 +55,7 @@ const powerLabelInclude = {
 } as const;
 
 export type ResolvedPoCatalogIdentity = {
+  skuCode: string;
   lensProductPowerId: string;
   lensProductVariantId: string;
   sph: number;
@@ -173,6 +174,7 @@ export async function resolveDraftLineCatalogIdentity(
       if (!bridged) return null;
       const labels = labelsFromPower(bridged);
       return {
+        skuCode: bridged.lensProductVariant.skuCode,
         lensProductPowerId: bridged.id,
         lensProductVariantId: bridged.lensProductVariantId,
         sph: num(bridged.sph),
@@ -208,6 +210,7 @@ export async function resolveDraftLineCatalogIdentity(
 
   const labels = labelsFromPower(leaf);
   return {
+    skuCode: leaf.lensProductVariant.skuCode,
     lensProductPowerId: leaf.id,
     lensProductVariantId: leaf.lensProductVariantId,
     sph: num(leaf.sph),

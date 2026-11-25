@@ -55,6 +55,9 @@ function powerLabel(order: {
 
 function lensLabel(order: {
   lensType: string;
+  lensProductPower?: {
+    lensProductVariant: { skuCode: string; name: string; product: { base: { name: string } } };
+  } | null;
   singleVisionLens?: { brand: string; category?: string | null; item?: string | null } | null;
   kryptokLens?: { brand?: string | null; category?: string | null; item?: string | null } | null;
   progressiveLens?: { brand: string; item: string; category?: string | null } | null;
@@ -62,6 +65,14 @@ function lensLabel(order: {
   oriVisionLens?: { brand: string; item?: string | null } | null;
   magnusLens?: { category?: string | null; item?: string | null } | null;
 }): { description: string; productName: string | null; lensId: string | null } {
+  if (order.lensProductPower) {
+    const variant = order.lensProductPower.lensProductVariant;
+    return {
+      description: `${variant.name} (${variant.skuCode})`,
+      productName: variant.product.base.name,
+      lensId: null,
+    };
+  }
   switch (order.lensType) {
     case "SINGLE_VISION": {
       const l = order.singleVisionLens;
@@ -155,6 +166,7 @@ export async function createInvoiceFromOrder(
       bifocalLens: true,
       oriVisionLens: true,
       magnusLens: true,
+      lensProductPower: { include: { lensProductVariant: { include: { product: { include: { base: true } } } } } },
       wholesaleLineItems: true,
     },
   });
@@ -251,7 +263,8 @@ export async function createInvoiceFromOrder(
     order.progressiveLensId ||
     order.bifocalLensId ||
     order.oriVisionLensId ||
-    order.magnusLensId;
+    order.magnusLensId ||
+    order.lensProductPowerId;
 
   const invoiceLines = wholesalePricing
     ? wholesalePricing.lines.map((prepared, index) => {

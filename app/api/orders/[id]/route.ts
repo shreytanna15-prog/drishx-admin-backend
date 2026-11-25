@@ -4,12 +4,10 @@ import { prisma } from "../../../lib/prisma";
 import { NotificationType, OrderStatus, Prisma } from "@prisma/client";
 import {
   fulfillOrderPick,
-  restorePickedStock,
   setOrderPickedQuantity,
 } from "../../../lib/order-inventory";
 import { markActiveVersionFinalFulfilled } from "../../../lib/alternate-power-workflow";
 import { activateOrderLoyalty } from "../../../lib/loyalty/activate";
-import { reverseRedemption } from "../../../lib/loyalty/redeem";
 import {
   canTransitionStatus,
   formatOrderStatusLabel,
@@ -27,7 +25,6 @@ import {
   recordAuditEvent,
   singleChange,
 } from "../../../lib/audit";
-import { voidTransaction } from "../../../lib/audit-query";
 import { validateOrderNotes } from "../../../lib/order-notes";
 import { requireStaffPermission } from "../../../lib/staff-access";
 import {
@@ -50,7 +47,6 @@ import {
 import {
   assertOrderInvoiceAllowsCancellation,
   OrderInvoiceCancellationError,
-  voidUnpaidInvoiceOnOrderCancel,
 } from "../../../lib/finance/void-unpaid-invoice";
 import {
   orderDetailInclude,
@@ -61,6 +57,8 @@ import {
   shouldNotifyStaffOnEligibilityChange,
 } from "../../../lib/prescription-order-hold";
 import { notifyStaffOfNewOrder } from "../../../lib/staff-notifications";
+import { CatalogOrderStockError } from "../../../lib/catalog/catalog-order-stock";
+import { cancelOrderInTransaction } from "../../../lib/cancel-order";
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/orders/:id
@@ -459,6 +457,11 @@ export async function PUT(
       }
     }
     const movingToPacked = status === "PACKED" && currentStatus !== "PACKED";
+    if (movingToPacked && existingOrder.lensProductPowerId &&
+      (existingOrder.reservedQuantity < existingOrder.quantity ||
+        (pickedQuantity !== null && pickedQuantity < existingOrder.quantity))) {
+      return NextResponse.json({ error: "Catalog stock must be fully reserved and picked before packing." }, { status: 409 });
+    }
     const effectiveServiceId =
       nextDeliveryServiceId !== undefined ? nextDeliveryServiceId : currentServiceId;
     if (movingToPacked) {
@@ -516,7 +519,7 @@ export async function PUT(
       // the cancelling transaction below (Phase 4 atomicity).
     }
 
-    if (pickedQuantity !== null && session.role !== "CUSTOMER" && nextStatus !== "CANCELLED") {
+    if (pickedQuantity !== null && session.role !== "CUSTOMER" && nextStatus !== "CANCELLED" && !existingOrder.lensProductPowerId) {
       await setOrderPickedQuantity(existingOrder, pickedQuantity, stockAudit);
     }
 
@@ -563,44 +566,30 @@ export async function PUT(
       if (isCancelling) {
         // Stock + sale void + loyalty + invoice/ledger need > Prisma default 5s (P2028).
         updatedOrder = await prisma.$transaction(
-          async (tx) => {
-            await restorePickedStock(existingOrder, stockAudit, tx);
-            if (existingOrder.transactionId) {
-              await voidTransaction(
-                existingOrder.transactionId,
-                ReasonCode.VOID.INCORRECT_ENTRY,
-                cancelReason ?? "Order cancelled",
-                session,
-                tx
-              );
-            }
-            await reverseRedemption({
-              customerId: existingOrder.userId,
-              orderId: existingOrder.id,
-              db: tx,
-            });
-            const order = await tx.order.update({
-              where: { id },
-              data: updateData,
-            });
-            await voidUnpaidInvoiceOnOrderCancel({
-              orderId: id,
-              reason: cancelReason || "Order cancelled",
-              tx,
-            });
-            return order;
-          },
+          (tx) => cancelOrderInTransaction({
+            tx, orderId: id, reason: cancelReason || "Order cancelled",
+            session, request: auditCtx, updateData,
+          }),
           { maxWait: 10_000, timeout: 60_000 }
         );
       } else {
-        updatedOrder = await prisma.order.update({
-          where: { id },
-          data: updateData,
-        });
+        const catalogPickTarget = existingOrder.lensProductPowerId
+          ? pickedQuantity ?? (
+              (nextStatus === "PACKED" || nextStatus === "COMPLETED") &&
+              existingOrder.reservedQuantity > existingOrder.pickedQuantity
+                ? existingOrder.reservedQuantity : null
+            )
+          : null;
+        updatedOrder = catalogPickTarget !== null
+          ? await setOrderPickedQuantity(existingOrder, catalogPickTarget, stockAudit, updateData)
+          : await prisma.order.update({ where: { id }, data: updateData });
       }
     } catch (e) {
       if (e instanceof OrderInvoiceCancellationError) {
         return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      if (e instanceof CatalogOrderStockError) {
+        return NextResponse.json({ error: e.message, code: e.code }, { status: e.status });
       }
       throw e;
     }
@@ -653,6 +642,7 @@ export async function PUT(
 
     const shouldFulfillPick =
       pickedQuantity === null &&
+      !existingOrder.lensProductPowerId &&
       (nextStatus === "PACKED" || nextStatus === "COMPLETED") &&
       existingOrder.reservedQuantity > existingOrder.pickedQuantity;
 
@@ -694,19 +684,13 @@ export async function PUT(
         },
       });
       const auditCtx = buildAuditRequestContext(req);
-      await recordAuditEvent(prisma, {
-        action:
-          status === "CANCELLED"
-            ? AuditAction.ORDER_CANCELLED
-            : AuditAction.ORDER_STATUS_CHANGED,
+      if (status !== "CANCELLED") await recordAuditEvent(prisma, {
+        action: AuditAction.ORDER_STATUS_CHANGED,
         module: AuditModule.ORDER,
         entityType: "Order",
         entityId: id,
         actor: actorFromSession(session),
         request: auditCtx,
-        reasonCode:
-          status === "CANCELLED" ? ReasonCode.ORDER_CANCEL.OTHER : undefined,
-        reasonText: status === "CANCELLED" ? (cancelReason ?? null) : null,
         changes: singleChange("status", currentStatus, status),
         context: { orderNumber: existingOrder.orderNumber },
         activityMessage: activityMessages[activityMessages.length - 1]!,
@@ -1012,6 +996,9 @@ export async function PATCH(
     if (!full) return NextResponse.json({ error: "Order not found." }, { status: 404 });
     return NextResponse.json(await serializeOrderDetail(full, session.role));
   } catch (error) {
+    if (error instanceof CatalogOrderStockError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
     console.error("PATCH /api/orders/[id] error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
@@ -1050,45 +1037,13 @@ export async function DELETE(
       await prisma.$transaction(
         async (tx) => {
           if (existingOrder.status !== OrderStatus.CANCELLED) {
-            await restorePickedStock(
-              existingOrder,
-              {
-                actorUserId: session.userId,
-                orderId: id,
-                request: buildAuditRequestContext(req),
-              },
-              tx
-            );
-            if (existingOrder.transactionId) {
-              await voidTransaction(
-                existingOrder.transactionId,
-                ReasonCode.VOID.INCORRECT_ENTRY,
-                archiveReason,
-                session,
-                tx
-              );
-            }
-            await reverseRedemption({
-              customerId: existingOrder.userId,
-              orderId: existingOrder.id,
-              db: tx,
+            await cancelOrderInTransaction({ tx, orderId: id, reason: archiveReason, session,
+              request: buildAuditRequestContext(req),
+              updateData: { archivedAt: new Date(), archiveReason },
             });
+          } else {
+            await tx.order.update({ where: { id }, data: { archivedAt: new Date(), archiveReason } });
           }
-          await tx.order.update({
-            where: { id },
-            data: {
-              archivedAt: new Date(),
-              archiveReason,
-              status: OrderStatus.CANCELLED,
-              transactionId: null,
-              reservedQuantity: 0,
-            },
-          });
-          await voidUnpaidInvoiceOnOrderCancel({
-            orderId: id,
-            reason: archiveReason,
-            tx,
-          });
         },
         { maxWait: 10_000, timeout: 60_000 }
       );

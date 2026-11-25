@@ -40,11 +40,13 @@ import {
 } from "../../../../lib/audit";
 import { createInvoiceFromOrder } from "../../../../lib/finance/create-invoice-from-order";
 import { reverseLoyaltyForCreditAllocations } from "../../../../lib/loyalty/reverse";
+import { setCatalogReturnRestockedQuantity } from "../../../../lib/catalog/catalog-return-stock";
 
 const DECIDABLE_STATUSES = new Set<string>([
   ReturnRequestStatus.SUBMITTED,
   ReturnRequestStatus.MORE_INFO_REQUIRED,
   ReturnRequestStatus.ESCALATED_TO_ADMIN,
+  ReturnRequestStatus.REJECTED,
 ]);
 
 export async function POST(
@@ -208,30 +210,27 @@ export async function POST(
           },
         });
 
-        if (stockDisposition === "RETURN_TO_SALEABLE" && item.lensId) {
+        if (stockDisposition === "RETURN_TO_SALEABLE" && (item.lensProductPowerId || item.lensId)) {
           const qty = Number(item.quantity);
-          // S5: prefer bridged catalog leaf; else legacy lens table.
-          const bridged = await tx.lensProductPower.findFirst({
-            where: {
-              legacyLensType: item.lensType,
-              legacyLensId: item.lensId,
-            },
-            select: { id: true },
-          });
+          const bridged = item.lensProductPowerId
+            ? { id: item.lensProductPowerId }
+            : item.lensId ? await tx.lensProductPower.findFirst({
+                where: { legacyLensType: item.lensType, legacyLensId: item.lensId },
+                select: { id: true },
+              }) : null;
           if (bridged) {
-            const { receiveCatalogStockLine } = await import(
-              "@/app/lib/catalog/catalog-stock-receive"
-            );
-            await receiveCatalogStockLine({
-              lensProductPowerId: bridged.id,
-              quantityAdded: qty,
-              actorUserId: session.userId,
-              referenceId: id,
-              dualWriteLegacy: false,
-              client: tx,
+            if (!item.lensProductPowerId) {
+              await tx.returnRequestItem.update({
+                where: { id: item.id }, data: { lensProductPowerId: bridged.id },
+              });
+            }
+            await setCatalogReturnRestockedQuantity({
+              tx, returnItemId: item.id, targetQuantity: qty,
+              actor: actorFromSession(session), request: buildAuditRequestContext(req),
+              reason: remarks || "Return approved for saleable stock",
             });
           } else {
-            await incrementLensStock(tx, item.lensType, item.lensId, qty);
+            await incrementLensStock(tx, item.lensType, item.lensId!, qty);
           }
         }
       }

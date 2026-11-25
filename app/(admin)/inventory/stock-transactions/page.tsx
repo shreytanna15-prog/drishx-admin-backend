@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminSelect } from "@/components/admin-select";
 import {
   Table,
   TableBody,
@@ -15,52 +16,31 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AdminApiError } from "@/app/lib/admin-api";
-import {
-  fetchCatalogStockTransactions,
-  type CatalogStockTransaction,
-} from "@/app/lib/admin-stock";
+import { useGetCatalogStockTransactions } from "@/app/lib/modules/stock/query/use-get-catalog-stock-transactions";
 
 export default function CatalogStockTransactionsPage() {
-  const [items, setItems] = useState<CatalogStockTransaction[]>([]);
-  const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
+  const [movementType, setMovementType] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchCatalogStockTransactions({
-        powerId: q.trim() || undefined,
-        page,
-        limit: 40,
-      });
-      setItems(res.items);
-      setTotal(res.total);
-    } catch (err) {
-      setError(
-        err instanceof AdminApiError
-          ? err.message
-          : "Failed to load transactions."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [q, page]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { data, loading, refreshing, error, refetch } = useGetCatalogStockTransactions({
+    q: q.trim() || undefined,
+    movementType: movementType || undefined,
+    from: from || undefined,
+    to: to || undefined,
+    page,
+    limit: 40,
+  });
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   return (
     <AdminPage
       title="Stock Transactions"
       subtitle="Ledger of catalog stock movements (receive, adjust, discrepancy)."
       actions={
-        <Button variant="outline" size="sm" onClick={() => void load()}>
+        <Button variant="outline" size="sm" onClick={() => void refetch()}>
           <RefreshCw className="size-4" />
           Refresh
         </Button>
@@ -71,7 +51,7 @@ export default function CatalogStockTransactionsPage() {
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-(--brand-text-muted)" />
           <Input
             className="pl-8"
-            placeholder="Filter by leaf / power id…"
+            placeholder="Search SKU, variant or leaf id…"
             value={q}
             onChange={(e) => {
               setPage(1);
@@ -79,10 +59,30 @@ export default function CatalogStockTransactionsPage() {
             }}
           />
         </div>
+        <AdminSelect
+          value={movementType}
+          onValueChange={(value) => { setPage(1); setMovementType(value); }}
+          options={[
+            { value: "", label: "All movements" },
+            ...["RECEIVED", "RESERVED", "RELEASED", "ADJUSTED", "PICKED", "RESTORED", "RETURNED", "DAMAGED", "WRITTEN_OFF", "SOLD"].map(
+              (value) => ({ value, label: value.replaceAll("_", " ") })
+            ),
+          ]}
+          triggerClassName="h-9 min-w-40"
+        />
+        <label className="flex items-center gap-2 text-sm text-(--brand-text-muted)">
+          From
+          <Input type="date" value={from} onChange={(e) => { setPage(1); setFrom(e.target.value); }} className="w-36" />
+        </label>
+        <label className="flex items-center gap-2 text-sm text-(--brand-text-muted)">
+          To
+          <Input type="date" value={to} onChange={(e) => { setPage(1); setTo(e.target.value); }} className="w-36" />
+        </label>
         <Badge variant="secondary">{total} rows</Badge>
+        {refreshing ? <span className="text-xs text-(--brand-text-muted)">Refreshing…</span> : null}
       </div>
 
-      {error ? <p className="mb-3 text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-red-600">{error.message}</p> : null}
 
       {loading ? (
         <TableSkeleton rows={10} />
