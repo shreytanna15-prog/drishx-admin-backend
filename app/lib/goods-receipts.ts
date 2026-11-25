@@ -18,6 +18,7 @@ import {
 import { readLensRow, type DbClient } from "./procurement-lens";
 import { receiveStockLine } from "./stock-intake";
 import { receiveCatalogStockLine } from "./catalog/catalog-stock-receive";
+import { fulfillProcurementOrder } from "./order-inventory";
 import { getFinancialYear } from "./finance/financial-year";
 import { isReceivablePoStatus, openPoLineOutstanding } from "./purchase-order-math";
 import {
@@ -895,6 +896,21 @@ export async function confirmGoodsReceipt(input: {
   }
 
   if (posted) {
+    const orderRequests = await prisma.procurementRequest.findMany({
+      where: {
+        orderId: { not: null }, lensProductPowerId: { not: null },
+        purchaseOrderAllocations: { some: { purchaseOrderId: head.purchaseOrderId } },
+      },
+      select: { orderId: true },
+    });
+    for (const orderId of new Set(orderRequests.map((request) => request.orderId).filter((id): id is string => Boolean(id)))) {
+      try {
+        await fulfillProcurementOrder(orderId);
+      } catch (error) {
+        // Receipt remains confirmed; the order can be recalculated idempotently.
+        console.error(`Catalog order coverage refresh failed for ${orderId}:`, error);
+      }
+    }
     await recordAuditEvent(prisma, {
       action: AuditAction.GOODS_RECEIPT_CONFIRMED,
       module: AuditModule.INVENTORY,

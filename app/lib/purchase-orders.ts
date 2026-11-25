@@ -939,6 +939,7 @@ export type ProcurementQueueItem = {
   lensId: string | null;
   lensProductPowerId: string | null;
   lensProductVariantId: string | null;
+  skuCode: string | null;
   sph: number | null;
   cyl: number | null;
   requiredQuantity: number;
@@ -1032,6 +1033,7 @@ export async function listOpenProcurementQueue(
       lensId: row.lensId,
       lensProductPowerId: leaf?.id ?? null,
       lensProductVariantId: variant?.id ?? null,
+      skuCode: variant?.skuCode ?? null,
       sph: leaf ? Number(leaf.sph) : null,
       cyl: leaf ? Number(leaf.cyl) : null,
       requiredQuantity: row.requiredQuantity,

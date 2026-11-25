@@ -60,6 +60,7 @@ export const ReturnTimelineEventType = {
   APPROVED_REPLACEMENT: "APPROVED_REPLACEMENT",
   REJECTED: "REJECTED",
   CLOSED: "CLOSED",
+  STOCK_CORRECTED: "STOCK_CORRECTED",
 } as const;
 export type ReturnTimelineEventType =
   (typeof ReturnTimelineEventType)[keyof typeof ReturnTimelineEventType];

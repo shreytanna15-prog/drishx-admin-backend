@@ -13,9 +13,10 @@ import {
 import { AdminApiError } from "@/app/lib/admin-api";
 import { listActiveDeliveryServiceOptions } from "@/app/lib/admin-delivery";
 import {
-  createAdminCatalogOrder,
+  createAdminCatalogStockOrder,
   createAdminRxOrder,
-  searchAdminCatalogLenses,
+  searchAdminCatalogPowers,
+  type AdminCatalogPowerHit,
 } from "@/app/lib/admin-orders";
 import {
   createWalkInCustomer,
@@ -35,6 +36,8 @@ import {
 import { formatMoney } from "@/app/lib/admin-orders";
 import { usePaginatedListState } from "@/app/lib/hooks/use-paginated-list-state";
 import { orderTotalFromPairPrice } from "@/app/lib/lens-pricing";
+
+type CatalogPowerHit = AdminCatalogPowerHit;
 import { useGetCustomers } from "@/app/lib/modules/customers/query/use-get-customers";
 import {
   QueryEmptyState,
@@ -60,25 +63,10 @@ type DeliveryServiceOption = {
   isActive?: boolean;
 };
 
-type CatalogLensHit = {
-  id: string;
-  lensType: "SINGLE_VISION" | "KRYPTOK" | "PROGRESSIVE";
-  brand?: string | null;
-  item?: string | null;
-  coating?: string | null;
-  category?: string | null;
-  sph?: number | null;
-  cyl?: number | null;
-  axis?: number | null;
-  add?: number | null;
-  eye?: string | null;
-  price: number;
-  quantity: number;
-};
-
 type CatalogDraft = {
-  lens: CatalogLensHit | null;
+  power: CatalogPowerHit | null;
   quantity: number;
+  stockMode: "LIVE" | "NON_LIVE";
   notes: string;
   deliveryServiceId: string;
 };
@@ -121,15 +109,17 @@ const initialRxDraft: RxDraft = {
   left: { ...emptyRxEye },
 };
 
-function lensLabel(lens: CatalogLensHit): string {
+function powerLabel(power: CatalogPowerHit): string {
   const parts = [
-    lens.brand,
-    lens.item,
-    lens.coating,
-    lens.sph != null ? `SPH ${lens.sph}` : null,
-    lens.cyl != null ? `CYL ${lens.cyl}` : null,
+    power.skuCode,
+    power.name,
+    `SPH ${power.sph.toFixed(2)}`,
+    `CYL ${power.cyl.toFixed(2)}`,
+    power.axis != null ? `Axis ${power.axis}` : null,
+    power.addition != null ? `ADD ${power.addition}` : null,
+    power.eye,
   ].filter(Boolean);
-  return parts.join(" · ") || lens.id;
+  return parts.join(" · ");
 }
 
 function parseEyeNumber(raw: string): number | null {
@@ -146,17 +136,15 @@ export function AdminCreateOrderPanel() {
     useState<CreateOrderCustomerCandidate | null>(null);
   const [channel, setChannel] = useState<OrderChannel | null>(null);
   const [catalog, setCatalog] = useState<CatalogDraft>({
-    lens: null,
+    power: null,
     quantity: 1,
+    stockMode: "LIVE",
     notes: "",
     deliveryServiceId: "",
   });
   const [rx, setRx] = useState<RxDraft>(initialRxDraft);
   const [lensSearch, setLensSearch] = useState("");
-  const [lensTypeFilter, setLensTypeFilter] = useState<
-    "single-vision" | "kryptok" | "progressive"
-  >("single-vision");
-  const [lensHits, setLensHits] = useState<CatalogLensHit[]>([]);
+  const [lensHits, setLensHits] = useState<CatalogPowerHit[]>([]);
   const [lensLoading, setLensLoading] = useState(false);
   const [deliveryServices, setDeliveryServices] = useState<
     DeliveryServiceOption[]
@@ -416,14 +404,9 @@ export function AdminCreateOrderPanel() {
         void (async () => {
           setLensLoading(true);
           try {
-            const hits = await searchAdminCatalogLenses({
-              type: lensTypeFilter,
-              search: q,
-              page: 1,
-              limit: 20,
-            });
+            const res = await searchAdminCatalogPowers({ q, page: 1, limit: 24 });
             if (cancelled) return;
-            setLensHits(hits as CatalogLensHit[]);
+            setLensHits(res.items ?? []);
           } catch {
             if (!cancelled) setLensHits([]);
           } finally {
@@ -436,7 +419,7 @@ export function AdminCreateOrderPanel() {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [step, channel, lensSearch, lensTypeFilter, lensSearchUi.queryReady]);
+  }, [step, channel, lensSearch, lensSearchUi.queryReady]);
 
   function goNext() {
     setSubmitError(null);
@@ -450,12 +433,16 @@ export function AdminCreateOrderPanel() {
     }
     if (step === 3) {
       if (channel === "CATALOG") {
-        if (!catalog.lens) {
-          setSubmitError("Select a catalog lens.");
+        if (!catalog.power) {
+          setSubmitError("Select a catalog stock leaf.");
           return;
         }
-        if (!(catalog.quantity > 0)) {
-          setSubmitError("Quantity must be greater than zero.");
+        if (!Number.isInteger(catalog.quantity) || catalog.quantity <= 0) {
+          setSubmitError("Quantity must be a positive whole number.");
+          return;
+        }
+        if (catalog.stockMode === "LIVE" && catalog.quantity > catalog.power.available) {
+          setSubmitError("LIVE mode requires quantity ≤ available stock (or switch to NON_LIVE).");
           return;
         }
       }
@@ -488,21 +475,15 @@ export function AdminCreateOrderPanel() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      if (channel === "CATALOG" && catalog.lens) {
-        const body: Record<string, unknown> = {
+      if (channel === "CATALOG" && catalog.power) {
+        const res = await createAdminCatalogStockOrder({
           userId: selectedCustomer.id,
-          lensType: catalog.lens.lensType,
-          lensId: catalog.lens.id,
+          lensProductPowerId: catalog.power.id,
           quantity: catalog.quantity,
+          stockMode: catalog.stockMode,
           notes: catalog.notes.trim() || undefined,
           deliveryServiceId: catalog.deliveryServiceId || undefined,
-          sph: catalog.lens.sph,
-          cyl: catalog.lens.cyl,
-          axis: catalog.lens.axis,
-          add: catalog.lens.add,
-          eye: catalog.lens.eye,
-        };
-        const res = await createAdminCatalogOrder(body);
+        });
         router.push(`/orders/${res.order.id}`);
         return;
       }
@@ -554,9 +535,9 @@ export function AdminCreateOrderPanel() {
   }
 
   const catalogTotal =
-    catalog.lens != null
+    catalog.power != null
       ? orderTotalFromPairPrice(
-          Number(catalog.lens.price),
+          Number(catalog.power.price),
           Number(catalog.quantity)
         )
       : 0;
@@ -884,39 +865,16 @@ export function AdminCreateOrderPanel() {
           <div className="space-y-4">
             <div>
               <h2 className="text-lg font-extrabold text-(--brand-text)">
-                Build catalog order
+                Build catalog stock order
               </h2>
               <p className="mt-1 text-sm text-(--brand-text-muted)">
-                Search the live lens catalog. Stock and price come from checkout.
+                Search catalog stock leaves (variant + SPH/CYL). LIVE requires available stock; NON_LIVE can raise procurement.
               </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  ["single-vision", "Single vision"],
-                  ["kryptok", "Kryptok"],
-                  ["progressive", "Progressive"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setLensTypeFilter(value)}
-                  className={cn(
-                    "rounded-lg px-3 py-1.5 text-xs font-bold",
-                    lensTypeFilter === value
-                      ? "bg-(--brand-primary) text-(--brand-primary-text)"
-                      : "bg-(--brand-primary)/10 text-(--brand-text)"
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
             </div>
             <Input
               value={lensSearch}
               onChange={(e) => setLensSearch(e.target.value)}
-              placeholder="Search brand, item, coating, power…"
+              placeholder="Search SKU or name…"
               className="h-11 rounded-xl"
             />
             {lensSearchUi.loading ? (
@@ -925,49 +883,63 @@ export function AdminCreateOrderPanel() {
               </p>
             ) : null}
             <ul className="max-h-56 space-y-2 overflow-y-auto">
-              {lensSearchUi.hits.map((lens) => (
-                <li key={lens.id}>
+              {lensSearchUi.hits.map((power) => (
+                <li key={power.id}>
                   <button
                     type="button"
                     onClick={() =>
-                      setCatalog((prev) => ({ ...prev, lens }))
+                      setCatalog((prev) => ({ ...prev, power }))
                     }
                     className={cn(
                       "w-full rounded-xl border px-3 py-2 text-left text-sm",
-                      catalog.lens?.id === lens.id
+                      catalog.power?.id === power.id
                         ? "border-(--brand-primary) bg-(--brand-primary)/10"
                         : "border-(--brand-card-border)"
                     )}
                   >
                     <div className="font-semibold text-(--brand-text)">
-                      {lensLabel(lens)}
+                      {powerLabel(power)}
                     </div>
                     <div className="text-xs text-(--brand-text-muted)">
-                      {formatMoney(lens.price)} per pair · Stock{" "}
-                      {lens.quantity}
+                      {formatMoney(power.price)} per pair · {power.available} available
                     </div>
                   </button>
                 </li>
               ))}
             </ul>
-            {catalog.lens ? (
+            {catalog.power ? (
               <div className="rounded-xl border border-(--brand-card-border) p-3 text-sm">
                 Selected:{" "}
-                <span className="font-semibold">{lensLabel(catalog.lens)}</span>
-                {catalog.lens.quantity < catalog.quantity ? (
+                <span className="font-semibold">{powerLabel(catalog.power)}</span>
+                {catalog.stockMode === "LIVE" && catalog.power.available < catalog.quantity ? (
                   <p className="mt-2 text-amber-700 dark:text-amber-300">
-                    Requested qty exceeds available stock ({catalog.lens.quantity}
-                    ). Checkout may route to procurement for the customer.
+                    Requested qty exceeds available ({catalog.power.available}). Switch to NON_LIVE or lower qty.
                   </p>
                 ) : null}
               </div>
             ) : null}
             <label className="block text-sm font-semibold text-(--brand-label)">
+              Stock mode
+              <select
+                className="mt-1 block h-11 w-full rounded-xl border border-(--brand-input-border) bg-(--brand-card) px-3"
+                value={catalog.stockMode}
+                onChange={(e) =>
+                  setCatalog((p) => ({
+                    ...p,
+                    stockMode: e.target.value as "LIVE" | "NON_LIVE",
+                  }))
+                }
+              >
+                <option value="LIVE">LIVE — available only</option>
+                <option value="NON_LIVE">NON_LIVE — procure shortage</option>
+              </select>
+            </label>
+            <label className="block text-sm font-semibold text-(--brand-label)">
               Quantity
               <Input
                 type="number"
-                min={0.25}
-                step={0.25}
+                min={1}
+                step={1}
                 value={catalog.quantity}
                 onChange={(e) =>
                   setCatalog((p) => ({
@@ -1166,13 +1138,14 @@ export function AdminCreateOrderPanel() {
                 label="Order type"
                 value={channel === "RX" ? "RX prescription" : "Catalog / Retail"}
               />
-              {channel === "CATALOG" && catalog.lens ? (
+              {channel === "CATALOG" && catalog.power ? (
                 <>
-                  <ReviewRow label="Product" value={lensLabel(catalog.lens)} />
+                  <ReviewRow label="Product" value={powerLabel(catalog.power)} />
+                  <ReviewRow label="Stock mode" value={catalog.stockMode} />
                   <ReviewRow label="Quantity" value={String(catalog.quantity)} />
                   <ReviewRow
                     label="Price per pair"
-                    value={formatMoney(catalog.lens.price)}
+                    value={formatMoney(catalog.power.price)}
                   />
                   <ReviewRow
                     label="Line total (est.)"
@@ -1180,7 +1153,7 @@ export function AdminCreateOrderPanel() {
                   />
                   <ReviewRow
                     label="Stock available"
-                    value={String(catalog.lens.quantity)}
+                    value={String(catalog.power.available)}
                   />
                   <ReviewRow
                     label="Notes"

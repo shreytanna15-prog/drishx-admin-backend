@@ -49,6 +49,25 @@ export function calculateCatalogRequiredQuantity(input: {
   return required;
 }
 
+/** Outstanding approved/open requests already awaiting placement on a PO. */
+export function catalogUnallocatedRequestQuantity(
+  requests: Array<{ requestedQuantity: number; orderedQuantity: number }>
+): number {
+  return requests.reduce(
+    (sum, request) =>
+      sum + Math.max(0, request.requestedQuantity - request.orderedQuantity),
+    0
+  );
+}
+
+/** Only raise demand not already present on the consolidated request queue. */
+export function catalogNewRequestQuantity(
+  required: number,
+  requests: Array<{ requestedQuantity: number; orderedQuantity: number }>
+): number {
+  return Math.max(0, required - catalogUnallocatedRequestQuantity(requests));
+}
+
 /** Raise a new requirement when available ≤ threshold (and no open PO). */
 export function shouldRaiseCatalogReorder(input: {
   available: number;

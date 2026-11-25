@@ -350,6 +350,7 @@ export function serializeOrderListItem(order: ListOrderRow, role: string) {
     cutoffDeferred: order.cutoffDeferred ?? false,
     dispatchOverridden: Boolean(order.dispatchOverrideStamp),
     orderSource: order.orderSource ?? null,
+    lensProductPowerId: order.lensProductPowerId ?? null,
     placedByUserId: order.placedByUserId ?? null,
     hasOrderImage,
     /** List never signs images — detail GET still does. */

@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
   try {
     const sp = req.nextUrl.searchParams;
     const data = await listCatalogStockTransactions({
+      q: sp.get("q") ?? undefined,
       powerId: sp.get("powerId") ?? undefined,
       productId: sp.get("productId") ?? undefined,
       movementType: sp.get("movementType") ?? undefined,

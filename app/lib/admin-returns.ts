@@ -87,6 +87,8 @@ export type AdminReturnRequest = {
   primaryOrder?: AdminReturnOrderContext | null;
   items: Array<{
     id: string;
+    lensProductPowerId?: string | null;
+    saleableRestockedQuantity?: number;
     originalOrderId: string;
     lensLabel: string;
     quantity: number;
@@ -408,6 +410,17 @@ export async function submitAdminReturnDecision(
   await adminFetch(`/api/returns/${returnId}/decision`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function correctAdminReturnStock(input: {
+  returnId: string;
+  reason: string;
+  items: Array<{ itemId: string; saleableQuantity: number }>;
+}): Promise<void> {
+  await adminFetch(`/api/returns/${input.returnId}/stock`, {
+    method: "PATCH",
+    body: JSON.stringify({ reason: input.reason, items: input.items }),
   });
 }
 

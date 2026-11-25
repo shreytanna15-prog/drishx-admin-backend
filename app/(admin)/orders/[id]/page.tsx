@@ -147,6 +147,11 @@ function OrderDetailPageContent() {
           <ArrowLeft className="size-4" />
           Back to orders
         </Link>
+        {order?.lensProductPowerId ? (
+          <Link href={`/orders/${id}/change-requests`} className="ml-4 text-sm font-semibold text-(--brand-link) hover:underline">
+            Change requests
+          </Link>
+        ) : null}
       </div>
 
       {error ? (

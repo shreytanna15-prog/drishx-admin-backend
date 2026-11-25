@@ -265,12 +265,13 @@ async function loadSupportedCatalogRows(): Promise<InventoryCatalogRowInput[]> {
     });
   }
 
-  // S5: include catalog stock leaves (skip rows already covered by legacy bridge).
-  const legacyIds = new Set(rows.map((r) => r.lensId));
+  // Catalog leaves are the stock truth for bridged rows (receipts do not
+  // dual-write the old lens quantity); keep only unbridged legacy rows.
   const catalogPowers = await prisma.lensProductPower.findMany({
     select: {
       id: true,
       quantity: true,
+      weightedAverageCost: true,
       blockedQty: true,
       sph: true,
       cyl: true,
@@ -287,7 +288,7 @@ async function loadSupportedCatalogRows(): Promise<InventoryCatalogRowInput[]> {
           addition: { select: { value: true } },
           product: {
             select: {
-              family: { select: { name: true } },
+              family: { select: { name: true, code: true } },
               coating: { select: { name: true } },
             },
           },
@@ -295,35 +296,48 @@ async function loadSupportedCatalogRows(): Promise<InventoryCatalogRowInput[]> {
       },
     },
   });
-  for (const power of catalogPowers) {
-    if (power.legacyLensId && legacyIds.has(power.legacyLensId)) continue;
-    const available = Math.max(0, power.quantity - power.blockedQty);
-    rows.push({
-      lensType: power.legacyLensType ?? LensType.SINGLE_VISION,
-      lensId: power.legacyLensId ?? `catalog:${power.id}`,
-      category: power.lensProductVariant.product.family.name,
-      brand: power.lensProductVariant.skuCode,
-      item: power.lensProductVariant.name,
-      coating: power.lensProductVariant.product.coating?.name ?? null,
-      progressiveType: null,
-      index: null,
-      sph: num(power.sph),
-      cyl: num(power.cyl),
-      add:
-        power.lensProductVariant.addition?.value != null
-          ? num(power.lensProductVariant.addition.value)
-          : null,
-      axis: power.lensProductVariant.axis,
-      eye: power.lensProductVariant.eye,
-      crossPower: null,
-      onHand: available,
-      isDisabled: false,
-      costPrice: num(power.lensProductVariant.purchasePrice),
-      sellingPrice: num(power.lensProductVariant.sellingPrice),
-    });
-  }
+  const bridgedLegacyKeys = new Set(
+    catalogPowers.flatMap((power) =>
+      power.legacyLensType && power.legacyLensId
+        ? [`${power.legacyLensType}:${power.legacyLensId}`]
+        : []
+    )
+  );
+  const unbridgedLegacy = rows.filter(
+    (row) => !bridgedLegacyKeys.has(`${row.lensType}:${row.lensId}`)
+  );
+  const catalogRows: InventoryCatalogRowInput[] = catalogPowers.map((power) => ({
+    lensType: catalogReportLensType(power.lensProductVariant.product.family.code),
+    lensId: `catalog:${power.id}`,
+    category: power.lensProductVariant.product.family.name,
+    brand: power.lensProductVariant.skuCode,
+    item: power.lensProductVariant.name,
+    coating: power.lensProductVariant.product.coating?.name ?? null,
+    progressiveType: null,
+    index: null,
+    sph: num(power.sph),
+    cyl: num(power.cyl),
+    add:
+      power.lensProductVariant.addition?.value != null
+        ? num(power.lensProductVariant.addition.value)
+        : null,
+    axis: power.lensProductVariant.axis,
+    eye: power.lensProductVariant.eye,
+    crossPower: null,
+    onHand: power.quantity,
+    blockedQty: power.blockedQty,
+    isDisabled: false,
+    costPrice: num(power.weightedAverageCost),
+    sellingPrice: num(power.lensProductVariant.sellingPrice),
+  }));
 
-  return rows;
+  return [...unbridgedLegacy, ...catalogRows];
+}
+
+function catalogReportLensType(familyCode: string): LensType {
+  if (familyCode === "KT") return LensType.KRYPTOK;
+  if (familyCode === "V2") return LensType.PROGRESSIVE;
+  return LensType.SINGLE_VISION;
 }
 
 /**
@@ -346,6 +360,7 @@ async function loadBatchedCommittedOrders(): Promise<
       oriVisionLensId: true,
       magnusLensId: true,
       bifocalLensId: true,
+      lensProductPowerId: true,
       reservedQuantity: true,
       pickedQuantity: true,
     },
@@ -353,7 +368,9 @@ async function loadBatchedCommittedOrders(): Promise<
 
   return orders.map((order) => {
     const field = orderLensIdField(order.lensType);
-    const lensId = order[field] ?? null;
+    const lensId = order.lensProductPowerId
+      ? `catalog:${order.lensProductPowerId}`
+      : order[field] ?? null;
     return {
       lensType: order.lensType,
       lensId,
@@ -365,21 +382,35 @@ async function loadBatchedCommittedOrders(): Promise<
 
 /** Batched load of active reorder rules (isActive only — no autoProcure filter). */
 async function loadActiveReorderRules(): Promise<ActiveReorderRuleInput[]> {
-  const rules = await prisma.reorderRule.findMany({
-    where: { isActive: true },
-    select: {
-      lensType: true,
-      lensId: true,
-      minStock: true,
-      targetStock: true,
-    },
-  });
-  return rules.map((rule) => ({
-    lensType: rule.lensType,
-    lensId: rule.lensId,
-    minStock: rule.minStock,
-    targetStock: rule.targetStock,
-  }));
+  const [legacy, catalog] = await Promise.all([
+    prisma.reorderRule.findMany({
+      where: { isActive: true },
+      select: { lensType: true, lensId: true, minStock: true, targetStock: true },
+    }),
+    prisma.lensProductPower.findMany({
+      where: { OR: [{ minStock: { gt: 0 } }, { targetStock: { gt: 0 } }] },
+      select: {
+        id: true,
+        minStock: true,
+        targetStock: true,
+        lensProductVariant: { select: { product: { select: { family: { select: { code: true } } } } } },
+      },
+    }),
+  ]);
+  return [
+    ...legacy.map((rule) => ({
+      lensType: rule.lensType,
+      lensId: rule.lensId,
+      minStock: rule.minStock,
+      targetStock: rule.targetStock,
+    })),
+    ...catalog.map((power) => ({
+      lensType: catalogReportLensType(power.lensProductVariant.product.family.code),
+      lensId: `catalog:${power.id}`,
+      minStock: power.minStock,
+      targetStock: power.targetStock,
+    })),
+  ];
 }
 
 async function loadInventoryPositions(): Promise<InventoryStockPosition[]> {

@@ -1,0 +1,2 @@
+﻿-- Already applied on database historically; stub so local history matches _prisma_migrations.
+-- No-op: lens multi-addition DDL is present in DB from prior deploy.

@@ -48,6 +48,7 @@ export type AdminOrderLens = {
 
 export type AdminOrder = {
   id: string;
+  lensProductPowerId?: string | null;
   orderNumber: number | null;
   checkoutBatchId?: string | null;
   lensType: string;
@@ -1007,6 +1008,50 @@ export async function createAdminCatalogOrder(
   body: Record<string, unknown>
 ): Promise<{ order: { id: string } }> {
   return adminFetch<{ order: { id: string } }>("/api/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export type AdminCatalogPowerHit = {
+  id: string;
+  variantId: string;
+  skuCode: string;
+  name: string;
+  family: string;
+  base: string;
+  sph: number;
+  cyl: number;
+  axis: number | null;
+  addition: number | null;
+  eye: string | null;
+  price: number;
+  available: number;
+};
+
+export async function searchAdminCatalogPowers(params: {
+  q?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{ items: AdminCatalogPowerHit[]; total?: number; hasMore?: boolean }> {
+  const qs = new URLSearchParams({
+    page: String(params.page ?? 1),
+    limit: String(params.limit ?? 24),
+  });
+  if (params.q?.trim()) qs.set("q", params.q.trim());
+  return adminFetch(`/api/catalog/powers?${qs}`);
+}
+
+export async function createAdminCatalogStockOrder(body: {
+  userId: string;
+  lensProductPowerId: string;
+  quantity: number;
+  stockMode: "LIVE" | "NON_LIVE";
+  deliveryServiceId?: string;
+  notes?: string;
+}): Promise<{ order: { id: string }; needsProcurement?: boolean }> {
+  return adminFetch("/api/orders/catalog", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

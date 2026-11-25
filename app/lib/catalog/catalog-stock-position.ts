@@ -8,11 +8,9 @@ import {
   OPEN_PO_STATUSES_FOR_INCOMING,
   openPoLineOutstanding,
 } from "@/app/lib/purchase-order-math";
-import {
-  CATALOG_RESERVED_QTY_UNTIL_CUTOVER,
-  catalogAvailable,
-} from "@/app/lib/catalog/catalog-stock-position-core";
+import { catalogAvailable } from "@/app/lib/catalog/catalog-stock-position-core";
 import { encodeStockLeafKey } from "@/app/lib/catalog/lens-product-stock-core";
+import { ACTIVE_RESERVATION_STATUSES } from "@/app/lib/order-inventory";
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
@@ -75,6 +73,35 @@ export type CatalogStockPositionDto = {
   legacyLensId: string | null;
   updatedAt: string;
 };
+
+/** Derive the hold from open catalog orders; never count already-picked units twice. */
+export async function getCatalogReservedForPowers(
+  powerIds: string[],
+  client: DbClient = prisma
+): Promise<Map<string, number>> {
+  const result = new Map(powerIds.map((id) => [id, 0]));
+  if (powerIds.length === 0) return result;
+  const orders = await client.order.findMany({
+      where: { lensProductPowerId: { in: powerIds }, status: { in: ACTIVE_RESERVATION_STATUSES } },
+      select: { lensProductPowerId: true, reservedQuantity: true, pickedQuantity: true },
+    });
+  const wholesaleLines = await client.wholesaleOrderLineItem.findMany({
+      where: {
+        lensProductPowerId: { in: powerIds },
+        order: { status: { in: ACTIVE_RESERVATION_STATUSES } },
+      },
+      select: { lensProductPowerId: true, reservedQuantity: true },
+    });
+  for (const order of orders) {
+    const id = order.lensProductPowerId!;
+    result.set(id, (result.get(id) ?? 0) + Math.max(0, order.reservedQuantity - order.pickedQuantity));
+  }
+  for (const line of wholesaleLines) {
+    const id = line.lensProductPowerId!;
+    result.set(id, (result.get(id) ?? 0) + Math.max(0, line.reservedQuantity));
+  }
+  return result;
+}
 
 export async function getCatalogIncomingForPowers(
   powerIds: string[],
@@ -159,11 +186,11 @@ function serializePosition(
     };
   },
   incoming: number,
-  openPo: CatalogOpenPoDto | null
+  openPo: CatalogOpenPoDto | null,
+  reservedQty: number
 ): CatalogStockPositionDto {
   const sph = num(row.sph);
   const cyl = num(row.cyl);
-  const reservedQty = CATALOG_RESERVED_QTY_UNTIL_CUTOVER;
   const available = catalogAvailable({
     onHand: row.quantity,
     blockedQty: row.blockedQty,
@@ -208,14 +235,16 @@ export async function getCatalogStockPosition(
     include: powerInclude,
   });
   if (!row) return null;
-  const [incomingMap, openMap] = await Promise.all([
+  const [incomingMap, openMap, reservedMap] = await Promise.all([
     getCatalogIncomingForPowers([powerId], client),
     getCatalogOpenLocksForPowers([powerId], client),
+    getCatalogReservedForPowers([powerId], client),
   ]);
   return serializePosition(
     row,
     incomingMap.get(powerId) ?? 0,
-    openMap.get(powerId) ?? null
+    openMap.get(powerId) ?? null,
+    reservedMap.get(powerId) ?? 0
   );
 }
 
@@ -273,16 +302,18 @@ export async function listCatalogStockPositions(params: {
       take: 2000,
     });
     const ids = candidates.map((c) => c.id);
-    const [incomingMap, openMap] = await Promise.all([
+    const [incomingMap, openMap, reservedMap] = await Promise.all([
       getCatalogIncomingForPowers(ids, db),
       getCatalogOpenLocksForPowers(ids, db),
+      getCatalogReservedForPowers(ids, db),
     ]);
     const all = candidates
       .map((row) =>
         serializePosition(
           row,
           incomingMap.get(row.id) ?? 0,
-          openMap.get(row.id) ?? null
+          openMap.get(row.id) ?? null,
+          reservedMap.get(row.id) ?? 0
         )
       )
       .filter((p) => p.available <= p.minStock);
@@ -308,9 +339,10 @@ export async function listCatalogStockPositions(params: {
     }),
   ]);
   const ids = rows.map((r) => r.id);
-  const [incomingMap, openMap] = await Promise.all([
+  const [incomingMap, openMap, reservedMap] = await Promise.all([
     getCatalogIncomingForPowers(ids, db),
     getCatalogOpenLocksForPowers(ids, db),
+    getCatalogReservedForPowers(ids, db),
   ]);
 
   return {
@@ -318,7 +350,8 @@ export async function listCatalogStockPositions(params: {
       serializePosition(
         row,
         incomingMap.get(row.id) ?? 0,
-        openMap.get(row.id) ?? null
+        openMap.get(row.id) ?? null,
+        reservedMap.get(row.id) ?? 0
       )
     ),
     page,
@@ -347,13 +380,15 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
     take: 5000,
   });
   const ids = rows.map((r) => r.id);
-  const [incomingMap, openMap] = await Promise.all([
+  const [incomingMap, openMap, reservedMap] = await Promise.all([
     getCatalogIncomingForPowers(ids, client),
     getCatalogOpenLocksForPowers(ids, client),
+    getCatalogReservedForPowers(ids, client),
   ]);
 
   let onHandSum = 0;
   let blockedSum = 0;
+  let reservedSum = 0;
   let availableSum = 0;
   let shortageCount = 0;
   const shortages: Array<{
@@ -369,7 +404,7 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
   }> = [];
 
   for (const row of rows) {
-    const reservedQty = CATALOG_RESERVED_QTY_UNTIL_CUTOVER;
+    const reservedQty = reservedMap.get(row.id) ?? 0;
     const available = catalogAvailable({
       onHand: row.quantity,
       blockedQty: row.blockedQty,
@@ -377,6 +412,7 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
     });
     onHandSum += row.quantity;
     blockedSum += row.blockedQty;
+    reservedSum += reservedQty;
     availableSum += available;
     const incoming = incomingMap.get(row.id) ?? 0;
     const openPo = openMap.get(row.id) ?? null;
@@ -406,7 +442,7 @@ export async function getCatalogStockOverview(client: DbClient = prisma) {
     onHandSum,
     blockedSum,
     availableSum,
-    reservedSum: 0,
+    reservedSum,
     shortageCount,
     openPoLeafCount: openMap.size,
     topShortages: shortages.slice(0, 25),

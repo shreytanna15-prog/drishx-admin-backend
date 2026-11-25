@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Loader2, Play, RefreshCw, Search } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
+import { AdminSelect } from "@/components/admin-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,87 +19,70 @@ import {
 } from "@/components/ui/table";
 import { AdminApiError } from "@/app/lib/admin-api";
 import {
-  fetchCatalogStockPowers,
   patchCatalogStockPowerRules,
   runCatalogReorderCheckRequest,
-  type CatalogStockPower,
 } from "@/app/lib/admin-stock";
+import { useGetCatalogStockPowers } from "@/app/lib/modules/stock/query/use-get-catalog-stock-powers";
 
 export default function CatalogPowerWiseStockPage() {
-  const [items, setItems] = useState<CatalogStockPower[]>([]);
-  const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
+  const [familyCode, setFamilyCode] = useState("");
   const [shortageOnly, setShortageOnly] = useState(false);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<
     Record<string, { minStock: string; targetStock: string }>
   >({});
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchCatalogStockPowers({
-        q: q.trim() || undefined,
-        shortageOnly,
-        page,
-        limit: 50,
-      });
-      setItems(res.items);
-      setTotal(res.total);
-      const next: Record<string, { minStock: string; targetStock: string }> = {};
-      for (const row of res.items) {
-        next[row.id] = {
-          minStock: String(row.minStock),
-          targetStock: String(row.targetStock),
-        };
-      }
-      setDrafts(next);
-    } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.message : "Failed to load powers."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [q, shortageOnly, page]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { data, loading, refreshing, error: queryError, refetch } = useGetCatalogStockPowers({
+    q: q.trim() || undefined,
+    familyCode: familyCode || undefined,
+    shortageOnly,
+    page,
+    limit: 50,
+  });
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const error = actionError ?? queryError?.message ?? null;
 
   async function saveRules(id: string) {
-    const draft = drafts[id];
+    const row = items.find((item) => item.id === id);
+    const draft = drafts[id] ?? (row
+      ? { minStock: String(row.minStock), targetStock: String(row.targetStock) }
+      : null);
     if (!draft) return;
-    setError(null);
+    setActionError(null);
     try {
       await patchCatalogStockPowerRules(id, {
         minStock: Number(draft.minStock),
         targetStock: Number(draft.targetStock),
       });
       setMessage("Rules saved.");
-      await load();
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      await refetch();
     } catch (err) {
-      setError(err instanceof AdminApiError ? err.message : "Save failed.");
+      setActionError(err instanceof AdminApiError ? err.message : "Save failed.");
     }
   }
 
   async function runReorder() {
     setRunning(true);
     setMessage(null);
-    setError(null);
+    setActionError(null);
     try {
       const res = await runCatalogReorderCheckRequest();
       setMessage(
         `Scanned ${res.scanned ?? 0}: created ${res.created ?? 0}, suppressed ${res.suppressed ?? 0}, not needed ${res.notNeeded ?? 0}.`
       );
-      await load();
+      await refetch();
     } catch (err) {
-      setError(
+      setActionError(
         err instanceof AdminApiError ? err.message : "Reorder check failed."
       );
     } finally {
@@ -115,7 +99,7 @@ export default function CatalogPowerWiseStockPage() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => void load()}
+            onClick={() => void refetch()}
             className="h-9 rounded-xl border-(--brand-card-border) bg-(--brand-card) px-4 text-sm font-semibold text-(--brand-text) hover:bg-(--brand-primary)/10"
           >
             <RefreshCw className="size-4" />
@@ -150,6 +134,20 @@ export default function CatalogPowerWiseStockPage() {
             }}
           />
         </div>
+        <AdminSelect
+          value={familyCode}
+          onValueChange={(value) => {
+            setPage(1);
+            setFamilyCode(value);
+          }}
+          options={[
+            { value: "", label: "All families" },
+            { value: "SV", label: "Single Vision" },
+            { value: "KT", label: "Kryptok" },
+            { value: "V2", label: "Progressive V2" },
+          ]}
+          triggerClassName="h-9 min-w-36"
+        />
         <label className="flex items-center gap-2 text-sm text-(--brand-text)">
           <input
             type="checkbox"
@@ -162,6 +160,7 @@ export default function CatalogPowerWiseStockPage() {
           Shortages only
         </label>
         <Badge variant="secondary">{total} leaves</Badge>
+        {refreshing ? <span className="text-xs text-(--brand-text-muted)">Refreshing…</span> : null}
       </div>
 
       {message ? (
@@ -178,6 +177,7 @@ export default function CatalogPowerWiseStockPage() {
               <TableRow>
                 <TableHead>SKU / Power</TableHead>
                 <TableHead className="text-right">On hand</TableHead>
+                <TableHead className="text-right">Reserved</TableHead>
                 <TableHead className="text-right">Blocked</TableHead>
                 <TableHead className="text-right">Available</TableHead>
                 <TableHead className="text-right">Incoming</TableHead>
@@ -190,7 +190,7 @@ export default function CatalogPowerWiseStockPage() {
             <TableBody>
               {items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-sm">
+                  <TableCell colSpan={10} className="text-center text-sm">
                     No catalog leaves yet. Set threshold/target on a product
                     matrix, or confirm a receipt.
                   </TableCell>
@@ -209,6 +209,9 @@ export default function CatalogPowerWiseStockPage() {
                         <div className="text-xs text-(--brand-text-muted)">
                           {row.family} · SPH {row.sph.toFixed(2)} / CYL{" "}
                           {row.cyl.toFixed(2)}
+                          {row.axis != null ? ` · AXIS ${row.axis}` : ""}
+                          {row.addition != null ? ` · ADD ${row.addition.toFixed(2)}` : ""}
+                          {row.eye ? ` · ${row.eye}` : ""}
                           {short ? (
                             <Badge className="ml-2" variant="destructive">
                               Short
@@ -218,6 +221,9 @@ export default function CatalogPowerWiseStockPage() {
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {row.onHand}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.reservedQty}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {row.blockedQty}

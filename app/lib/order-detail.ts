@@ -50,6 +50,12 @@ export const orderDetailInclude = {
   oriVisionLens: true,
   magnusLens: true,
   bifocalLens: true,
+  lensProductPower: {
+    select: {
+      id: true, sph: true, cyl: true,
+      lensProductVariant: { select: { skuCode: true, name: true } },
+    },
+  },
   wholesaleLineItems: {
     orderBy: { createdAt: "asc" as const },
   },

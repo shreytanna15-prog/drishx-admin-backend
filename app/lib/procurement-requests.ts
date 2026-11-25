@@ -4,6 +4,7 @@ import {
   ProcurementPriority,
   ProcurementRequestSource,
   ProcurementRequestStatus,
+  type Prisma,
 } from "@prisma/client";
 import { prisma } from "./prisma";
 import {
@@ -49,6 +50,56 @@ export const RESERVING_ORDER_STATUSES: readonly OrderStatus[] = [
   OrderStatus.PARTIALLY_FULFILLED,
   OrderStatus.AWAITING_PROCUREMENT,
 ] as const;
+
+/** Withdraw only unmet order demand that has not become an active supplier commitment. */
+export async function cancelUnallocatedOrderDemand(input: {
+  orderId: string;
+  reason: string;
+  tx: Prisma.TransactionClient;
+  actor: AuditActor;
+  request?: AuditRequestContext | null;
+}) {
+  const { tx } = input;
+  const requests = await tx.procurementRequest.findMany({
+    where: {
+      orderId: input.orderId, source: ProcurementRequestSource.ORDER_SHORTAGE,
+      status: { in: [...OPEN_REQUEST_STATUSES] },
+    },
+    include: {
+      purchaseOrderAllocations: {
+        select: {
+          quantity: true, reversedQuantity: true,
+          purchaseOrder: { select: { status: true } },
+        },
+      },
+    },
+  });
+  for (const request of requests) {
+    const hasSupplierCommitment = request.purchaseOrderAllocations.some((allocation) =>
+      allocation.quantity > allocation.reversedQuantity &&
+      !["CANCELLED", "CLOSED"].includes(allocation.purchaseOrder.status)
+    );
+    if (hasSupplierCommitment) continue;
+    await tx.procurementRequest.update({
+      where: { id: request.id },
+      data: {
+        status: ProcurementRequestStatus.CANCELLED,
+        resolvedAt: new Date(),
+        resolutionReason: `Order cancelled: ${input.reason.slice(0, 400)}`,
+      },
+    });
+    await recordAuditEvent(tx, {
+      action: AuditAction.PROCUREMENT_REQUEST_CANCELLED,
+      module: AuditModule.INVENTORY,
+      entityType: "ProcurementRequest",
+      entityId: request.id,
+      actor: input.actor,
+      request: input.request ?? null,
+      context: { orderId: input.orderId, publicId: request.publicId },
+      activityMessage: `Order cancellation withdrew procurement request ${request.publicId}`,
+    });
+  }
+}
 
 export type StockPosition = {
   onHand: number;
@@ -638,23 +689,14 @@ export async function nextProcurementRequestPublicId(
   const financialYear = `${new Date().getFullYear()}`;
   const seqId = `PR:${financialYear}`;
 
-  const seq = await client.$transaction(async (tx) => {
-    const existing = await tx.invoiceSequence.findUnique({ where: { id: seqId } });
-    if (!existing) {
-      await tx.invoiceSequence.create({
-        data: { id: seqId, financialYear, prefix: "PR", nextValue: 2 },
-      });
-      return 1;
-    }
-    const current = existing.nextValue;
-    await tx.invoiceSequence.update({
-      where: { id: seqId },
-      data: { nextValue: current + 1 },
-    });
-    return current;
+  // Atomic upsert works both in a caller's transaction and outside one.
+  const sequence = await client.invoiceSequence.upsert({
+    where: { id: seqId },
+    create: { id: seqId, financialYear, prefix: "PR", nextValue: 2 },
+    update: { nextValue: { increment: 1 } },
   });
 
-  return `PR-${String(seq).padStart(6, "0")}`;
+  return `PR-${String(sequence.nextValue - 1).padStart(6, "0")}`;
 }
 
 export type { LensDescriptor, ProcurementRequestRecord };

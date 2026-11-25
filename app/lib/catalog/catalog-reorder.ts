@@ -26,6 +26,8 @@ import { PROCUREMENT_REQUEST_STATUSES_OPEN } from "@/app/lib/procurement-rules";
 import { nextProcurementRequestPublicId } from "@/app/lib/procurement-requests";
 import {
   calculateCatalogRequiredQuantity,
+  catalogNewRequestQuantity,
+  catalogUnallocatedRequestQuantity,
   shouldRaiseCatalogReorder,
 } from "@/app/lib/catalog/catalog-stock-position-core";
 import {
@@ -70,13 +72,35 @@ export type CatalogReorderCheckResult =
       reason: string;
     };
 
-export async function runCatalogReorderCheck(input: {
+type CatalogReorderInput = {
   powerId: string;
   actor?: AuditActor;
   request?: AuditRequestContext | null;
   client?: DbClient;
-}): Promise<CatalogReorderCheckResult> {
-  const db = input.client ?? prisma;
+};
+
+export async function runCatalogReorderCheck(
+  input: CatalogReorderInput
+): Promise<CatalogReorderCheckResult> {
+  return input.client && input.client !== prisma
+    ? runCatalogReorderCheckLocked(input, input.client)
+    : prisma.$transaction(
+        (tx) => runCatalogReorderCheckLocked(input, tx),
+        { maxWait: 10_000, timeout: 20_000 }
+      );
+}
+
+async function runCatalogReorderCheckLocked(
+  input: CatalogReorderInput,
+  db: DbClient
+): Promise<CatalogReorderCheckResult> {
+  // Serialize checks for this leaf so simultaneous Run reorder clicks cannot
+  // each see the same uncovered shortage and create duplicate requests.
+  const locked = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "LensProductPower" WHERE "id" = ${input.powerId} FOR UPDATE`;
+  if (!locked.length) {
+    return { outcome: "not_needed", position: null, reason: "Stock leaf not found." };
+  }
   const position = await getCatalogStockPosition(input.powerId, db);
   if (!position) {
     return { outcome: "not_needed", position: null, reason: "Stock leaf not found." };
@@ -128,13 +152,14 @@ export async function runCatalogReorderCheck(input: {
     },
     orderBy: { createdAt: "asc" },
   });
-  const coveredTotal = position.available + position.incoming;
-  if (existing.length > 0 && coveredTotal >= position.targetStock) {
+  const unallocated = catalogUnallocatedRequestQuantity(existing);
+  const toRaise = catalogNewRequestQuantity(required, existing);
+  if (existing.length > 0 && toRaise === 0) {
     return {
       outcome: "suppressed_existing",
       position,
       request: { id: existing[0]!.id, publicId: existing[0]!.publicId },
-      reason: `${existing.length} open request(s) already cover this leaf.`,
+      reason: `${existing.length} open request(s) already cover this leaf (${unallocated} units unallocated).`,
     };
   }
 
@@ -146,21 +171,21 @@ export async function runCatalogReorderCheck(input: {
     "MINIMUM_STOCK_THRESHOLD",
     `Available ${position.available} <= threshold ${position.minStock}`,
     `Target ${position.targetStock}, incoming ${position.incoming}`,
-    `Required ${required}`,
+    `Required ${required}, existing unallocated ${unallocated}, new ${toRaise}`,
     `Leaf ${position.skuCode} ${position.sph.toFixed(2)}/${position.cyl.toFixed(2)}`,
   ].join(" | ");
 
   const created = await db.procurementRequest.create({
     data: {
-      publicId: await nextProcurementRequestPublicId(prisma),
+      publicId: await nextProcurementRequestPublicId(db),
       lensType: (position.legacyLensType as LensType | null) ?? null,
       lensId: position.legacyLensId,
       lensProductPowerId: position.id,
       source: ProcurementRequestSource.MINIMUM_STOCK_THRESHOLD,
       status: ProcurementRequestStatus.OPEN,
       priority,
-      requiredQuantity: required,
-      requestedQuantity: required,
+      requiredQuantity: toRaise,
+      requestedQuantity: toRaise,
       stockAtTrigger: position.onHand,
       availableAtTrigger: position.available,
       incomingAtTrigger: position.incoming,
@@ -187,9 +212,9 @@ export async function runCatalogReorderCheck(input: {
       available: String(position.available),
       minStock: String(position.minStock),
       targetStock: String(position.targetStock),
-      required: String(required),
+      required: String(toRaise),
     },
-    activityMessage: `Catalog reorder ${created.publicId} — ${position.skuCode} (+${required})`,
+    activityMessage: `Catalog reorder ${created.publicId} — ${position.skuCode} (+${toRaise})`,
   });
 
   return {
@@ -252,7 +277,7 @@ export async function runCatalogReorderCheckAll(input?: {
       powerId: leaf.id,
       actor: input?.actor,
       request: input?.request,
-      client: db,
+      client: input?.client,
     });
     const skuCode = leaf.lensProductVariant.skuCode;
     if (outcome.outcome === "created") {

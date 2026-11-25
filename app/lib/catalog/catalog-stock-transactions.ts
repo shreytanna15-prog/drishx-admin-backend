@@ -55,6 +55,7 @@ export type CatalogStockTransactionDto = {
 };
 
 export async function listCatalogStockTransactions(params: {
+  q?: string;
   powerId?: string;
   productId?: string;
   movementType?: string;
@@ -86,6 +87,22 @@ export async function listCatalogStockTransactions(params: {
     };
     delete where.OR;
   }
+  const q = params.q?.trim();
+  if (q) {
+    where.OR = [
+      { lensProductPowerId: { contains: q, mode: "insensitive" } },
+      {
+        lensProductPower: {
+          lensProductVariant: {
+            OR: [
+              { skuCode: { contains: q, mode: "insensitive" } },
+              { name: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        },
+      },
+    ];
+  }
   if (params.movementType) {
     where.movementType = params.movementType as StockMovementType;
   }
@@ -96,8 +113,11 @@ export async function listCatalogStockTransactions(params: {
       if (!Number.isNaN(d.getTime())) where.createdAt.gte = d;
     }
     if (params.to) {
-      const d = new Date(params.to);
-      if (!Number.isNaN(d.getTime())) where.createdAt.lte = d;
+      const d = new Date(`${params.to}T00:00:00Z`);
+      if (!Number.isNaN(d.getTime())) {
+        d.setUTCDate(d.getUTCDate() + 1);
+        where.createdAt.lt = d;
+      }
     }
   }
 

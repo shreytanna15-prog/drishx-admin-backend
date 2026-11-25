@@ -11,9 +11,11 @@ import {
   AuditModule,
   recordAuditEvent,
   singleChange,
+  systemActor,
 } from "@/app/lib/audit";
 import { assertCatalogPowersNotFrozen } from "@/app/lib/catalog/catalog-stock-freeze";
-import { getCatalogStockPosition } from "@/app/lib/catalog/catalog-stock-position";
+import { getCatalogReservedForPowers, getCatalogStockPosition } from "@/app/lib/catalog/catalog-stock-position";
+import type { CatalogStockPositionDto } from "@/app/lib/catalog/catalog-stock-position";
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
@@ -41,7 +43,7 @@ export async function setCatalogPowerBlockedQty(input: {
   client?: DbClient;
   /** Skip freeze guard when verifying a stock check for this session. */
   allowFrozenSessionId?: string | null;
-}) {
+}): Promise<CatalogStockPositionDto | null> {
   if (
     !Number.isInteger(input.blockedQty) ||
     input.blockedQty < 0 ||
@@ -55,6 +57,13 @@ export async function setCatalogPowerBlockedQty(input: {
   }
 
   const db = input.client ?? prisma;
+  if (!input.client) {
+    return prisma.$transaction(
+      (tx) => setCatalogPowerBlockedQty({ ...input, client: tx }),
+      { maxWait: 10_000, timeout: 20_000 }
+    );
+  }
+  await db.$queryRaw`SELECT "id" FROM "LensProductPower" WHERE "id" = ${input.powerId} FOR UPDATE`;
   await assertCatalogPowersNotFrozen([input.powerId], {
     exceptSessionId: input.allowFrozenSessionId,
     client: db,
@@ -68,9 +77,10 @@ export async function setCatalogPowerBlockedQty(input: {
     throw new CatalogStockBlockError("Stock leaf not found.", 404, "POWER_NOT_FOUND");
   }
 
-  if (input.blockedQty > leaf.quantity) {
+  const reserved = (await getCatalogReservedForPowers([leaf.id], db)).get(leaf.id) ?? 0;
+  if (input.blockedQty > leaf.quantity - reserved) {
     throw new CatalogStockBlockError(
-      `Blocked (${input.blockedQty}) cannot exceed on-hand (${leaf.quantity}).`,
+      `Blocked (${input.blockedQty}) cannot exceed unreserved on-hand (${leaf.quantity - reserved}).`,
       409,
       "BLOCKED_EXCEEDS_ON_HAND"
     );
@@ -128,11 +138,19 @@ export async function incrementCatalogBlockedByLegacyLens(input: {
   lensId: string;
   shortQty: number;
   actorUserId?: string | null;
+  actorName?: string | null;
+  request?: AuditRequestContext | null;
   referenceId?: string | null;
   client?: DbClient;
 }): Promise<{ powerId: string; blockedQty: number } | null> {
   if (!Number.isInteger(input.shortQty) || input.shortQty <= 0) return null;
   const db = input.client ?? prisma;
+  if (!input.client) {
+    return prisma.$transaction(
+      (tx) => incrementCatalogBlockedByLegacyLens({ ...input, client: tx }),
+      { maxWait: 10_000, timeout: 20_000 }
+    );
+  }
 
   const leaf = await db.lensProductPower.findFirst({
     where: {
@@ -143,7 +161,12 @@ export async function incrementCatalogBlockedByLegacyLens(input: {
   });
   if (!leaf) return null;
 
-  const next = Math.min(leaf.quantity, leaf.blockedQty + input.shortQty);
+  await db.$queryRaw`SELECT "id" FROM "LensProductPower" WHERE "id" = ${leaf.id} FOR UPDATE`;
+
+  await assertCatalogPowersNotFrozen([leaf.id], { client: db });
+
+  const reserved = (await getCatalogReservedForPowers([leaf.id], db)).get(leaf.id) ?? 0;
+  const next = Math.min(leaf.quantity - reserved, leaf.blockedQty + input.shortQty);
   if (next === leaf.blockedQty) return { powerId: leaf.id, blockedQty: next };
 
   await db.lensProductPower.update({
@@ -166,6 +189,20 @@ export async function incrementCatalogBlockedByLegacyLens(input: {
       reasonCode: "pick_short",
       notes: `blockedQty +${input.shortQty} (${leaf.blockedQty} → ${next})`,
     },
+  });
+
+  await recordAuditEvent(db, {
+    action: AuditAction.STOCK_ADJUSTED,
+    module: AuditModule.INVENTORY,
+    entityType: "LensProductPower",
+    entityId: leaf.id,
+    actor: input.actorUserId
+      ? { actorType: "HUMAN", actorUserId: input.actorUserId, actorName: input.actorName ?? null }
+      : systemActor(),
+    request: input.request ?? null,
+    changes: singleChange("blockedQty", leaf.blockedQty, next),
+    context: { lensProductPowerId: leaf.id, orderId: input.referenceId ?? null },
+    activityMessage: `Pick discrepancy blocked qty ${leaf.blockedQty} → ${next}`,
   });
 
   return { powerId: leaf.id, blockedQty: next };

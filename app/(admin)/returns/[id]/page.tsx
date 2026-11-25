@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminSelect } from "@/components/admin-select";
 import { EntityTimeline } from "@/components/audit/entity-timeline";
+import { ReturnStockCorrection } from "./return-stock-correction";
 
 function ReturnOrderContextBlock({
   order,
@@ -121,6 +122,7 @@ const DECIDABLE_STATUSES = new Set([
   "SUBMITTED",
   "MORE_INFO_REQUIRED",
   "ESCALATED_TO_ADMIN",
+  "REJECTED",
 ]);
 
 type EmployeeOption = {
@@ -449,6 +451,14 @@ export default function ReturnDetailPage() {
               ))}
             </div>
           </section>
+
+          {["APPROVED_CREDIT", "APPROVED_REPLACEMENT", "CLOSED"].includes(request.status) ? (
+            <ReturnStockCorrection
+              key={request.items.map((item) => `${item.id}:${item.saleableRestockedQuantity ?? 0}`).join("|")}
+              request={request}
+              onSaved={async () => setRequest(await getAdminReturn(request.id))}
+            />
+          ) : null}
 
           {request.images.length > 0 ? (
             <section className="rounded-2xl border border-(--brand-card-border) bg-(--brand-card) p-5">
