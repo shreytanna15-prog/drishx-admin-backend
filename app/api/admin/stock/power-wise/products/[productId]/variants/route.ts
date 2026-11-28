@@ -25,16 +25,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const { productId } = await ctx.params;
     const sp = req.nextUrl.searchParams;
     const axisRaw = sp.get("axis");
-    const additionRaw = sp.get("addition");
     const data = await listPowerWiseVariants(productId, {
       q: sp.get("q") ?? undefined,
       includeInactive: sp.get("includeInactive") === "true",
       axis: axisRaw != null && axisRaw !== "" ? Number(axisRaw) : undefined,
-      eye: sp.get("eye") ?? undefined,
-      addition:
-        additionRaw != null && additionRaw !== ""
-          ? Number(additionRaw)
-          : undefined,
     });
     return NextResponse.json(data);
   } catch (error) {

@@ -28,10 +28,15 @@ import {
   buildPowerWiseProductName,
   fillMissingPowerWiseCells,
   filterPowerWiseVariants,
+  groupPowerWiseVariantsByMatrixSheet,
   isPowerWiseShortage,
+  powerWiseMatrixGroupKey,
   powerWiseProductMatchesQuery,
+  powerWiseSheetAxis,
   zeroPowerWiseCell,
   type PowerWiseMatrixCell,
+  type PowerWiseMatrixGroupRow,
+  type PowerWiseUngroupedVariant,
 } from "@/app/lib/catalog/power-wise-stock-core";
 import { exportSheetsToXlsxBuffer } from "@/app/lib/reports/export-workbook";
 import {
@@ -76,34 +81,21 @@ export type PowerWiseProductCard = {
   activeShortagesCount: number;
 };
 
-export type PowerWiseVariantRow = {
-  id: string;
-  skuCode: string;
-  name: string;
-  isActive: boolean;
-  sphMin: number;
-  sphMax: number;
-  cylMin: number;
-  cylMax: number;
-  axis: number | null;
-  eye: string | null;
-  addition: number | null;
-  rangeLabel: string;
-  totalOnHand: number;
-  totalReserved: number;
-  totalAvailable: number;
-  totalBlocked: number;
-};
+/** Level 2 row — one catalog matrix sheet (range + axis), not one ADD/eye SKU. */
+export type PowerWiseVariantRow = PowerWiseMatrixGroupRow;
 
 export type PowerWiseVariantMatrix = {
   productId: string;
+  /** URL seed variant; matrix includes all siblings in the same range+axis sheet. */
   variantId: string;
+  groupKey: string;
   skuCode: string;
   name: string;
   rangeLabel: string;
   axis: number | null;
-  eye: string | null;
-  addition: number | null;
+  additions: number[];
+  eyes: string[];
+  variantCount: number;
   family: CatalogMatrixFamilyCaps & { code: string; name: string };
   variants: Array<{
     id: string;
@@ -138,8 +130,6 @@ export type PowerWiseVariantFilters = {
   q?: string;
   includeInactive?: boolean;
   axis?: number;
-  eye?: string;
-  addition?: number;
 };
 
 function num(value: Prisma.Decimal | number | null | undefined): number | null {
@@ -390,7 +380,7 @@ export async function listPowerWiseVariants(
     bucket.totalBlocked += leaf.blocked;
   }
 
-  const mapped: PowerWiseVariantRow[] = variants.map((v) => {
+  const mapped: PowerWiseUngroupedVariant[] = variants.map((v) => {
     const sphMin = Number(v.sphMin);
     const sphMax = Number(v.sphMax);
     const cylMin = Number(v.cylMin);
@@ -413,11 +403,10 @@ export async function listPowerWiseVariants(
     };
   });
 
-  const rows = filterPowerWiseVariants(mapped, {
+  const grouped = groupPowerWiseVariantsByMatrixSheet(mapped);
+  const rows = filterPowerWiseVariants(grouped, {
     q: filters.q,
     axis: filters.axis,
-    eye: filters.eye,
-    addition: filters.addition,
   });
 
   return {
@@ -455,8 +444,8 @@ export async function getPowerWiseVariantMatrix(
     throw err;
   }
 
-  const variant = product.variants.find((v) => v.id === variantId);
-  if (!variant) {
+  const seed = product.variants.find((v) => v.id === variantId);
+  if (!seed) {
     throw new PowerWiseStockError(
       "Variant not found on this product.",
       404,
@@ -464,8 +453,17 @@ export async function getPowerWiseVariantMatrix(
     );
   }
 
+  const groupKey = powerWiseMatrixGroupKey(seed);
+  const sheetAxis = powerWiseSheetAxis(seed);
+
+  // Same sheet as catalog matrix: all ADD/eye siblings for this range+axis.
+  const sheetVariants = product.variants.filter(
+    (v) => powerWiseMatrixGroupKey(v) === groupKey
+  );
+
+  const sheetVariantIds = sheetVariants.map((v) => v.id);
   const powerRows = await client.lensProductPower.findMany({
-    where: { lensProductVariantId: variantId },
+    where: { lensProductVariantId: { in: sheetVariantIds } },
   });
   const reservedMap = await getCatalogReservedForPowers(
     powerRows.map((r) => r.id),
@@ -477,11 +475,12 @@ export async function getPowerWiseVariantMatrix(
     const sph = Number(row.sph);
     const cyl = Number(row.cyl);
     const reservedQty = reservedMap.get(row.id) ?? 0;
-    leaves[encodeStockLeafKey(variantId, sph, cyl)] = buildPowerWiseLeafCell({
-      onHand: row.quantity,
-      blockedQty: row.blockedQty,
-      reservedQty,
-    });
+    leaves[encodeStockLeafKey(row.lensProductVariantId, sph, cyl)] =
+      buildPowerWiseLeafCell({
+        onHand: row.quantity,
+        blockedQty: row.blockedQty,
+        reservedQty,
+      });
   }
 
   const family: CatalogMatrixFamilyCaps & { code: string; name: string } = {
@@ -492,37 +491,68 @@ export async function getPowerWiseVariantMatrix(
     supportsEye: product.family.supportsEye,
   };
 
-  const variantInput = {
-    id: variant.id,
-    sphMin: variant.sphMin,
-    sphMax: variant.sphMax,
-    cylMin: variant.cylMin,
-    cylMax: variant.cylMax,
-    axis: variant.axis,
-    eye: variant.eye,
-    addition: variant.addition,
-    addMin: variant.addMin,
-  };
+  const variantInputs = sheetVariants.map((v) => ({
+    id: v.id,
+    sphMin: v.sphMin,
+    sphMax: v.sphMax,
+    cylMin: v.cylMin,
+    cylMax: v.cylMax,
+    axis: v.axis,
+    eye: v.eye,
+    addition: v.addition,
+    addMin: v.addMin,
+  }));
 
   const matrix = buildCatalogMatrix(
-    toCatalogMatrixVariants([variantInput]),
+    toCatalogMatrixVariants(variantInputs),
     family,
     { familyLabel: product.family.name }
   );
 
   fillMissingPowerWiseCells(matrix.sheets, leaves);
 
+  const additions = [
+    ...new Set(
+      sheetVariants
+        .map((v) =>
+          v.addition?.value != null ? Number(v.addition.value) : null
+        )
+        .filter((v): v is number => v != null && Number.isFinite(v))
+    ),
+  ].toSorted((a, b) => a - b);
+
+  const eyes = [
+    ...new Set(
+      sheetVariants
+        .map((v) => {
+          if (!v.eye) return null;
+          const upper = v.eye.trim().toUpperCase();
+          if (upper === "RIGHT" || upper === "RE") return "RE";
+          if (upper === "LEFT" || upper === "LE") return "LE";
+          return upper;
+        })
+        .filter((v): v is string => Boolean(v))
+    ),
+  ].toSorted((a, b) => a.localeCompare(b));
+
+  const titleParts = [
+    seed.rangeLabel,
+    sheetAxis != null ? `Axis ${sheetAxis}` : null,
+  ].filter(Boolean);
+
   return {
     productId: product.id,
-    variantId: variant.id,
-    skuCode: variant.skuCode,
-    name: variant.name,
-    rangeLabel: variant.rangeLabel,
-    axis: variant.axis,
-    eye: variant.eye,
-    addition: variant.addition?.value ?? null,
+    variantId: seed.id,
+    groupKey,
+    skuCode: seed.skuCode,
+    name: titleParts.join(" · ") || seed.name,
+    rangeLabel: seed.rangeLabel,
+    axis: sheetAxis,
+    additions,
+    eyes,
+    variantCount: sheetVariants.length,
     family,
-    variants: [variantInput],
+    variants: variantInputs,
     leaves,
     matrix,
   };
@@ -588,9 +618,9 @@ export async function exportPowerWiseVariantMatrix(
           "Axis",
           data.axis != null ? String(data.axis) : "",
           "Eye",
-          data.eye ?? "",
+          data.eyes.join(", "),
           "ADD",
-          data.addition != null ? String(data.addition) : "",
+          data.additions.map((n) => n.toFixed(2)).join(", "),
         ],
         rows: [
           ["On-hand / Reserved / Available / Blocked per cell"],
@@ -628,8 +658,12 @@ export async function exportPowerWiseVariantMatrix(
   writeLine(`${data.skuCode} · ${data.name}`);
   writeLine(
     `Range ${data.rangeLabel}${data.axis != null ? ` · Axis ${data.axis}` : ""}${
-      data.eye ? ` · Eye ${data.eye}` : ""
-    }${data.addition != null ? ` · ADD ${data.addition}` : ""}`
+      data.eyes.length > 0 ? ` · Eye ${data.eyes.join(", ")}` : ""
+    }${
+      data.additions.length > 0
+        ? ` · ADD ${data.additions.map((n) => n.toFixed(2)).join(", ")}`
+        : ""
+    }`
   );
   writeLine("Cells: On-hand / Reserved / Available / Blocked");
   y += 6;

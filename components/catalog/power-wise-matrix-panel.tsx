@@ -189,7 +189,7 @@ function PowerWiseCell({
   if (!cell || !cell.allowed) {
     return (
       <div
-        className="flex h-12 items-center justify-center rounded-md bg-(--brand-input-bg)/50 text-(--brand-text-muted)/40"
+        className="flex h-10 items-center justify-center rounded-md bg-(--brand-input-bg)/50 text-(--brand-text-muted)/40"
         title={
           sheetKind === "cross" || sheetKind === "sph-cyl"
             ? "Cross gap rule — not a stocked power"
@@ -207,7 +207,7 @@ function PowerWiseCell({
   if (!cell.present || !cell.variantId) {
     return (
       <div
-        className="h-12 rounded-md"
+        className="h-10 rounded-md"
         aria-label="No variant covers this power"
       />
     );
@@ -235,27 +235,25 @@ function PowerWiseCell({
 
   return (
     <div
-      className="flex h-12 flex-col items-center justify-center gap-0.5 rounded-md border border-(--brand-card-border) bg-(--brand-bg)/40 px-1 py-0.5"
+      className="flex h-10 items-center justify-center whitespace-nowrap rounded-md border border-(--brand-card-border) bg-(--brand-bg)/40 px-1.5 tabular-nums"
       title={powerHint}
+      aria-label={powerHint}
     >
-      <div className="flex items-center gap-1 tabular-nums">
-        <span className="text-[11px] font-bold text-(--brand-text)">
-          {leaf.onHand}
-        </span>
-        <span className="text-(--brand-text-muted)/40">/</span>
-        <span className="text-[11px] font-semibold text-(--brand-text-muted)">
-          {leaf.reserved}
-        </span>
-      </div>
-      <div className="flex items-center gap-1 tabular-nums">
-        <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
-          {leaf.available}
-        </span>
-        <span className="text-(--brand-text-muted)/40">/</span>
-        <span className="text-[11px] font-semibold text-rose-700/80 dark:text-rose-400/80">
-          {leaf.blocked}
-        </span>
-      </div>
+      <span className="text-[11px] font-bold text-(--brand-text)">
+        {leaf.onHand}
+      </span>
+      <span className="px-0.5 text-(--brand-text-muted)/40">/</span>
+      <span className="text-[11px] font-semibold text-(--brand-text-muted)">
+        {leaf.reserved}
+      </span>
+      <span className="px-0.5 text-(--brand-text-muted)/40">/</span>
+      <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+        {leaf.available}
+      </span>
+      <span className="px-0.5 text-(--brand-text-muted)/40">/</span>
+      <span className="text-[11px] font-semibold text-rose-700/80 dark:text-rose-400/80">
+        {leaf.blocked}
+      </span>
     </div>
   );
 }

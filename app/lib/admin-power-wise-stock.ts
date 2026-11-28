@@ -38,8 +38,10 @@ export type PowerWiseProductCard = {
   activeShortagesCount: number;
 };
 
+/** Level 2 — one catalog matrix sheet (power range + axis). */
 export type PowerWiseVariantRow = {
   id: string;
+  groupKey: string;
   skuCode: string;
   name: string;
   isActive: boolean;
@@ -48,9 +50,11 @@ export type PowerWiseVariantRow = {
   cylMin: number;
   cylMax: number;
   axis: number | null;
-  eye: string | null;
-  addition: number | null;
   rangeLabel: string;
+  additions: number[];
+  eyes: string[];
+  variantCount: number;
+  variantIds: string[];
   totalOnHand: number;
   totalReserved: number;
   totalAvailable: number;
@@ -67,12 +71,14 @@ export type PowerWiseMatrixCell = {
 export type PowerWiseVariantMatrix = {
   productId: string;
   variantId: string;
+  groupKey: string;
   skuCode: string;
   name: string;
   rangeLabel: string;
   axis: number | null;
-  eye: string | null;
-  addition: number | null;
+  additions: number[];
+  eyes: string[];
+  variantCount: number;
   family: CatalogMatrixFamilyCaps & { code: string; name: string };
   variants: Array<{
     id: string;
@@ -128,16 +134,12 @@ export function fetchPowerWiseVariants(
     q?: string;
     includeInactive?: boolean;
     axis?: number;
-    eye?: string;
-    addition?: number;
   }
 ) {
   const sp = new URLSearchParams();
   if (params?.q) sp.set("q", params.q);
   if (params?.includeInactive) sp.set("includeInactive", "true");
   if (params?.axis != null) sp.set("axis", String(params.axis));
-  if (params?.eye) sp.set("eye", params.eye);
-  if (params?.addition != null) sp.set("addition", String(params.addition));
   const qs = sp.toString();
   return adminFetch<{
     product: {

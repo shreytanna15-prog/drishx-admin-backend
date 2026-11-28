@@ -79,8 +79,11 @@ export default function PowerWiseMatrixPage() {
     ? [
         data.rangeLabel,
         data.axis != null ? `Axis ${data.axis}` : null,
-        data.eye ? `Eye ${data.eye}` : null,
-        data.addition != null ? `ADD ${data.addition.toFixed(2)}` : null,
+        data.additions.length > 0
+          ? `ADD ${data.additions.map((n) => n.toFixed(2)).join(", ")}`
+          : null,
+        data.eyes.length > 0 ? `Eye ${data.eyes.join(", ")}` : null,
+        `${data.variantCount} variant${data.variantCount === 1 ? "" : "s"}`,
       ]
         .filter(Boolean)
         .join(" · ")
@@ -88,14 +91,14 @@ export default function PowerWiseMatrixPage() {
 
   return (
     <AdminPage
-      title={data?.skuCode || "Power matrix"}
-      subtitle="Read-only On-hand / Reserved / Available / Blocked for this variant."
+      title={data?.name || "Power matrix"}
+      subtitle="Read-only On-hand / Reserved / Available / Blocked — same SPH×CYL sheets and ADD columns as Products / Stock by Product."
     >
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button asChild variant="outline" size="sm" className="h-9">
           <Link href={`/inventory/power-wise-stock/${productId}`}>
             <ArrowLeft className="size-4" />
-            Variants
+            Sheets
           </Link>
         </Button>
         {data ? (
@@ -161,7 +164,9 @@ export default function PowerWiseMatrixPage() {
               {data.name}
             </p>
             <p className="text-xs text-(--brand-text-muted)">
-              Cells: On-hand / Reserved · Available / Blocked
+              Catalog matrix sheets for this range
+              {data.axis != null ? ` + axis ${data.axis}` : ""}. Cells: On-hand /
+              Reserved · Available / Blocked.
             </p>
           </div>
           <PowerWiseMatrixPanel

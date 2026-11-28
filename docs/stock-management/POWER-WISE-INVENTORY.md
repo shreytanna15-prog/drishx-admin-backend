@@ -32,7 +32,7 @@ Client (Naman) clarified Power-wise vs Products & catalog / Stock by Product:
 |--------|---------|
 | **Products & catalog** | Create/edit parents + variants; setup matrix |
 | **Stock by Product** | Ops matrix with **Current / Threshold / Target** (editable rules) |
-| **Power-wise Inventory** | Walk-in / phone: “Do we have this stock?” — **read-only** On-hand · Reserved · Available · Blocked on **one variant matrix**, with Excel/PDF download |
+| **Power-wise Inventory** | Walk-in / phone: “Do we have this stock?” — **read-only** On-hand · Reserved · Available · Blocked on **one range+axis matrix** (same sheets as Products / Stock by Product), with Excel/PDF download |
 
 Today’s `/inventory/power-wise-stock` is a **flat leaf table** with editable min/target + **Run reorder**. That UX is **replaced entirely** by the 3-level flow below. Run reorder moves to **Stock Dashboard** in a later slice — for this slice: **remove Run reorder from Power-wise** only (do not build dashboard move here unless already trivial).
 
@@ -42,15 +42,15 @@ Today’s `/inventory/power-wise-stock` is a **flat leaf table** with editable m
 
 | # | Decision |
 |---|----------|
-| 1 | **3 levels:** Parent stock cards → Variants list → Read-only matrix |
+| 1 | **3 levels:** Parent stock cards → Range+axis sheet list → Read-only catalog matrix |
 | 2 | Level 1 = **one grid of all parent stock cards** + attribute filters (including Family). Not Storefront cards; not a clone of Products & catalog cards — **stock-flavoured**. |
-| 3 | Level 2 = **variants** of that parent (`LensProductVariant`), with filters suited to range / axis / ADD / eye / search |
+| 3 | Level 2 = **matrix sheets** of that parent — one row per **power range + axis** (ADD/eye are columns, not rows); search / axis filter |
 | 4 | Level 3 = same family-aware **2D matrix shell** as Stock by Product `[id]`, but cells show **four read-only** values only |
-| 5 | Cell values: **On-hand · Reserved · Available · Blocked** — same formulas as Stock Dashboard / `catalogAvailable` |
+| 5 | Cell values: **On-hand / Reserved / Available / Blocked** — **one line** per cell as `x / x / x / x` (same formulas as Stock Dashboard / `catalogAvailable`) |
 | 6 | No **Incoming** / open PO on this matrix in v1 |
 | 7 | Valid matrix cells with no DB leaf yet → show **all four as 0** |
 | 8 | Cross / `allowed: false` cells stay disabled × (no stock values) — same as catalog matrix |
-| 9 | Download **Excel + PDF** for **that variant’s matrix only** (not whole parent, not all products) |
+| 9 | Download **Excel + PDF** for **that range+axis sheet only** (not whole parent, not all products) |
 | 10 | **Remove Run reorder** (and min/target editing) from Power-wise |
 | 11 | **Do not delete** Stock by Product / threshold-target / bulk-select code — leave for later; just don’t surface edit/reorder on Power-wise |
 | 12 | **Replace** today’s flat Power-wise page entirely (same base route `/inventory/power-wise-stock`) |
@@ -84,7 +84,7 @@ reserved  = derived open-order reserved (existing getCatalogReservedForPowers / 
 available = onHand − reserved − blocked   // computeAvailableQty / catalogAvailable
 ```
 
-Dashboard already aggregates these four (`onHandSum`, `reservedSum`, `availableSum`, `blockedSum`). Power-wise shows them **per SPH×CYL cell** under one variant.
+Dashboard already aggregates these four (`onHandSum`, `reservedSum`, `availableSum`, `blockedSum`). Power-wise shows them **per SPH×CYL cell** on the same catalog matrix sheets (ADD as columns).
 
 ---
 
@@ -127,51 +127,57 @@ Patterns: `AdminPage`, brand tokens, `AdminSelect`, skeletons, lucide. Matrix: r
 Filters: parent attributes (Family, Base, Material, Index, Coating, Color, Diameter, Progressive type) + text search.  
 Click card → Level 2.
 
-### 4.2 Level 2 — Variants list
+### 4.2 Level 2 — Matrix sheets (range + axis)
 
 **Route:** `/inventory/power-wise-stock/[productId]`
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  ← Parents    {attr summary}                                │
-│  Search…  Range / Axis / ADD / Eye filters as suitable      │
+│  Search…  Axis filter                                       │
 ├─────────────────────────────────────────────────────────────┤
-│  SKU · Name · Power range · Axis · ADD · Eye · …            │
-│  (optional: rolled-up available / on-hand for that variant) │
+│  Power range · Axis · ADD columns · Eye · Variants · …      │
+│  (rolled-up on-hand / available for the sheet)              │
 │  → Open matrix                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-- One row per **active** `LensProductVariant` (include inactive behind a toggle if useful; default active).  
-- Click row → Level 3 for **that variant only** (never dump all matrices).
+- One row per **catalog matrix sheet** = **power range + axis** (same grouping as `buildCatalogMatrix` / Products / Stock by Product).  
+- **Do not** list one row per ADD or eye SKU — those are **columns inside** the matrix.  
+- Include inactive behind a toggle if useful; default active.  
+- Click row → Level 3 for that sheet (URL may use a representative `variantId`; API expands all ADD/eye siblings).
 
 ### 4.3 Level 3 — Read-only stock matrix
 
-**Route:** `/inventory/power-wise-stock/[productId]/[variantId]`
+**Route:** `/inventory/power-wise-stock/[productId]/[variantId]`  
+(`variantId` is a seed in the sheet; response includes all siblings for the same range+axis.)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  ← Variants    {SKU} · {range} · axis/ADD/eye               │
+│  ← Sheets    {range} · Axis · ADD columns summary           │
 │  [ Download Excel ]  [ Download PDF ]                       │
 │  Cells: On-hand / Reserved / Available / Blocked (read-only)│
+│  Display: one line →  12 / 2 / 10 / 0                      │
 ├─────────────────────────────────────────────────────────────┤
-│  Family sheets (SV / KT / V2) — coverage for THIS variant   │
-│  only (not sibling variants). Cross gap cells = ×           │
+│  Same family sheets as Products / Stock by Product          │
+│  (SPH×CYL stubs; ADD / eye as data columns; colours)        │
+│  Cross gap cells = ×                                        │
 │                                                             │
-│  ┌─────┬──────┬──────┐                                      │
-│  │     │ CYL… │      │                                      │
-│  ├─────┼──────┼──────┤                                      │
-│  │ SPH │ OH R │ …    │   each cell: four numbers            │
-│  │     │ Av Bl│      │   missing leaf → 0 0 0 0             │
-│  └─────┴──────┴──────┘                                      │
+│  ┌─────┬──────────────────┬──────────────────┐              │
+│  │     │ ADD 1.00         │ ADD 1.50         │              │
+│  ├─────┼──────────────────┼──────────────────┤              │
+│  │ SPH │ 12 / 2 / 10 / 0  │ 0 / 0 / 0 / 0    │              │
+│  │ CYL │                  │                  │              │
+│  └─────┴──────────────────┴──────────────────┘              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 | Behaviour | Detail |
 |-----------|--------|
 | Read-only | No Threshold/Target inputs; no Add to Cart; no Run reorder |
-| Coverage | Build sheet for **selected variant’s** power range (and family sheet rules). If product-level matrix UI today stacks all variants, Level 3 must scope to **one variant** |
-| Download | Excel + PDF of **this** matrix with the four columns / labels clear |
+| Coverage | Same `buildCatalogMatrix` rules as catalog — **all ADD/eye variants** that share this power range + axis |
+| Cell UI | **Single line** `onHand / reserved / available / blocked` (never wrap to two lines). Missing leaf → `0 / 0 / 0 / 0` |
+| Download | Excel + PDF of **this** matrix; export text matches the same four values |
 | Navigation | Link optional: “Edit thresholds on Stock by Product” → `/inventory/stock-overview/[productId]` (nice-to-have) |
 
 ---
@@ -183,8 +189,8 @@ Reuse position helpers in `app/lib/catalog/catalog-stock-position*.ts`, `admin-s
 | Method | Path (proposed) | Purpose |
 |--------|-----------------|---------|
 | GET | `/api/admin/stock/power-wise/products` | Parent cards: filters + aggregates (onHand, available, reserved, shortageCount, variantCount) |
-| GET | `/api/admin/stock/power-wise/products/:productId/variants` | Variant list + optional rollups + filter query params |
-| GET | `/api/admin/stock/power-wise/products/:productId/variants/:variantId/matrix` | Sheet cells with `{ onHand, reserved, available, blocked }` (0 if no leaf) |
+| GET | `/api/admin/stock/power-wise/products/:productId/variants` | Matrix sheet list (grouped by range+axis) + rollups + `q` / `axis` filters |
+| GET | `/api/admin/stock/power-wise/products/:productId/variants/:variantId/matrix` | Catalog matrix for that range+axis sheet (all ADD/eye siblings); cells `{ onHand, reserved, available, blocked }` (0 if no leaf) |
 | GET | `/api/admin/stock/power-wise/products/:productId/variants/:variantId/export?format=xlsx\|pdf` | Download that matrix |
 
 Auth: admin (same as other `/api/admin/stock/*`).
@@ -213,7 +219,7 @@ Do **not** leave the old flat table as a hidden default. Replace entirely.
 |-------|-------------|-----------|
 | **P0** | Confirm nav label under Stocks; remove Run reorder + edit UI from current page **or** replace page shell | Power-wise no longer edits rules / reorder |
 | **P1** | Parent cards API + Level 1 UI + attribute filters | Can open a parent |
-| **P2** | Variants list API + Level 2 UI | Can open one variant |
+| **P2** | Range+axis sheet list API + Level 2 UI | Can open one matrix sheet |
 | **P3** | Matrix API + read-only matrix UI (four states, zeros, cross ×) | Walk-in view works |
 | **P4** | Excel + PDF export for that matrix | Downloads match on-screen cells |
 | **P5** | Polish: empty states, loading skeletons, optional link to Stock by Product | Slice complete |
@@ -241,8 +247,9 @@ Skills: `drishx-repo`, `drishx-nextjs`, `drishx-prisma`, `drishx-api-auth-audit`
 
 - [ ] Level 1: parent stock cards with On-hand · Available · Reserved · Active shortages + variant count  
 - [ ] Attribute filters (incl. family) + search on Level 1  
-- [ ] Level 2: variants of one parent; filters for range/axis/ADD/eye as suitable  
-- [ ] Level 3: one variant matrix only; four read-only states per valid cell  
+- [ ] Level 2: one row per **power range + axis** sheet (ADD/eye summarized, not separate rows)  
+- [ ] Level 3: same catalog matrix as Products / Stock by Product (ADD columns); four read-only states per valid cell  
+- [ ] Each cell shows **one line** `onHand / reserved / available / blocked` (not two stacked pairs)  
 - [ ] Missing leaf → `0 / 0 / 0 / 0`  
 - [ ] Disabled cross cells remain non-stock  
 - [ ] `available = onHand − reserved − blocked` (shared helper)  
@@ -276,4 +283,4 @@ Skills: `drishx-repo`, `drishx-nextjs`, `drishx-prisma`, `drishx-api-auth-audit`
 
 ## 11. One-line brief
 
-> Replace flat Power-wise with parent stock cards → variant list → read-only On-hand/Reserved/Available/Blocked matrix (zeros for empty cells), Excel+PDF for that matrix only; remove Run reorder and rule editing from this module; leave Stock by Product triad editing code intact; admin only. Implement from **this** file — do not rewrite CLIENT-PLAN / DEVELOPER-GUIDE.
+> Replace flat Power-wise with parent stock cards → range+axis sheet list → read-only matrix using the **same** `buildCatalogMatrix` sheets as Products / Stock by Product (ADD as columns); each cell one line `OH / R / Av / Bl` (zeros for empty cells); Excel+PDF for that matrix only; remove Run reorder and rule editing from this module; leave Stock by Product triad editing code intact; admin only. Implement from **this** file — do not rewrite CLIENT-PLAN / DEVELOPER-GUIDE.

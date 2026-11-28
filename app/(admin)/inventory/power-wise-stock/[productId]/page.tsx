@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, RefreshCw, Search } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
-import { AdminSelect } from "@/components/admin-select";
 import { TableSkeleton } from "@/components/admin-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +23,16 @@ import {
   type PowerWiseVariantRow,
 } from "@/app/lib/admin-power-wise-stock";
 
+function formatAdditions(adds: number[]) {
+  if (adds.length === 0) return "—";
+  return adds.map((n) => n.toFixed(2)).join(", ");
+}
+
+function formatEyes(eyes: string[]) {
+  if (eyes.length === 0) return "—";
+  return eyes.join(", ");
+}
+
 export default function PowerWiseVariantsPage() {
   const params = useParams();
   const productId =
@@ -36,9 +45,7 @@ export default function PowerWiseVariantsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [q, setQ] = useState("");
-  const [eye, setEye] = useState("");
   const [axisFilter, setAxisFilter] = useState("");
-  const [additionFilter, setAdditionFilter] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
 
   const load = useCallback(async () => {
@@ -48,17 +55,10 @@ export default function PowerWiseVariantsPage() {
     try {
       const axis =
         axisFilter.trim() === "" ? undefined : Number(axisFilter.trim());
-      const addition =
-        additionFilter.trim() === ""
-          ? undefined
-          : Number(additionFilter.trim());
       const res = await fetchPowerWiseVariants(productId, {
         q: q.trim() || undefined,
         includeInactive,
-        eye: eye || undefined,
         axis: axis != null && Number.isFinite(axis) ? axis : undefined,
-        addition:
-          addition != null && Number.isFinite(addition) ? addition : undefined,
       });
       setProductName(res.product.name);
       setFamilyCode(res.product.familyCode);
@@ -67,13 +67,13 @@ export default function PowerWiseVariantsPage() {
       setError(
         err instanceof AdminApiError
           ? err.message
-          : "Failed to load variants."
+          : "Failed to load matrix sheets."
       );
       setVariants([]);
     } finally {
       setLoading(false);
     }
-  }, [productId, q, eye, axisFilter, additionFilter, includeInactive]);
+  }, [productId, q, axisFilter, includeInactive]);
 
   useEffect(() => {
     void load();
@@ -81,8 +81,8 @@ export default function PowerWiseVariantsPage() {
 
   return (
     <AdminPage
-      title={productName || "Variants"}
-      subtitle="Pick one variant to open its read-only power matrix."
+      title={productName || "Power matrices"}
+      subtitle="One row per power range + axis — same sheets as Products / Stock by Product. ADD and eye are columns inside the matrix."
     >
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button asChild variant="outline" size="sm" className="h-9">
@@ -96,36 +96,20 @@ export default function PowerWiseVariantsPage() {
             {familyCode}
           </Badge>
         ) : null}
-        <div className="relative min-w-[200px] flex-1">
+        <div className="relative min-w-50 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-(--brand-text-muted)" />
           <Input
             className="h-9 pl-8"
-            placeholder="Search SKU, name, range…"
+            placeholder="Search range, axis, ADD…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
-        <AdminSelect
-          value={eye}
-          onValueChange={setEye}
-          options={[
-            { value: "", label: "All eyes" },
-            { value: "RE", label: "RE" },
-            { value: "LE", label: "LE" },
-          ]}
-          triggerClassName="h-9 min-w-28"
-        />
         <Input
           className="h-9 w-24"
           placeholder="Axis"
           value={axisFilter}
           onChange={(e) => setAxisFilter(e.target.value)}
-        />
-        <Input
-          className="h-9 w-24"
-          placeholder="ADD"
-          value={additionFilter}
-          onChange={(e) => setAdditionFilter(e.target.value)}
         />
         <label className="flex h-9 items-center gap-2 rounded-md border border-(--brand-card-border) bg-(--brand-card) px-3 text-xs font-medium text-(--brand-text)">
           <input
@@ -148,7 +132,7 @@ export default function PowerWiseVariantsPage() {
       ) : variants.length === 0 ? (
         <div className="rounded-xl border border-(--brand-card-border) bg-(--brand-card) px-6 py-12 text-center">
           <p className="text-sm text-(--brand-text-muted)">
-            No variants match the current filters.
+            No power-range sheets match the current filters.
           </p>
         </div>
       ) : (
@@ -156,12 +140,11 @@ export default function PowerWiseVariantsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Name</TableHead>
                 <TableHead>Power range</TableHead>
                 <TableHead>Axis</TableHead>
-                <TableHead>ADD</TableHead>
+                <TableHead>ADD columns</TableHead>
                 <TableHead>Eye</TableHead>
+                <TableHead>Variants</TableHead>
                 <TableHead className="text-right">On-hand</TableHead>
                 <TableHead className="text-right">Available</TableHead>
                 <TableHead />
@@ -169,10 +152,10 @@ export default function PowerWiseVariantsPage() {
             </TableHeader>
             <TableBody>
               {variants.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow key={row.groupKey}>
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
-                      {row.skuCode}
+                      {row.rangeLabel}
                       {!row.isActive ? (
                         <Badge variant="outline" className="text-[10px]">
                           Inactive
@@ -180,15 +163,14 @@ export default function PowerWiseVariantsPage() {
                       ) : null}
                     </div>
                   </TableCell>
-                  <TableCell>{row.name}</TableCell>
-                  <TableCell className="text-(--brand-text-muted)">
-                    {row.rangeLabel}
-                  </TableCell>
                   <TableCell>{row.axis ?? "—"}</TableCell>
-                  <TableCell>
-                    {row.addition != null ? row.addition.toFixed(2) : "—"}
+                  <TableCell className="text-(--brand-text-muted)">
+                    {formatAdditions(row.additions)}
                   </TableCell>
-                  <TableCell>{row.eye ?? "—"}</TableCell>
+                  <TableCell className="text-(--brand-text-muted)">
+                    {formatEyes(row.eyes)}
+                  </TableCell>
+                  <TableCell>{row.variantCount}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {row.totalOnHand}
                   </TableCell>
