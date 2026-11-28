@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-shell";
+import { DetailSkeleton } from "@/components/admin-skeletons";
 import {
   AdditionMultiSelect,
   AxisMultiSelect,
@@ -68,8 +69,11 @@ function attrNumericOptions(items: LensAttribute[]) {
     }));
 }
 
-export default function NewLensProductPage() {
+function NewLensProductPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const familyCodeFromQuery =
+    searchParams.get("family")?.trim().toUpperCase() || "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [families, setFamilies] = useState<LensAttribute[]>([]);
@@ -88,9 +92,9 @@ export default function NewLensProductPage() {
     new Set()
   );
   const [attrsLoading, setAttrsLoading] = useState(true);
+  const [familyPrefillDone, setFamilyPrefillDone] = useState(false);
 
-  const [familyId, setFamilyId] = useState("");
-  const [baseId, setBaseId] = useState("");
+  const [familyId, setFamilyId] = useState("");  const [baseId, setBaseId] = useState("");
   const [materialId, setMaterialId] = useState("");
   const [indexId, setIndexId] = useState("");
   const [coatingId, setCoatingId] = useState("");
@@ -152,6 +156,17 @@ export default function NewLensProductPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (familyPrefillDone || families.length === 0 || !familyCodeFromQuery) {
+      return;
+    }
+    const match = families.find(
+      (f) => f.code.toUpperCase() === familyCodeFromQuery
+    );
+    if (match) setFamilyId(match.id);
+    setFamilyPrefillDone(true);
+  }, [families, familyPrefillDone, familyCodeFromQuery]);
 
   useEffect(() => {
     if (!baseId) {
@@ -521,5 +536,13 @@ export default function NewLensProductPage() {
       </form>
       </div>
     </AdminPage>
+  );
+}
+
+export default function NewLensProductPage() {
+  return (
+    <Suspense fallback={<DetailSkeleton />}>
+      <NewLensProductPageContent />
+    </Suspense>
   );
 }

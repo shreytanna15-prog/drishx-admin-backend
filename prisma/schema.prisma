@@ -1352,6 +1352,7 @@ model LensFamily {
   createdAt               DateTime      @default(now())
   updatedAt               DateTime      @updatedAt
   products                LensProduct[]
+  storefrontCards         StorefrontCard[]
 
   @@index([isActive, sortOrder])
 }
@@ -1366,6 +1367,7 @@ model LensBase {
   updatedAt     DateTime               @updatedAt
   materialLinks LensBaseMaterialLink[]
   products      LensProduct[]
+  storefrontCards StorefrontCard[]
 
   @@index([isActive, sortOrder])
 }
@@ -1380,6 +1382,7 @@ model LensMaterial {
   updatedAt DateTime               @updatedAt
   baseLinks LensBaseMaterialLink[]
   products  LensProduct[]
+  storefrontCards StorefrontCard[]
 
   @@index([isActive, sortOrder])
 }
@@ -1395,6 +1398,7 @@ model LensIndex {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   products  LensProduct[]
+  storefrontCards StorefrontCard[]
 
   @@index([isActive, sortOrder])
 }
@@ -1409,7 +1413,8 @@ model LensCoating {
   updatedAt DateTime @updatedAt
   /// Catalog coating master; each coated product has its own parent and variants.
 
-  products LensProduct[]
+  products        LensProduct[]
+  storefrontCards StorefrontCard[]
 
   @@index([isActive, sortOrder])
 }
@@ -1423,6 +1428,7 @@ model LensColor {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   products  LensProduct[]
+  storefrontCards StorefrontCard[]
 
   @@index([isActive, sortOrder])
 }
@@ -1468,6 +1474,7 @@ model LensDiameter {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   products  LensProduct[]
+  storefrontCards StorefrontCard[]
 
   @@index([isActive, sortOrder])
 }
@@ -1482,6 +1489,7 @@ model LensProgressiveType {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   products  LensProduct[]
+  storefrontCards StorefrontCard[]
 
   @@index([isActive, sortOrder])
 }
@@ -1548,6 +1556,7 @@ model LensProduct {
   diameter          LensDiameter?        @relation(fields: [diameterId], references: [id])
   progressiveType   LensProgressiveType? @relation(fields: [progressiveTypeId], references: [id])
   variants          LensProductVariant[]
+  storefrontOverrides StorefrontCardProductOverride[]
 
   /// Uniqueness across optional attrs is enforced by a NULLS NOT DISTINCT unique
   /// index (see migrations …progressive_type).
@@ -1560,6 +1569,61 @@ model LensProduct {
   @@index([diameterId])
   @@index([progressiveTypeId])
   @@index([isActive, updatedAt])
+}
+
+enum StorefrontCardOverrideKind {
+  PIN
+  EXCLUDE
+}
+
+/// Merchandising card — customer shop Level 2 (attribute filters + pin/exclude).
+model StorefrontCard {
+  id          String   @id @default(cuid())
+  familyId    String
+  family      LensFamily @relation(fields: [familyId], references: [id])
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+
+  /// Optional FKs = AND filters. Null = any for that dimension.
+  baseId            String?
+  materialId        String?
+  indexId           String?
+  coatingId         String?
+  colorId           String?
+  diameterId        String?
+  progressiveTypeId String?
+
+  base            LensBase?            @relation(fields: [baseId], references: [id])
+  material        LensMaterial?        @relation(fields: [materialId], references: [id])
+  index           LensIndex?           @relation(fields: [indexId], references: [id])
+  coating         LensCoating?         @relation(fields: [coatingId], references: [id])
+  color           LensColor?           @relation(fields: [colorId], references: [id])
+  diameter        LensDiameter?        @relation(fields: [diameterId], references: [id])
+  progressiveType LensProgressiveType? @relation(fields: [progressiveTypeId], references: [id])
+
+  overrides StorefrontCardProductOverride[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([familyId, name])
+  @@index([familyId, isActive, sortOrder])
+}
+
+/// Hybrid overrides only — matched parents are NOT stored row-per-product.
+model StorefrontCardProductOverride {
+  id               String                     @id @default(cuid())
+  storefrontCardId String
+  storefrontCard   StorefrontCard             @relation(fields: [storefrontCardId], references: [id], onDelete: Cascade)
+  lensProductId    String
+  lensProduct      LensProduct                @relation(fields: [lensProductId], references: [id], onDelete: Cascade)
+  kind             StorefrontCardOverrideKind
+  createdAt        DateTime                   @default(now())
+
+  @@unique([storefrontCardId, lensProductId])
+  @@index([lensProductId])
+  @@index([storefrontCardId, kind])
 }
 
 /// RC-04 sellable unit: power range × optional axis × optional ADD × optional eye.

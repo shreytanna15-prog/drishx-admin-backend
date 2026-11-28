@@ -1,7 +1,7 @@
 # Storefront Catalog + sidebar nav split
 
 **Document type:** Implementation handoff for engineers  
-**Status:** Locked (Nov 2026, revised after client meeting cross-check) — ready to build  
+**Status:** Done (Nov 2026) — hybrid filters + pin/exclude; admin Levels 1–3; web/mobile Level 2+3 browse on storefront APIs (buy/detail/cart remain legacy follow-up)  
 **Primary surface:** Admin panel + **customer-facing shop** (what optical-shop customers see)  
 **Repos (all three — not admin-only):**
 

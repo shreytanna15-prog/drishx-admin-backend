@@ -125,10 +125,10 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: "Stock & Procurement",
+    title: "Stocks",
     items: [
       {
-        title: "Stock Overview",
+        title: "Stock by Product",
         icon: Package,
         href: "/inventory/stock-overview",
       },
@@ -157,6 +157,12 @@ const NAV_SECTIONS: NavSection[] = [
         icon: FileText,
         href: "/inventory/stock-transactions",
       },
+      { title: "Smart Alerts", icon: Bell },
+    ],
+  },
+  {
+    title: "Procurement",
+    items: [
       {
         title: "Procurement Cart",
         icon: ClipboardList,
@@ -172,6 +178,16 @@ const NAV_SECTIONS: NavSection[] = [
         icon: Store,
         href: "/procurement/suppliers",
       },
+    ],
+  },
+  {
+    title: "Inventory",
+    items: [
+      {
+        title: "Storefront Catalog",
+        icon: LayoutGrid,
+        href: "/inventory/storefront-catalog",
+      },
       {
         title: "Products & catalog",
         icon: Layers,
@@ -182,7 +198,6 @@ const NAV_SECTIONS: NavSection[] = [
         icon: Tags,
         href: "/inventory/attributes",
       },
-      { title: "Smart Alerts", icon: Bell },
     ],
   },
   {

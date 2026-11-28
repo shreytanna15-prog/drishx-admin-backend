@@ -61,7 +61,7 @@ export default function CatalogStockOverviewPage() {
 
   return (
     <AdminPage
-      title="Stock Overview"
+      title="Stock by Product"
       subtitle="Select any catalog product to open its live 2D Excel power matrix."
     >
       <div className="mb-3 flex flex-wrap items-center gap-2 lg:flex-nowrap">

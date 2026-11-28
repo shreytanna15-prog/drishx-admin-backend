@@ -33,8 +33,11 @@ export function resolveActiveTitle(
   if (pathMatchesRoute(pathname, "/loyalty/settings")) return "Loyalty Settings";
   if (pathMatchesRoute(pathname, "/loyalty/customers")) return "Loyalty & Wallet";
   if (pathMatchesRoute(pathname, "/loyalty")) return "Loyalty & Wallet";
+  if (pathMatchesRoute(pathname, "/inventory/storefront-catalog")) {
+    return "Storefront Catalog";
+  }
   if (pathMatchesRoute(pathname, "/inventory/stock-overview")) {
-    return "Stock Overview";
+    return "Stock by Product";
   }
   if (pathMatchesRoute(pathname, "/inventory/stock-dashboard")) {
     return "Stock Dashboard / Audit";
