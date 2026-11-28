@@ -1,7 +1,7 @@
 # Power-wise Inventory (admin ops browse)
 
 **Document type:** Implementation handoff for engineers  
-**Status:** Locked (Nov 2026, after client meeting + product-lead notes) — ready to build  
+**Status:** Built (admin) — 3-level browse + Excel/PDF; Stock by Product edit hub unchanged  
 **Primary surface:** Admin panel only  
 **Repos:** `drishx-admin-backend` only (no web/mobile in this slice)
 
