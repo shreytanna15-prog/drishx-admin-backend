@@ -269,26 +269,53 @@ function serializeMembershipItem(
 }
 
 async function validateFilterFks(filters: StorefrontFilterInput): Promise<void> {
-  const entries: Array<
-    [keyof StorefrontFilterInput, keyof typeof prisma, string]
-  > = [
-    ["baseId", "lensBase", "Base"],
-    ["materialId", "lensMaterial", "Material"],
-    ["indexId", "lensIndex", "Index"],
-    ["coatingId", "lensCoating", "Coating"],
-    ["colorId", "lensColor", "Color"],
-    ["diameterId", "lensDiameter", "Diameter"],
-    ["progressiveTypeId", "lensProgressiveType", "Progressive type"],
+  const lookups: Array<{
+    field: keyof StorefrontFilterInput;
+    label: string;
+    find: (id: string) => Promise<unknown>;
+  }> = [
+    {
+      field: "baseId",
+      label: "Base",
+      find: (id) => prisma.lensBase.findUnique({ where: { id } }),
+    },
+    {
+      field: "materialId",
+      label: "Material",
+      find: (id) => prisma.lensMaterial.findUnique({ where: { id } }),
+    },
+    {
+      field: "indexId",
+      label: "Index",
+      find: (id) => prisma.lensIndex.findUnique({ where: { id } }),
+    },
+    {
+      field: "coatingId",
+      label: "Coating",
+      find: (id) => prisma.lensCoating.findUnique({ where: { id } }),
+    },
+    {
+      field: "colorId",
+      label: "Color",
+      find: (id) => prisma.lensColor.findUnique({ where: { id } }),
+    },
+    {
+      field: "diameterId",
+      label: "Diameter",
+      find: (id) => prisma.lensDiameter.findUnique({ where: { id } }),
+    },
+    {
+      field: "progressiveTypeId",
+      label: "Progressive type",
+      find: (id) => prisma.lensProgressiveType.findUnique({ where: { id } }),
+    },
   ];
 
   await Promise.all(
-    entries.map(async ([field, model, label]) => {
+    lookups.map(async ({ field, label, find }) => {
       const id = filters[field];
       if (!id) return;
-      const delegate = prisma[model] as {
-        findUnique: (args: { where: { id: string } }) => Promise<unknown>;
-      };
-      const row = await delegate.findUnique({ where: { id } });
+      const row = await find(id);
       if (!row) {
         throw new StorefrontCatalogError(
           `${label} not found for filter.`,
@@ -300,11 +327,21 @@ async function validateFilterFks(filters: StorefrontFilterInput): Promise<void> 
   );
 }
 
+type StorefrontFilterFkData = {
+  baseId?: string | null;
+  materialId?: string | null;
+  indexId?: string | null;
+  coatingId?: string | null;
+  colorId?: string | null;
+  diameterId?: string | null;
+  progressiveTypeId?: string | null;
+};
+
 function filterInputToPrismaData(
   filters?: StorefrontFilterInput
-): Prisma.StorefrontCardUncheckedUpdateInput {
+): StorefrontFilterFkData {
   if (!filters) return {};
-  const data: Prisma.StorefrontCardUncheckedUpdateInput = {};
+  const data: StorefrontFilterFkData = {};
   if ("baseId" in filters) data.baseId = filters.baseId ?? null;
   if ("materialId" in filters) data.materialId = filters.materialId ?? null;
   if ("indexId" in filters) data.indexId = filters.indexId ?? null;
